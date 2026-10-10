@@ -90,7 +90,9 @@ std::vector<double> parseNumberList(QStringView text)
     static const QRegularExpression numberPattern(
         QStringLiteral(R"([-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?)"));
     std::vector<double> values;
-    auto it = numberPattern.globalMatchView(text);
+    // globalMatch(QString) rather than globalMatchView: the latter needs Qt 6.5, and Linux
+    // distributions still ship Qt 6.4.
+    auto it = numberPattern.globalMatch(text.toString());
     while (it.hasNext())
         values.push_back(it.next().capturedView().toDouble());
     return values;
@@ -102,7 +104,7 @@ QTransform parseTransform(QStringView text)
     static const QRegularExpression itemPattern(
         QStringLiteral(R"((matrix|translate|scale|rotate|skewX|skewY)\s*\(([^)]*)\))"));
     QTransform total;
-    auto it = itemPattern.globalMatchView(text);
+    auto it = itemPattern.globalMatch(text.toString());
     while (it.hasNext()) {
         const QRegularExpressionMatch match = it.next();
         const QStringView kind = match.capturedView(1);
