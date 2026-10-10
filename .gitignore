@@ -1,0 +1,8 @@
+/build*/
+/out/
+CMakeUserPresets.json
+CMakeLists.txt.user*
+.vs/
+.vscode/
+.idea/
+*.swp
