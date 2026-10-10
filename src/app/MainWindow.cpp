@@ -43,6 +43,45 @@ QIcon toolIcon(CanvasWidget::Tool tool, const QColor &ink)
         p.drawPolygon(arrow, 7);
         break;
     }
+    case CanvasWidget::Tool::Node: {
+        // Hollow arrow touching a node on a curve.
+        QPainterPath curve;
+        curve.moveTo(4, 27);
+        curve.cubicTo(8, 12, 18, 30, 28, 8);
+        p.setPen(QPen(ink, 1.6));
+        p.drawPath(curve);
+        const QPointF arrow[] = {{12, 6}, {12, 20}, {15.5, 16.5}, {18.5, 22}, {20.5, 21}, {17.5, 15.5}, {22, 15.5}};
+        p.setPen(QPen(ink, 1.6, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        p.setBrush(Qt::white);
+        p.drawPolygon(arrow, 7);
+        p.setBrush(ink);
+        p.drawRect(QRectF(25, 5, 5, 5));
+        break;
+    }
+    case CanvasWidget::Tool::Freehand: {
+        QPainterPath squiggle;
+        squiggle.moveTo(4, 22);
+        squiggle.cubicTo(8, 6, 13, 6, 14, 16);
+        squiggle.cubicTo(15, 26, 22, 26, 27, 10);
+        p.setBrush(Qt::NoBrush);
+        p.drawPath(squiggle);
+        break;
+    }
+    case CanvasWidget::Tool::Bezier: {
+        QPainterPath curve;
+        curve.moveTo(5, 25);
+        curve.cubicTo(5, 8, 27, 24, 27, 7);
+        p.setPen(QPen(ink, 1.8));
+        p.setBrush(Qt::NoBrush);
+        p.drawPath(curve);
+        p.setPen(QPen(ink, 1));
+        p.drawLine(QPointF(27, 7), QPointF(20, 3));
+        p.drawLine(QPointF(27, 7), QPointF(30, 13));
+        p.setBrush(ink);
+        p.drawRect(QRectF(2.5, 22.5, 5, 5));
+        p.drawRect(QRectF(24.5, 4.5, 5, 5));
+        break;
+    }
     case CanvasWidget::Tool::Rectangle:
         p.drawRect(QRectF(6, 9, 20, 14));
         break;
@@ -170,6 +209,11 @@ void MainWindow::createActions()
                         &CanvasWidget::zoomToActualSize);
     viewMenu->addAction(tr("&Fit Page"), QKeySequence(Qt::SHIFT | Qt::Key_F4), m_canvas, &CanvasWidget::fitPage);
 
+    // Object
+    QMenu *objectMenu = menuBar()->addMenu(tr("&Object"));
+    objectMenu->addAction(tr("Convert to &Curves"), QKeySequence(Qt::CTRL | Qt::Key_Q), m_canvas,
+                          &CanvasWidget::convertSelectionToCurves);
+
     // Tools
     QMenu *toolsMenu = menuBar()->addMenu(tr("&Tools"));
     QToolBar *toolBar = addToolBar(tr("Tools"));
@@ -185,6 +229,9 @@ void MainWindow::createActions()
     };
     const ToolDef defs[] = {
         {CanvasWidget::Tool::Select, tr("Select"), QKeySequence(Qt::Key_V)},
+        {CanvasWidget::Tool::Node, tr("Shape (edit nodes)"), QKeySequence(Qt::Key_F10)},
+        {CanvasWidget::Tool::Freehand, tr("Freehand"), QKeySequence(Qt::Key_F5)},
+        {CanvasWidget::Tool::Bezier, tr("Bézier"), QKeySequence(Qt::Key_B)},
         {CanvasWidget::Tool::Rectangle, tr("Rectangle"), QKeySequence(Qt::Key_F6)},
         {CanvasWidget::Tool::Ellipse, tr("Ellipse"), QKeySequence(Qt::Key_F7)},
     };
@@ -383,8 +430,24 @@ void MainWindow::updateStyleIndicators()
                                 ? tr("%1, %2 mm").arg(describeColor(style.stroke))
                                       .arg(style.strokeWidth / kUnitsPerMm, 0, 'f', 2)
                                 : tr("none");
-    const QString prefix = selected ? (selected->kind() == ShapeKind::Rectangle ? tr("Rectangle") : tr("Ellipse"))
-                                    : tr("New shapes");
+    QString prefix = tr("New shapes");
+    if (selected) {
+        switch (selected->kind()) {
+        case ShapeKind::Rectangle:
+            prefix = tr("Rectangle");
+            break;
+        case ShapeKind::Ellipse:
+            prefix = tr("Ellipse");
+            break;
+        case ShapeKind::Path: {
+            int nodes = 0;
+            for (const SubPath &sp : selected->pathData())
+                nodes += int(sp.nodes.size());
+            prefix = tr("Curve, %n node(s)", nullptr, nodes);
+            break;
+        }
+        }
+    }
     m_styleLabel->setText(tr("%1 — Fill: %2   Outline: %3").arg(prefix, describeColor(style.fill), outline));
 }
 

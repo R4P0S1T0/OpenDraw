@@ -11,7 +11,7 @@ Rough order of work. Items move as contributors pick them up.
 - [x] Fill colour
 - [x] Save and open SVG
 
-## 0.2 — Familiar workspace (current)
+## 0.2 — Familiar workspace
 
 - [x] Property bar: position, size and outline width of the selection
 - [x] Colour palette docked on the right: left click sets fill, right click sets outline, "no colour" swatch
@@ -22,13 +22,15 @@ Rough order of work. Items move as contributors pick them up.
 - [ ] Rulers and guidelines
 - [ ] Keep unsupported SVG elements when saving, so round-tripping a newer file loses nothing
 
-## 0.3 — Real drawings
+## 0.3 — Real drawings (current)
 
-- [ ] Paths: Bézier curves, freehand and polyline tools, node editing
+- [x] Paths: Bézier and freehand tools, node editing (move, add, delete, smooth/corner handles)
+- [x] Convert rectangles and ellipses to curves
+- [x] Full SVG path support on import and export, plus transforms, groups and inherited styles
+- [ ] Node type commands (make smooth / make corner / make line), break and join nodes
 - [ ] Groups, ordering (to front / to back), alignment and distribution
 - [ ] Text objects
 - [ ] Layers and multiple pages
-- [ ] Full SVG path support on import and export
 
 ## 0.4 — No more locked files
 

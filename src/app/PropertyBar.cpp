@@ -43,8 +43,8 @@ PropertyBar::PropertyBar(Document *document, QUndoStack *undoStack, QWidget *par
     m_x = addField(tr("X"), tr("Horizontal position of the left edge"), -kMaxMm);
     m_y = addField(tr("Y"), tr("Vertical position of the top edge"), -kMaxMm);
     addSeparator();
-    m_width = addField(tr("W"), tr("Width"), 0.01);
-    m_height = addField(tr("H"), tr("Height"), 0.01);
+    m_width = addField(tr("W"), tr("Width"), 0.0);
+    m_height = addField(tr("H"), tr("Height"), 0.0);
     addSeparator();
     m_outline = addField(tr("Outline"), tr("Outline width (0 = no outline)"), 0.0);
     m_outline->setMaximum(100.0);

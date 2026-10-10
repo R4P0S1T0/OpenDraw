@@ -1,6 +1,7 @@
 set(BRANDING_DIR ${PROJECT_SOURCE_DIR}/assets/branding)
 
-set(APP_SOURCES
+# Everything except main(), so the UI can also be driven by tests.
+add_library(opendraw_ui STATIC
     CanvasWidget.cpp
     CanvasWidget.h
     ColorPalette.cpp
@@ -9,8 +10,18 @@ set(APP_SOURCES
     MainWindow.h
     PropertyBar.cpp
     PropertyBar.h
-    main.cpp
 )
+target_include_directories(opendraw_ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(opendraw_ui PUBLIC opendraw_core Qt6::Widgets)
+
+# Window icon, available at runtime as ":/opendraw-icon-256.png".
+qt_add_resources(opendraw_ui "branding"
+    PREFIX "/"
+    BASE ${BRANDING_DIR}
+    FILES ${BRANDING_DIR}/opendraw-icon-256.png
+)
+
+set(APP_SOURCES main.cpp)
 
 # Icon embedded in the Windows executable (shown in Explorer and the taskbar).
 if(WIN32)
@@ -20,16 +31,8 @@ if(WIN32)
 endif()
 
 qt_add_executable(opendraw WIN32 MACOSX_BUNDLE ${APP_SOURCES})
-
-# Window icon, available at runtime as ":/opendraw-icon-256.png".
-qt_add_resources(opendraw "branding"
-    PREFIX "/"
-    BASE ${BRANDING_DIR}
-    FILES ${BRANDING_DIR}/opendraw-icon-256.png
-)
-
 target_compile_definitions(opendraw PRIVATE OPENDRAW_VERSION="${PROJECT_VERSION}")
-target_link_libraries(opendraw PRIVATE opendraw_core Qt6::Widgets)
+target_link_libraries(opendraw PRIVATE opendraw_ui)
 
 include(GNUInstallDirs)
 install(TARGETS opendraw

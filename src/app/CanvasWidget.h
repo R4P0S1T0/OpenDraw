@@ -7,7 +7,11 @@
 #include <QWidget>
 
 #include <array>
+#include <memory>
+#include <optional>
+#include <vector>
 
+class QPainter;
 class QUndoStack;
 
 namespace opendraw {
@@ -19,7 +23,7 @@ class CanvasWidget : public QWidget {
     Q_OBJECT
 
 public:
-    enum class Tool { Select, Rectangle, Ellipse };
+    enum class Tool { Select, Node, Freehand, Bezier, Rectangle, Ellipse };
 
     CanvasWidget(Document *document, QUndoStack *undoStack, QWidget *parent = nullptr);
 
@@ -39,7 +43,11 @@ public slots:
     void zoomOut();
     void zoomToActualSize();
     void fitPage();
+    // Deletes the selected node (shape tool), the last node of a curve being drawn, or the selected shape.
     void deleteSelection();
+    void convertSelectionToCurves();
+    // Completes the curve being drawn with the Bézier tool.
+    void finishCurve();
 
 signals:
     void zoomChanged(double zoom);
@@ -52,22 +60,47 @@ protected:
     void mousePressEvent(QMouseEvent *event) override;
     void mouseMoveEvent(QMouseEvent *event) override;
     void mouseReleaseEvent(QMouseEvent *event) override;
+    void mouseDoubleClickEvent(QMouseEvent *event) override;
     void wheelEvent(QWheelEvent *event) override;
     void keyPressEvent(QKeyEvent *event) override;
     void keyReleaseEvent(QKeyEvent *event) override;
 
 private:
-    enum class Drag { None, Pan, Move, Create, Resize };
+    enum class Drag { None, Pan, Move, Resize, Create, NodeMove, NodeHandle, BezierHandle, Freehand };
+    enum class NodeHandle { In, Out };
+
+    struct NodeRef {
+        int subpath = -1;
+        int node = -1;
+        bool isValid() const { return subpath >= 0 && node >= 0; }
+    };
 
     QTransform viewTransform() const;
     QPointF toDocument(const QPointF &widgetPosition) const;
+    QPointF toWidget(const QPointF &documentPosition) const;
     void zoomAround(const QPointF &widgetPosition, double factor);
     void updateCursor();
 
-    // Selection handles in widget coordinates, clockwise from the top-left corner.
-    std::array<QRectF, 8> handleRects() const;
-    int handleAt(const QPointF &widgetPosition) const;
+    // Select tool: bounding-box handles in widget coordinates, clockwise from the top-left corner.
+    std::array<QRectF, 8> resizeHandleRects() const;
+    int resizeHandleAt(const QPointF &widgetPosition) const;
     void setHoverCursor(const QPointF &widgetPosition);
+
+    // Shape tool
+    Shape *selectedPath() const;
+    NodeRef nodeAt(const QPointF &widgetPosition) const;
+    std::optional<NodeHandle> nodeHandleAt(const QPointF &widgetPosition) const;
+    bool activeNodeIsValid() const;
+    void commitPathEdit(const PathData &before, const QString &text);
+    void removeActiveNode();
+
+    // Style given to new curves: open curves are never filled.
+    Style curveStyle(bool closed) const;
+    void addNewShape(std::unique_ptr<Shape> shape);
+
+    void paintSelection(QPainter &painter);
+    void paintNodes(QPainter &painter, const Shape &shape);
+    void paintBezierPreview(QPainter &painter);
 
     Document *m_document;
     QUndoStack *m_undoStack;
@@ -81,12 +114,20 @@ private:
     bool m_spaceHeld = false;
 
     Drag m_drag = Drag::None;
-    QPointF m_dragStart;  // document coordinates
-    QPointF m_dragLast;   // document coordinates
-    QPointF m_panLast;    // widget coordinates
-    QRectF m_creating;    // document coordinates
+    QPointF m_dragStart; // document coordinates
+    QPointF m_dragLast;  // document coordinates
+    QPointF m_panLast;   // widget coordinates
+    QPointF m_cursor;    // document coordinates, last known mouse position
+    QRectF m_creating;   // rectangle/ellipse being drawn
     int m_resizeHandle = -1;
     QRectF m_resizeOriginal;
+
+    NodeRef m_activeNode;
+    NodeHandle m_draggedHandle = NodeHandle::Out;
+    PathData m_pathBeforeEdit;
+
+    SubPath m_bezier; // curve being drawn with the Bézier tool; empty when idle
+    std::vector<QPointF> m_freehand;
 };
 
 } // namespace opendraw

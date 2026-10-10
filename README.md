@@ -12,10 +12,11 @@
 
 OpenDraw is a free, open-source, cross-platform vector graphics editor for Linux and Windows. It aims to offer professional tools for illustration and graphic design, with a workflow that feels familiar to people coming from other desktop vector editors, and without the lock-in that comes with closed file formats.
 
-> **Status: early development (0.2).** You can draw, select, move, resize and recolour rectangles and ellipses, edit position and size in millimetres, undo and redo, and save and open SVG files. It is not ready for real work yet.
+> **Status: early development (0.3).** You can draw rectangles, ellipses, Bézier and freehand curves, edit curve nodes, move, resize and recolour objects, undo and redo, and open SVG files from other programs. Text, layers and groups are still missing, so it is not ready for real work yet.
 
 ## Goals
 
+- **Works with files from other programs.** SVG import understands paths, transforms, groups and inherited styles, so drawings exported from other editors open as editable objects.
 - **Files you can always open.** Drawings are stored in open formats (SVG today). Every file records its format version, and an older OpenDraw never refuses a newer file: it opens everything it understands and tells you exactly what it had to leave out.
 - **Import from proprietary formats.** Planned: CorelDRAW (`.cdr`) import through [libcdr](https://wiki.documentfoundation.org/DLP/Libraries/libcdr), so existing work is not trapped.
 - **A familiar workflow.** Toolbox, property bar, colour palette and keyboard shortcuts that experienced designers already know.
@@ -32,6 +33,10 @@ See [docs/ROADMAP.md](docs/ROADMAP.md) for what is planned next.
 | Exact position and size | Type values in the property bar at the top (millimetres) |
 | Rectangle | `F6`, drag on the page. Hold `Shift` for a square |
 | Ellipse | `F7`, drag on the page. Hold `Shift` for a circle |
+| Bézier curve | `B`. Click for a corner node, click and drag for a smooth node. Click the first node to close the shape; `Enter`, `Esc` or double-click to finish. `Backspace` removes the last node while drawing |
+| Freehand | `F5`, drag to draw. The stroke is smoothed into a few curve segments; end near the start to close it |
+| Edit nodes | Shape tool (`F10`): drag nodes and handles, double-click a segment to add a node, double-click a node or press `Delete` to remove it. Hold `Alt` while dragging a handle to make a corner |
+| Convert to curves | `Ctrl` `Q` turns a rectangle or ellipse into an editable curve |
 | Fill / outline colour | Colour palette on the right: left click = fill, right click = outline, ✕ = none. With nothing selected it sets the colour for new shapes |
 | Custom colours | `Shift` `F11` (fill), `Shift` `F12` (outline) |
 | Zoom | Mouse wheel (around the cursor), `Ctrl` `+` / `Ctrl` `-`, `Shift` `F4` fits the page |
@@ -72,7 +77,7 @@ Visual Studio with the official Qt installer also works: open the folder in Visu
 ```
 src/core          document model, shapes, undo commands, SVG reading and writing (no GUI code)
 src/app           the Qt Widgets application: main window and drawing canvas
-tests             unit tests for src/core
+tests             unit tests for src/core and UI tests that drive the canvas with simulated input
 assets/branding   OpenDraw logo and application icons
 packaging         desktop integration files (Linux .desktop entry)
 docs              roadmap and design notes
