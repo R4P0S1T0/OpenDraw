@@ -153,14 +153,49 @@ void CanvasWidget::paintEvent(QPaintEvent *)
 
         painter.setPen(QPen(highlight, 1));
         painter.setBrush(Qt::white);
-        const QPointF handles[] = {box.topLeft(),     QPointF(box.center().x(), box.top()),
-                                   box.topRight(),    QPointF(box.right(), box.center().y()),
-                                   box.bottomRight(), QPointF(box.center().x(), box.bottom()),
-                                   box.bottomLeft(),  QPointF(box.left(), box.center().y())};
-        for (const QPointF &h : handles)
-            painter.drawRect(QRectF(h - QPointF(kHandleSizePx / 2, kHandleSizePx / 2),
-                                    QSizeF(kHandleSizePx, kHandleSizePx)));
+        for (const QRectF &handle : handleRects())
+            painter.drawRect(handle);
     }
+}
+
+std::array<QRectF, 8> CanvasWidget::handleRects() const
+{
+    std::array<QRectF, 8> rects;
+    if (!m_selected)
+        return rects;
+    const QRectF box = viewTransform().mapRect(m_selected->bounds()).adjusted(-3, -3, 3, 3);
+    const QPointF centers[] = {box.topLeft(),     QPointF(box.center().x(), box.top()),
+                               box.topRight(),    QPointF(box.right(), box.center().y()),
+                               box.bottomRight(), QPointF(box.center().x(), box.bottom()),
+                               box.bottomLeft(),  QPointF(box.left(), box.center().y())};
+    const QPointF half(kHandleSizePx / 2, kHandleSizePx / 2);
+    for (int i = 0; i < 8; ++i)
+        rects[i] = QRectF(centers[i] - half, QSizeF(kHandleSizePx, kHandleSizePx));
+    return rects;
+}
+
+int CanvasWidget::handleAt(const QPointF &widgetPosition) const
+{
+    if (!m_selected || m_tool != Tool::Select)
+        return -1;
+    const auto rects = handleRects();
+    for (int i = 0; i < 8; ++i) {
+        if (rects[i].adjusted(-2, -2, 2, 2).contains(widgetPosition))
+            return i;
+    }
+    return -1;
+}
+
+void CanvasWidget::setHoverCursor(const QPointF &widgetPosition)
+{
+    static const Qt::CursorShape shapes[] = {Qt::SizeFDiagCursor, Qt::SizeVerCursor, Qt::SizeBDiagCursor,
+                                             Qt::SizeHorCursor,   Qt::SizeFDiagCursor, Qt::SizeVerCursor,
+                                             Qt::SizeBDiagCursor, Qt::SizeHorCursor};
+    const int handle = m_spaceHeld ? -1 : handleAt(widgetPosition);
+    if (handle >= 0)
+        setCursor(shapes[handle]);
+    else
+        updateCursor();
 }
 
 void CanvasWidget::resizeEvent(QResizeEvent *event)
@@ -186,7 +221,11 @@ void CanvasWidget::mousePressEvent(QMouseEvent *event)
         return;
 
     m_dragStart = m_dragLast = docPos;
-    if (m_tool == Tool::Select) {
+    if (const int handle = handleAt(event->position()); handle >= 0) {
+        m_drag = Drag::Resize;
+        m_resizeHandle = handle;
+        m_resizeOriginal = m_selected->bounds();
+    } else if (m_tool == Tool::Select) {
         Shape *hit = m_document->shapeAt(docPos, kHitTolerancePx / m_zoom);
         setSelectedShape(hit);
         m_drag = hit ? Drag::Move : Drag::None;
@@ -203,7 +242,29 @@ void CanvasWidget::mouseMoveEvent(QMouseEvent *event)
 
     switch (m_drag) {
     case Drag::None:
+        setHoverCursor(event->position());
         break;
+    case Drag::Resize: {
+        // Handles 0-7 go clockwise from top-left; each moves the edges it sits on.
+        const int h = m_resizeHandle;
+        double left = m_resizeOriginal.left(), right = m_resizeOriginal.right();
+        double top = m_resizeOriginal.top(), bottom = m_resizeOriginal.bottom();
+        if (h == 0 || h == 6 || h == 7)
+            left = docPos.x();
+        if (h == 2 || h == 3 || h == 4)
+            right = docPos.x();
+        if (h == 0 || h == 1 || h == 2)
+            top = docPos.y();
+        if (h == 4 || h == 5 || h == 6)
+            bottom = docPos.y();
+        QRectF bounds = QRectF(QPointF(left, top), QPointF(right, bottom)).normalized();
+        const double minimum = 1.0 / m_zoom;
+        bounds.setWidth(std::max(bounds.width(), minimum));
+        bounds.setHeight(std::max(bounds.height(), minimum));
+        m_selected->setBounds(bounds);
+        m_document->notifyShapeChanged(m_selected);
+        break;
+    }
     case Drag::Pan:
         m_pan += event->position() - m_panLast;
         m_panLast = event->position();
@@ -246,6 +307,12 @@ void CanvasWidget::mouseReleaseEvent(QMouseEvent *event)
             m_undoStack->push(new MoveShapeCommand(m_document, m_selected, total, true));
         break;
     }
+    case Drag::Resize:
+        if (m_selected->bounds() != m_resizeOriginal)
+            m_undoStack->push(new SetBoundsCommand(m_document, m_selected, m_resizeOriginal, m_selected->bounds()));
+        m_resizeHandle = -1;
+        setHoverCursor(event->position());
+        break;
     case Drag::Create: {
         const QRectF bounds = m_creating;
         m_creating = QRectF();

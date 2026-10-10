@@ -72,6 +72,28 @@ void MoveShapeCommand::undo()
     m_document->notifyShapeChanged(m_shape);
 }
 
+SetBoundsCommand::SetBoundsCommand(Document *document, Shape *shape, const QRectF &oldBounds,
+                                   const QRectF &newBounds, QUndoCommand *parent)
+    : QUndoCommand(QCoreApplication::translate("Commands", "Resize"), parent)
+    , m_document(document)
+    , m_shape(shape)
+    , m_oldBounds(oldBounds)
+    , m_newBounds(newBounds)
+{
+}
+
+void SetBoundsCommand::redo()
+{
+    m_shape->setBounds(m_newBounds);
+    m_document->notifyShapeChanged(m_shape);
+}
+
+void SetBoundsCommand::undo()
+{
+    m_shape->setBounds(m_oldBounds);
+    m_document->notifyShapeChanged(m_shape);
+}
+
 SetStyleCommand::SetStyleCommand(Document *document, Shape *shape, const Style &style, QUndoCommand *parent)
     : QUndoCommand(QCoreApplication::translate("Commands", "Change style"), parent)
     , m_document(document)

@@ -1,8 +1,12 @@
 qt_add_executable(opendraw WIN32 MACOSX_BUNDLE
     CanvasWidget.cpp
     CanvasWidget.h
+    ColorPalette.cpp
+    ColorPalette.h
     MainWindow.cpp
     MainWindow.h
+    PropertyBar.cpp
+    PropertyBar.h
     main.cpp
 )
 

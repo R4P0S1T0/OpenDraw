@@ -1,6 +1,8 @@
 #include "MainWindow.h"
 
 #include "CanvasWidget.h"
+#include "ColorPalette.h"
+#include "PropertyBar.h"
 #include "core/Commands.h"
 #include "core/Document.h"
 #include "core/SvgIO.h"
@@ -17,6 +19,7 @@
 #include <QMessageBox>
 #include <QPainter>
 #include <QSaveFile>
+#include <QScreen>
 #include <QStatusBar>
 #include <QToolBar>
 #include <QUndoStack>
@@ -50,20 +53,31 @@ QIcon toolIcon(CanvasWidget::Tool tool, const QColor &ink)
     return QIcon(pixmap);
 }
 
-QIcon swatchIcon(const QColor &color)
+QIcon swatchIcon(const QColor &color, bool outline)
 {
     QPixmap pixmap(32, 32);
     pixmap.fill(Qt::transparent);
     QPainter p(&pixmap);
     p.setRenderHint(QPainter::Antialiasing);
-    p.setPen(QPen(QColor(0, 0, 0, 120), 1));
-    p.setBrush(color.alpha() > 0 ? QBrush(color) : QBrush(Qt::NoBrush));
-    p.drawRoundedRect(QRectF(5.5, 5.5, 21, 21), 3, 3);
+    const QRectF box(5.5, 5.5, 21, 21);
+    if (outline) {
+        p.setPen(QPen(color.alpha() > 0 ? color : QColor(0, 0, 0, 120), color.alpha() > 0 ? 4 : 1));
+        p.setBrush(Qt::NoBrush);
+    } else {
+        p.setPen(QPen(QColor(0, 0, 0, 120), 1));
+        p.setBrush(color.alpha() > 0 ? QBrush(color) : QBrush(Qt::NoBrush));
+    }
+    p.drawRoundedRect(box, 3, 3);
     if (color.alpha() == 0) {
         p.setPen(QPen(Qt::red, 2));
         p.drawLine(QPointF(7, 25), QPointF(25, 7));
     }
     return QIcon(pixmap);
+}
+
+QString describeColor(const QColor &color)
+{
+    return color.alpha() == 0 ? QCoreApplication::translate("MainWindow", "none") : color.name().toUpper();
 }
 
 const QString kSvgFilter = QStringLiteral("SVG (*.svg)");
@@ -79,8 +93,22 @@ MainWindow::MainWindow(QWidget *parent)
     setCentralWidget(m_canvas);
     createActions();
 
+    m_propertyBar = new PropertyBar(m_document, m_undoStack, this);
+    addToolBar(Qt::TopToolBarArea, m_propertyBar);
+
+    auto *palette = new ColorPalette(this);
+    QToolBar *paletteBar = new QToolBar(tr("Color Palette"), this);
+    paletteBar->setObjectName(QStringLiteral("colorPalette"));
+    paletteBar->setMovable(false);
+    paletteBar->addWidget(palette);
+    addToolBar(Qt::RightToolBarArea, paletteBar);
+    connect(palette, &ColorPalette::fillChosen, this, &MainWindow::applyFill);
+    connect(palette, &ColorPalette::outlineChosen, this, &MainWindow::applyOutline);
+
+    m_styleLabel = new QLabel(this);
     m_zoomLabel = new QLabel(this);
     m_positionLabel = new QLabel(this);
+    statusBar()->addWidget(m_styleLabel);
     statusBar()->addPermanentWidget(m_positionLabel);
     statusBar()->addPermanentWidget(m_zoomLabel);
 
@@ -92,12 +120,21 @@ MainWindow::MainWindow(QWidget *parent)
                                      .arg(pos.x() / kUnitsPerMm, 0, 'f', 1)
                                      .arg(pos.y() / kUnitsPerMm, 0, 'f', 1));
     });
-    connect(m_canvas, &CanvasWidget::selectionChanged, this, &MainWindow::updateFillIcon);
+    connect(m_canvas, &CanvasWidget::selectionChanged, this, [this](Shape *shape) {
+        m_propertyBar->setShape(shape);
+        updateStyleIndicators();
+    });
+    connect(m_document, &Document::changed, this, &MainWindow::updateStyleIndicators);
     connect(m_undoStack, &QUndoStack::cleanChanged, this, &MainWindow::updateTitle);
 
-    resize(1200, 800);
+    // Fit comfortably on the current screen, whatever its size and scaling.
+    if (const QScreen *screen = this->screen()) {
+        const QRect available = screen->availableGeometry();
+        resize(available.size() * 0.85);
+        move(available.center() - rect().center());
+    }
     updateTitle();
-    updateFillIcon();
+    updateStyleIndicators();
 }
 
 void MainWindow::createActions()
@@ -164,8 +201,12 @@ void MainWindow::createActions()
 
     toolBar->addSeparator();
     m_fillAction = toolBar->addAction(tr("Fill Color…"), this, &MainWindow::chooseFillColor);
+    m_fillAction->setShortcut(QKeySequence(Qt::SHIFT | Qt::Key_F11));
+    m_outlineAction = toolBar->addAction(tr("Outline Color…"), this, &MainWindow::chooseOutlineColor);
+    m_outlineAction->setShortcut(QKeySequence(Qt::SHIFT | Qt::Key_F12));
     toolsMenu->addSeparator();
     toolsMenu->addAction(m_fillAction);
+    toolsMenu->addAction(m_outlineAction);
 
     // Help
     QMenu *helpMenu = menuBar()->addMenu(tr("&Help"));
@@ -200,13 +241,33 @@ bool MainWindow::openFile(const QString &path)
         return false;
     }
     QString error;
-    if (!svg::read(&file, *m_document, &error)) {
+    svg::ReadReport report;
+    if (!svg::read(&file, *m_document, &error, &report)) {
         QMessageBox::warning(this, tr("Open"), tr("Could not read %1:\n%2").arg(path, error));
         return false;
     }
     m_undoStack->clear();
     setFilePath(path);
     m_canvas->fitPage();
+
+    // Never refuse a file: open what we understand and say what was left out.
+    if (report.isNewerFormat() || report.skippedCount() > 0) {
+        QStringList details;
+        if (report.isNewerFormat())
+            details << tr("This file was saved by a newer OpenDraw (format %1; this version reads format %2).")
+                           .arg(report.formatVersion)
+                           .arg(svg::kFormatVersion);
+        if (report.skippedCount() > 0) {
+            QStringList kinds;
+            for (auto it = report.skippedElements.cbegin(); it != report.skippedElements.cend(); ++it)
+                kinds << QStringLiteral("%1 × <%2>").arg(it.value()).arg(it.key());
+            details << tr("%n object(s) this version cannot edit yet were left out: %1.", nullptr,
+                          report.skippedCount())
+                           .arg(kinds.join(QStringLiteral(", ")));
+            details << tr("Saving over the original file would lose them. Use Save As to keep both.");
+        }
+        QMessageBox::information(this, tr("Opened with limitations"), details.join(QStringLiteral("\n\n")));
+    }
     return true;
 }
 
@@ -265,25 +326,66 @@ void MainWindow::chooseFillColor()
     Shape *selected = m_canvas->selectedShape();
     const QColor initial = selected ? selected->style().fill : m_canvas->defaultStyle().fill;
     const QColor color = QColorDialog::getColor(initial, this, tr("Fill Color"), QColorDialog::ShowAlphaChannel);
-    if (!color.isValid())
-        return;
+    if (color.isValid())
+        applyFill(color);
+}
 
-    Style defaults = m_canvas->defaultStyle();
-    defaults.fill = color;
-    m_canvas->setDefaultStyle(defaults);
+void MainWindow::chooseOutlineColor()
+{
+    Shape *selected = m_canvas->selectedShape();
+    const QColor initial = selected ? selected->style().stroke : m_canvas->defaultStyle().stroke;
+    const QColor color = QColorDialog::getColor(initial, this, tr("Outline Color"), QColorDialog::ShowAlphaChannel);
+    if (color.isValid())
+        applyOutline(color);
+}
 
-    if (selected) {
+// With a selection, colours apply to it; without one, they become the default for new shapes.
+void MainWindow::applyFill(const QColor &color)
+{
+    if (Shape *selected = m_canvas->selectedShape()) {
         Style style = selected->style();
         style.fill = color;
         m_undoStack->push(new SetStyleCommand(m_document, selected, style));
+    } else {
+        Style defaults = m_canvas->defaultStyle();
+        defaults.fill = color;
+        m_canvas->setDefaultStyle(defaults);
+        statusBar()->showMessage(tr("Default fill for new shapes: %1").arg(describeColor(color)), 3000);
     }
-    updateFillIcon();
+    updateStyleIndicators();
 }
 
-void MainWindow::updateFillIcon()
+void MainWindow::applyOutline(const QColor &color)
+{
+    if (Shape *selected = m_canvas->selectedShape()) {
+        Style style = selected->style();
+        style.stroke = color;
+        if (color.alpha() > 0 && style.strokeWidth <= 0.0)
+            style.strokeWidth = 1.0;
+        m_undoStack->push(new SetStyleCommand(m_document, selected, style));
+    } else {
+        Style defaults = m_canvas->defaultStyle();
+        defaults.stroke = color;
+        m_canvas->setDefaultStyle(defaults);
+        statusBar()->showMessage(tr("Default outline for new shapes: %1").arg(describeColor(color)), 3000);
+    }
+    updateStyleIndicators();
+}
+
+void MainWindow::updateStyleIndicators()
 {
     Shape *selected = m_canvas->selectedShape();
-    m_fillAction->setIcon(swatchIcon(selected ? selected->style().fill : m_canvas->defaultStyle().fill));
+    const Style &style = selected ? selected->style() : m_canvas->defaultStyle();
+    m_fillAction->setIcon(swatchIcon(style.fill, false));
+    m_outlineAction->setIcon(swatchIcon(style.hasStroke() ? style.stroke : QColor(Qt::transparent), true));
+
+    const QString outline = style.hasStroke()
+                                ? tr("%1, %2 mm").arg(describeColor(style.stroke))
+                                      .arg(style.strokeWidth / kUnitsPerMm, 0, 'f', 2)
+                                : tr("none");
+    const QString prefix = selected ? (selected->kind() == ShapeKind::Rectangle ? tr("Rectangle") : tr("Ellipse"))
+                                    : tr("New shapes");
+    m_styleLabel->setText(tr("%1 — Fill: %2   Outline: %3").arg(prefix, describeColor(style.fill), outline));
 }
 
 void MainWindow::about()

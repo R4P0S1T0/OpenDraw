@@ -19,6 +19,9 @@ private slots:
     void hitTestIgnoresEmptyFill();
     void undoRedoAddMoveRemove();
     void setStyleUndo();
+    void setBoundsUndo();
+    void writesFormatVersion();
+    void opensNewerFormatAndReportsSkipped();
 };
 
 void CoreTests::svgRoundTrip()
@@ -162,6 +165,60 @@ void CoreTests::setStyleUndo()
 
     stack.undo();
     QCOMPARE(shape->style().fill, before);
+}
+
+void CoreTests::setBoundsUndo()
+{
+    Document doc;
+    QUndoStack stack;
+    Shape *shape = doc.insertShape(-1, std::make_unique<Shape>(ShapeKind::Rectangle, QRectF(0, 0, 10, 10)));
+
+    stack.push(new SetBoundsCommand(&doc, shape, shape->bounds(), QRectF(5, 5, 40, 20)));
+    QCOMPARE(shape->bounds(), QRectF(5, 5, 40, 20));
+    stack.undo();
+    QCOMPARE(shape->bounds(), QRectF(0, 0, 10, 10));
+}
+
+void CoreTests::writesFormatVersion()
+{
+    Document doc;
+    QBuffer buffer;
+    QVERIFY(buffer.open(QIODevice::ReadWrite));
+    QVERIFY(svg::write(doc, &buffer));
+    buffer.seek(0);
+
+    Document loaded;
+    svg::ReadReport report;
+    QVERIFY(svg::read(&buffer, loaded, nullptr, &report));
+    QCOMPARE(report.formatVersion, svg::kFormatVersion);
+    QVERIFY(!report.isNewerFormat());
+    QCOMPARE(report.skippedCount(), 0);
+}
+
+void CoreTests::opensNewerFormatAndReportsSkipped()
+{
+    // A file from a hypothetical future release: must still open, keeping what we understand.
+    QByteArray data = R"(<svg xmlns="http://www.w3.org/2000/svg"
+                              xmlns:opendraw="https://github.com/R4P0S1T0/OpenDraw/ns/1"
+                              opendraw:format-version="99" viewBox="0 0 200 100">
+        <rect x="1" y="2" width="3" height="4" fill="#123456"/>
+        <path d="M0 0 L10 10"/>
+        <path d="M5 5 L20 20"/>
+        <text x="0" y="0">Hello</text>
+    </svg>)";
+    QBuffer buffer(&data);
+    QVERIFY(buffer.open(QIODevice::ReadOnly));
+
+    Document doc;
+    svg::ReadReport report;
+    QVERIFY(svg::read(&buffer, doc, nullptr, &report));
+    QCOMPARE(doc.count(), 1);
+    QCOMPARE(doc.pageSize(), QSizeF(200, 100));
+    QCOMPARE(report.formatVersion, 99);
+    QVERIFY(report.isNewerFormat());
+    QCOMPARE(report.skippedElements.value(QStringLiteral("path")), 2);
+    QCOMPARE(report.skippedElements.value(QStringLiteral("text")), 1);
+    QCOMPARE(report.skippedCount(), 3);
 }
 
 QTEST_GUILESS_MAIN(CoreTests)

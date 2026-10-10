@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.21)
 
 project(OpenDraw
-    VERSION 0.1.0
+    VERSION 0.2.0
     DESCRIPTION "Free, open-source, cross-platform vector graphics editor"
     HOMEPAGE_URL "https://github.com/R4P0S1T0/OpenDraw"
     LANGUAGES CXX)

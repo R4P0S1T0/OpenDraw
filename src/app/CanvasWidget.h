@@ -6,6 +6,8 @@
 #include <QRectF>
 #include <QWidget>
 
+#include <array>
+
 class QUndoStack;
 
 namespace opendraw {
@@ -55,12 +57,17 @@ protected:
     void keyReleaseEvent(QKeyEvent *event) override;
 
 private:
-    enum class Drag { None, Pan, Move, Create };
+    enum class Drag { None, Pan, Move, Create, Resize };
 
     QTransform viewTransform() const;
     QPointF toDocument(const QPointF &widgetPosition) const;
     void zoomAround(const QPointF &widgetPosition, double factor);
     void updateCursor();
+
+    // Selection handles in widget coordinates, clockwise from the top-left corner.
+    std::array<QRectF, 8> handleRects() const;
+    int handleAt(const QPointF &widgetPosition) const;
+    void setHoverCursor(const QPointF &widgetPosition);
 
     Document *m_document;
     QUndoStack *m_undoStack;
@@ -78,6 +85,8 @@ private:
     QPointF m_dragLast;   // document coordinates
     QPointF m_panLast;    // widget coordinates
     QRectF m_creating;    // document coordinates
+    int m_resizeHandle = -1;
+    QRectF m_resizeOriginal;
 };
 
 } // namespace opendraw

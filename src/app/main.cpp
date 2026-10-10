@@ -1,6 +1,7 @@
 #include "MainWindow.h"
 
 #include <QApplication>
+#include <QTimer>
 
 int main(int argc, char *argv[])
 {
@@ -10,10 +11,12 @@ int main(int argc, char *argv[])
     QApplication::setApplicationVersion(QStringLiteral(OPENDRAW_VERSION));
 
     opendraw::MainWindow window;
+    window.show();
+
+    // Open after the window is on screen so any message about the file appears on top of it.
     const QStringList args = QApplication::arguments();
     if (args.size() > 1)
-        window.openFile(args.at(1));
-    window.show();
+        QTimer::singleShot(0, &window, [&window, path = args.at(1)] { window.openFile(path); });
 
     return QApplication::exec();
 }

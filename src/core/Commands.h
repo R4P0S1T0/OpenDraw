@@ -59,6 +59,22 @@ private:
     bool m_skipNextRedo;
 };
 
+class SetBoundsCommand : public QUndoCommand {
+public:
+    // The shape may already have `newBounds` (interactive resize); redo simply applies it again.
+    SetBoundsCommand(Document *document, Shape *shape, const QRectF &oldBounds, const QRectF &newBounds,
+                     QUndoCommand *parent = nullptr);
+
+    void redo() override;
+    void undo() override;
+
+private:
+    Document *m_document;
+    Shape *m_shape;
+    QRectF m_oldBounds;
+    QRectF m_newBounds;
+};
+
 class SetStyleCommand : public QUndoCommand {
 public:
     SetStyleCommand(Document *document, Shape *shape, const Style &style, QUndoCommand *parent = nullptr);

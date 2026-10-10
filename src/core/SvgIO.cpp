@@ -141,7 +141,23 @@ QString tr(const char *text)
     return QCoreApplication::translate("SvgIO", text);
 }
 
+// Drawing elements OpenDraw does not import yet; reported so nothing disappears silently.
+bool isUnsupportedGraphic(QStringView name)
+{
+    static const QStringView names[] = {u"path", u"line", u"polyline", u"polygon",
+                                        u"text", u"image", u"use", u"foreignObject"};
+    return std::find(std::begin(names), std::end(names), name) != std::end(names);
+}
+
 } // namespace
+
+int ReadReport::skippedCount() const
+{
+    int total = 0;
+    for (int n : skippedElements)
+        total += n;
+    return total;
+}
 
 bool write(const Document &document, QIODevice *device)
 {
@@ -152,7 +168,10 @@ bool write(const Document &document, QIODevice *device)
     const QSizeF page = document.pageSize();
     w.writeStartElement(QStringLiteral("svg"));
     w.writeDefaultNamespace(QStringLiteral("http://www.w3.org/2000/svg"));
+    w.writeNamespace(QString::fromLatin1(kNamespace), QStringLiteral("opendraw"));
     w.writeAttribute(QStringLiteral("version"), QStringLiteral("1.1"));
+    w.writeAttribute(QString::fromLatin1(kNamespace), QStringLiteral("format-version"),
+                     QString::number(kFormatVersion));
     w.writeAttribute(QStringLiteral("width"), number(page.width()));
     w.writeAttribute(QStringLiteral("height"), number(page.height()));
     w.writeAttribute(QStringLiteral("viewBox"),
@@ -185,12 +204,13 @@ bool write(const Document &document, QIODevice *device)
     return !w.hasError();
 }
 
-bool read(QIODevice *device, Document &document, QString *errorMessage)
+bool read(QIODevice *device, Document &document, QString *errorMessage, ReadReport *report)
 {
     QXmlStreamReader r(device);
     std::vector<std::unique_ptr<Shape>> shapes;
     QSizeF pageSize = Document::defaultPageSize();
     bool foundSvg = false;
+    ReadReport localReport;
 
     while (!r.atEnd()) {
         r.readNext();
@@ -202,6 +222,9 @@ bool read(QIODevice *device, Document &document, QString *errorMessage)
 
         if (name == u"svg" && !foundSvg) {
             foundSvg = true;
+            localReport.formatVersion = r.attributes()
+                                            .value(QString::fromLatin1(kNamespace), QStringLiteral("format-version"))
+                                            .toInt();
             const QStringList viewBox = props.value(QStringLiteral("viewBox"))
                                             .split(QRegularExpression(QStringLiteral("[\\s,]+")),
                                                    Qt::SkipEmptyParts);
@@ -223,6 +246,8 @@ bool read(QIODevice *device, Document &document, QString *errorMessage)
             const double ry = name == u"circle" ? rx : props.length(QStringLiteral("ry"));
             shapes.push_back(std::make_unique<Shape>(
                 ShapeKind::Ellipse, QRectF(cx - rx, cy - ry, 2.0 * rx, 2.0 * ry), props.style()));
+        } else if (isUnsupportedGraphic(name)) {
+            ++localReport.skippedElements[name.toString()];
         }
     }
 
@@ -241,6 +266,8 @@ bool read(QIODevice *device, Document &document, QString *errorMessage)
     document.setPageSize(pageSize);
     for (auto &shape : shapes)
         document.insertShape(-1, std::move(shape));
+    if (report)
+        *report = localReport;
     return true;
 }
 
