@@ -88,7 +88,7 @@ public:
     explicit Properties(const QXmlStreamAttributes &attributes)
         : m_attributes(attributes)
     {
-        const QStringView style = attributes.value(QStringLiteral("style"));
+        const QStringView style = m_attributes.value(QStringLiteral("style"));
         for (QStringView declaration : style.split(u';')) {
             const qsizetype colon = declaration.indexOf(u':');
             if (colon < 0)
@@ -132,7 +132,8 @@ private:
             color.setAlphaF(color.alphaF() * std::clamp(opacity, 0.0, 1.0));
     }
 
-    const QXmlStreamAttributes &m_attributes;
+    // A copy: the reader's attributes() returns a temporary.
+    QXmlStreamAttributes m_attributes;
     QHash<QString, QString> m_style;
 };
 
