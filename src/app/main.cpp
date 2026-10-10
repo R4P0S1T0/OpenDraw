@@ -1,6 +1,7 @@
 #include "MainWindow.h"
 
 #include <QApplication>
+#include <QIcon>
 #include <QTimer>
 
 int main(int argc, char *argv[])
@@ -9,6 +10,8 @@ int main(int argc, char *argv[])
     QApplication::setApplicationName(QStringLiteral("OpenDraw"));
     QApplication::setOrganizationName(QStringLiteral("OpenDraw"));
     QApplication::setApplicationVersion(QStringLiteral(OPENDRAW_VERSION));
+    QApplication::setWindowIcon(QIcon(QStringLiteral(":/opendraw-icon-256.png")));
+    QApplication::setDesktopFileName(QStringLiteral("opendraw"));
 
     opendraw::MainWindow window;
     window.show();

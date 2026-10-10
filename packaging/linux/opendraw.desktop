@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=OpenDraw
+GenericName=Vector Graphics Editor
+Comment=Create and edit vector illustrations
+Exec=opendraw %f
+Icon=opendraw
+Terminal=false
+Categories=Graphics;VectorGraphics;Qt;
+MimeType=image/svg+xml;

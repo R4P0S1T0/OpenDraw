@@ -1,3 +1,13 @@
+<p align="center">
+  <img src="assets/branding/opendraw-logo.png" alt="OpenDraw" width="320">
+</p>
+
+<p align="center">
+  <a href="https://github.com/R4P0S1T0/OpenDraw/actions/workflows/build.yml"><img src="https://github.com/R4P0S1T0/OpenDraw/actions/workflows/build.yml/badge.svg" alt="Build status"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0--or--later-blue" alt="License: GPL-3.0-or-later"></a>
+  <img src="https://img.shields.io/badge/platforms-Linux%20%7C%20Windows-informational" alt="Platforms: Linux, Windows">
+</p>
+
 # OpenDraw
 
 OpenDraw is a free, open-source, cross-platform vector graphics editor for Linux and Windows. It aims to offer professional tools for illustration and graphic design, with a workflow that feels familiar to people coming from other desktop vector editors, and without the lock-in that comes with closed file formats.
@@ -60,10 +70,12 @@ Visual Studio with the official Qt installer also works: open the folder in Visu
 ## Project layout
 
 ```
-src/core   document model, shapes, undo commands, SVG reading and writing (no GUI code)
-src/app    the Qt Widgets application: main window and drawing canvas
-tests      unit tests for src/core
-docs       roadmap and design notes
+src/core          document model, shapes, undo commands, SVG reading and writing (no GUI code)
+src/app           the Qt Widgets application: main window and drawing canvas
+tests             unit tests for src/core
+assets/branding   OpenDraw logo and application icons
+packaging         desktop integration files (Linux .desktop entry)
+docs              roadmap and design notes
 ```
 
 ## Contributing

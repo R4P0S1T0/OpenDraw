@@ -391,7 +391,8 @@ void MainWindow::updateStyleIndicators()
 void MainWindow::about()
 {
     QMessageBox::about(this, tr("About OpenDraw"),
-                       tr("<h3>OpenDraw %1</h3>"
+                       tr("<p><img src=\":/opendraw-icon-256.png\" width=\"96\" height=\"96\"></p>"
+                          "<h3>OpenDraw %1</h3>"
                           "<p>A free, open-source, cross-platform vector graphics editor.</p>"
                           "<p>Licensed under the GNU General Public License v3.0 or later.</p>"
                           "<p><a href=\"https://github.com/R4P0S1T0/OpenDraw\">github.com/R4P0S1T0/OpenDraw</a></p>")
