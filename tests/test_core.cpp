@@ -1,5 +1,6 @@
 #include "core/Commands.h"
 #include "core/Document.h"
+#include "core/PathOps.h"
 #include "core/SvgIO.h"
 
 #include <QBuffer>
@@ -22,6 +23,8 @@ private slots:
     void setBoundsUndo();
     void writesFormatVersion();
     void opensNewerFormatAndReportsSkipped();
+    void importsGroupsTransformsAndInheritedStyle();
+    void pathsSurviveSaveAndOpen();
 };
 
 void CoreTests::svgRoundTrip()
@@ -203,7 +206,8 @@ void CoreTests::opensNewerFormatAndReportsSkipped()
                               opendraw:format-version="99" viewBox="0 0 200 100">
         <rect x="1" y="2" width="3" height="4" fill="#123456"/>
         <path d="M0 0 L10 10"/>
-        <path d="M5 5 L20 20"/>
+        <image href="photo.png"/>
+        <image href="photo2.png"/>
         <text x="0" y="0">Hello</text>
     </svg>)";
     QBuffer buffer(&data);
@@ -212,13 +216,73 @@ void CoreTests::opensNewerFormatAndReportsSkipped()
     Document doc;
     svg::ReadReport report;
     QVERIFY(svg::read(&buffer, doc, nullptr, &report));
-    QCOMPARE(doc.count(), 1);
+    QCOMPARE(doc.count(), 2);
     QCOMPARE(doc.pageSize(), QSizeF(200, 100));
     QCOMPARE(report.formatVersion, 99);
     QVERIFY(report.isNewerFormat());
-    QCOMPARE(report.skippedElements.value(QStringLiteral("path")), 2);
-    QCOMPARE(report.skippedElements.value(QStringLiteral("text")), 1);
+    QCOMPARE(report.skippedElements.value(QStringLiteral("<image>")), 2);
+    QCOMPARE(report.skippedElements.value(QStringLiteral("<text>")), 1);
     QCOMPARE(report.skippedCount(), 3);
+}
+
+void CoreTests::importsGroupsTransformsAndInheritedStyle()
+{
+    QByteArray data = R"svg(<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400">
+        <defs><rect id="hidden" width="5" height="5"/></defs>
+        <g fill="#ff0000" stroke="blue" transform="translate(100 50)">
+            <rect x="0" y="0" width="10" height="10"/>
+            <path d="M0 0 L10 0 L10 10 Z" fill="rgb(0, 128, 0)"/>
+            <g transform="scale(2)"><circle cx="5" cy="5" r="5" stroke-width="3"/></g>
+        </g>
+        <rect x="0" y="0" width="10" height="10" transform="rotate(45)"/>
+        <polygon points="0,0 10,0 5,8"/>
+        <line x1="0" y1="0" x2="10" y2="10" stroke="black"/>
+    </svg>)svg";
+    QBuffer buffer(&data);
+    QVERIFY(buffer.open(QIODevice::ReadOnly));
+
+    Document doc;
+    QVERIFY(svg::read(&buffer, doc));
+    QCOMPARE(doc.count(), 6); // the rect inside <defs> is not drawn
+
+    const Shape &rect = *doc.shapes()[0];
+    QCOMPARE(rect.kind(), ShapeKind::Rectangle);
+    QCOMPARE(rect.bounds(), QRectF(100, 50, 10, 10));
+    QCOMPARE(rect.style().fill, QColor(255, 0, 0));
+    QCOMPARE(rect.style().stroke, QColor(0, 0, 255));
+
+    const Shape &triangle = *doc.shapes()[1];
+    QCOMPARE(triangle.kind(), ShapeKind::Path);
+    QCOMPARE(triangle.bounds(), QRectF(100, 50, 10, 10));
+    QCOMPARE(triangle.style().fill, QColor(0, 128, 0));
+    QVERIFY(triangle.pathData().front().closed);
+
+    const Shape &circle = *doc.shapes()[2];
+    QCOMPARE(circle.kind(), ShapeKind::Ellipse);
+    QCOMPARE(circle.bounds(), QRectF(100, 50, 20, 20));
+    QCOMPARE(circle.style().strokeWidth, 6.0); // scaled with the group
+
+    QCOMPARE(doc.shapes()[3]->kind(), ShapeKind::Path); // rotated rectangle becomes a path
+    QCOMPARE(doc.shapes()[4]->pathData().front().nodes.size(), std::size_t(3));
+    QVERIFY(!doc.shapes()[5]->style().hasFill());
+}
+
+void CoreTests::pathsSurviveSaveAndOpen()
+{
+    Document original;
+    auto path = pathops::fromSvg(u"M 10 10 C 20 0 40 0 50 10 L 50 40 Z M 60 60 L 70 70");
+    QVERIFY(path);
+    original.insertShape(-1, std::make_unique<Shape>(*path));
+
+    QBuffer buffer;
+    QVERIFY(buffer.open(QIODevice::ReadWrite));
+    QVERIFY(svg::write(original, &buffer));
+    buffer.seek(0);
+
+    Document loaded;
+    QVERIFY(svg::read(&buffer, loaded));
+    QCOMPARE(loaded.count(), 1);
+    QCOMPARE(loaded.shapes()[0]->pathData(), original.shapes()[0]->pathData());
 }
 
 QTEST_GUILESS_MAIN(CoreTests)

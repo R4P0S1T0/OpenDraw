@@ -75,6 +75,41 @@ private:
     QRectF m_newBounds;
 };
 
+// Replaces a path's nodes (node editing). The shape may already hold `newPath`.
+class SetPathCommand : public QUndoCommand {
+public:
+    SetPathCommand(Document *document, Shape *shape, PathData oldPath, PathData newPath, const QString &text,
+                   QUndoCommand *parent = nullptr);
+
+    void redo() override;
+    void undo() override;
+
+private:
+    Document *m_document;
+    Shape *m_shape;
+    PathData m_oldPath;
+    PathData m_newPath;
+};
+
+// Swaps one shape for another at the same stacking position (e.g. "convert to curves").
+class ReplaceShapeCommand : public QUndoCommand {
+public:
+    ReplaceShapeCommand(Document *document, Shape *oldShape, std::unique_ptr<Shape> newShape, const QString &text,
+                        QUndoCommand *parent = nullptr);
+
+    Shape *newShape() const { return m_newShape; }
+
+    void redo() override;
+    void undo() override;
+
+private:
+    Document *m_document;
+    Shape *m_oldShape;
+    Shape *m_newShape;
+    std::unique_ptr<Shape> m_owned; // whichever shape is currently out of the document
+    int m_index;
+};
+
 class SetStyleCommand : public QUndoCommand {
 public:
     SetStyleCommand(Document *document, Shape *shape, const Style &style, QUndoCommand *parent = nullptr);

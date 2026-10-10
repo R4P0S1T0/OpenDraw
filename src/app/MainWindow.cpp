@@ -260,9 +260,9 @@ bool MainWindow::openFile(const QString &path)
         if (report.skippedCount() > 0) {
             QStringList kinds;
             for (auto it = report.skippedElements.cbegin(); it != report.skippedElements.cend(); ++it)
-                kinds << QStringLiteral("%1 × <%2>").arg(it.value()).arg(it.key());
-            details << tr("%n object(s) this version cannot edit yet were left out: %1.", nullptr,
-                          report.skippedCount())
+                kinds << QStringLiteral("%1 × %2").arg(it.value()).arg(it.key());
+            details << tr("%n item(s) this version does not support yet were left out or simplified: %1.",
+                          nullptr, report.skippedCount())
                            .arg(kinds.join(QStringLiteral(", ")));
             details << tr("Saving over the original file would lose them. Use Save As to keep both.");
         }

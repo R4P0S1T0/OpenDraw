@@ -12,9 +12,17 @@ AddShapeCommand::AddShapeCommand(Document *document, std::unique_ptr<Shape> shap
     , m_shape(shape.get())
     , m_owned(std::move(shape))
 {
-    setText(m_shape->kind() == ShapeKind::Rectangle
-                ? QCoreApplication::translate("Commands", "Add rectangle")
-                : QCoreApplication::translate("Commands", "Add ellipse"));
+    switch (m_shape->kind()) {
+    case ShapeKind::Rectangle:
+        setText(QCoreApplication::translate("Commands", "Add rectangle"));
+        break;
+    case ShapeKind::Ellipse:
+        setText(QCoreApplication::translate("Commands", "Add ellipse"));
+        break;
+    case ShapeKind::Path:
+        setText(QCoreApplication::translate("Commands", "Add curve"));
+        break;
+    }
 }
 
 void AddShapeCommand::redo()
@@ -92,6 +100,53 @@ void SetBoundsCommand::undo()
 {
     m_shape->setBounds(m_oldBounds);
     m_document->notifyShapeChanged(m_shape);
+}
+
+SetPathCommand::SetPathCommand(Document *document, Shape *shape, PathData oldPath, PathData newPath,
+                               const QString &text, QUndoCommand *parent)
+    : QUndoCommand(text, parent)
+    , m_document(document)
+    , m_shape(shape)
+    , m_oldPath(std::move(oldPath))
+    , m_newPath(std::move(newPath))
+{
+}
+
+void SetPathCommand::redo()
+{
+    m_shape->setPathData(m_newPath);
+    m_document->notifyShapeChanged(m_shape);
+}
+
+void SetPathCommand::undo()
+{
+    m_shape->setPathData(m_oldPath);
+    m_document->notifyShapeChanged(m_shape);
+}
+
+ReplaceShapeCommand::ReplaceShapeCommand(Document *document, Shape *oldShape, std::unique_ptr<Shape> newShape,
+                                         const QString &text, QUndoCommand *parent)
+    : QUndoCommand(text, parent)
+    , m_document(document)
+    , m_oldShape(oldShape)
+    , m_newShape(newShape.get())
+    , m_owned(std::move(newShape))
+    , m_index(document->indexOf(oldShape))
+{
+}
+
+void ReplaceShapeCommand::redo()
+{
+    std::unique_ptr<Shape> incoming = std::move(m_owned);
+    m_owned = m_document->takeShape(m_oldShape);
+    m_document->insertShape(m_index, std::move(incoming));
+}
+
+void ReplaceShapeCommand::undo()
+{
+    std::unique_ptr<Shape> incoming = std::move(m_owned);
+    m_owned = m_document->takeShape(m_newShape);
+    m_document->insertShape(m_index, std::move(incoming));
 }
 
 SetStyleCommand::SetStyleCommand(Document *document, Shape *shape, const Style &style, QUndoCommand *parent)

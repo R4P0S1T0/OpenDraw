@@ -19,7 +19,7 @@ inline constexpr char kNamespace[] = "https://github.com/R4P0S1T0/OpenDraw/ns/1"
 
 struct ReadReport {
     int formatVersion = 0;               // 0 when the file was not written by OpenDraw
-    QMap<QString, int> skippedElements;  // element name -> how many were not imported
+    QMap<QString, int> skippedElements;  // what was left out or simplified ("<text>", ...) -> count
 
     bool isNewerFormat() const { return formatVersion > kFormatVersion; }
     int skippedCount() const;
@@ -27,9 +27,9 @@ struct ReadReport {
 
 bool write(const Document &document, QIODevice *device);
 
-// Replaces the document's contents. Supports <rect>, <ellipse> and <circle> with
-// fill/stroke given as attributes or in a style attribute. Other drawing elements are
-// skipped and listed in `report`.
+// Replaces the document's contents. Imports <rect>, <circle>, <ellipse>, <line>, <polyline>,
+// <polygon> and <path>, including transforms, groups and inherited fill/stroke. Text, images
+// and other elements not supported yet are skipped and listed in `report`.
 bool read(QIODevice *device, Document &document, QString *errorMessage = nullptr,
           ReadReport *report = nullptr);
 
