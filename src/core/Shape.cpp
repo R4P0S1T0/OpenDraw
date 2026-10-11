@@ -1,11 +1,13 @@
 #include "core/Shape.h"
 
 #include "core/PathOps.h"
+#include "core/TextLayout.h"
 
 #include <QPainterPathStroker>
 
 #include <algorithm>
 #include <atomic>
+#include <cmath>
 
 namespace opendraw {
 
@@ -36,6 +38,15 @@ Shape::Shape(std::vector<std::unique_ptr<Shape>> children)
 {
 }
 
+Shape::Shape(TextData text, const QPointF &origin, const Style &style)
+    : m_id(nextShapeId++)
+    , m_kind(ShapeKind::Text)
+    , m_text(std::move(text))
+    , m_textOrigin(origin)
+    , m_style(style)
+{
+}
+
 Shape::~Shape() = default;
 
 QRectF Shape::bounds() const
@@ -52,6 +63,8 @@ QRectF Shape::bounds() const
             united = united.isNull() ? child->bounds() : united.united(child->bounds());
         return united;
     }
+    case ShapeKind::Text:
+        return textlayout::layout(m_text, m_textOrigin).bounds;
     }
     return {};
 }
@@ -93,6 +106,14 @@ void Shape::transform(const QTransform &t)
         for (auto &child : m_children)
             child->transform(t);
         break;
+    case ShapeKind::Text: {
+        // Text keeps its proportions: the font size follows the overall scale.
+        m_textOrigin = t.map(m_textOrigin);
+        const double scale = std::sqrt(std::abs(t.determinant()));
+        if (scale > 0.0)
+            m_text.format.size *= scale;
+        break;
+    }
     }
 }
 
@@ -113,6 +134,9 @@ QPainterPath Shape::path() const
         for (const auto &child : m_children)
             path.addPath(child->path());
         break;
+    case ShapeKind::Text:
+        path = textlayout::outline(m_text, m_textOrigin);
+        break;
     }
     return path;
 }
@@ -123,6 +147,8 @@ bool Shape::contains(const QPointF &point, double tolerance) const
         return std::any_of(m_children.begin(), m_children.end(),
                            [&](const auto &child) { return child->contains(point, tolerance); });
     }
+    if (m_kind == ShapeKind::Text) // letters are thin: the whole text box is clickable
+        return bounds().adjusted(-tolerance, -tolerance, tolerance, tolerance).contains(point);
 
     const QPainterPath outline = path();
     if (m_style.hasFill() && outline.contains(point))

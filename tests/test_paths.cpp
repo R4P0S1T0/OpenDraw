@@ -274,5 +274,5 @@ void PathTests::shapeScalesPathToNewBounds()
     QVERIFY(near(shape.bounds(), QRectF(15, 15, 20, 40)));
 }
 
-QTEST_GUILESS_MAIN(PathTests)
+QTEST_MAIN(PathTests)
 #include "test_paths.moc"

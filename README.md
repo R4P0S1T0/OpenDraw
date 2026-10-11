@@ -12,7 +12,7 @@
 
 OpenDraw is a free, open-source, cross-platform vector graphics editor for Linux and Windows. It aims to offer professional tools for illustration and graphic design, with a workflow that feels familiar to people coming from other desktop vector editors, and without the lock-in that comes with closed file formats.
 
-> **Status: early development (0.3).** You can draw rectangles, ellipses, Bézier and freehand curves, edit curve nodes, select several objects, group, order, align and distribute them, recolour them, undo and redo, and open SVG files from other programs. Text and layers are still missing, so it is not ready for real work yet.
+> **Status: early development (0.3).** You can draw rectangles, ellipses, Bézier and freehand curves, edit curve nodes, write text, select several objects, group, order, align and distribute them, recolour them, undo and redo, and open SVG files from other programs. Layers, multiple pages and PDF/PNG export are still missing, so it is not ready for real work yet.
 
 ## Goals
 
@@ -45,7 +45,8 @@ See [docs/ROADMAP.md](docs/ROADMAP.md) for what is planned next.
 | Bézier curve | `Shift` `B`. Click for a corner node, click and drag for a smooth node. Click the first node to close the shape; `Enter`, `Esc` or double-click to finish. `Backspace` removes the last node while drawing |
 | Freehand | `F5`, drag to draw. The stroke is smoothed into a few curve segments; end near the start to close it |
 | Edit nodes | Shape tool (`F10`): drag nodes and handles, double-click a segment to add a node, double-click a node or press `Delete` to remove it. Hold `Alt` while dragging a handle to make a corner |
-| Convert to curves | `Ctrl` `Q` turns a rectangle or ellipse into an editable curve |
+| Text | `F8`, click on the page and type. `Enter` starts a new line, `Esc` finishes. Click a text with the tool, or double-click it with the Select tool, to edit it. Font, size (pt), bold, italic and alignment are on the text bar |
+| Convert to curves | `Ctrl` `Q` turns a rectangle, ellipse or text into editable curves |
 | Fill / outline colour | Colour palette on the right: left click = fill, right click = outline, ✕ = none. With nothing selected it sets the colour for new shapes |
 | Custom colours | `Shift` `F11` (fill), `Shift` `F12` (outline) |
 | Zoom | Mouse wheel (around the cursor), `Ctrl` `+` / `Ctrl` `-`, `Shift` `F4` fits the page |

@@ -13,7 +13,9 @@
 #include <QCloseEvent>
 #include <QColorDialog>
 #include <QFileDialog>
+#include <QDoubleSpinBox>
 #include <QFileInfo>
+#include <QFontComboBox>
 #include <QLabel>
 #include <QMenuBar>
 #include <QMessageBox>
@@ -82,6 +84,15 @@ QIcon toolIcon(CanvasWidget::Tool tool, const QColor &ink)
         p.drawRect(QRectF(24.5, 4.5, 5, 5));
         break;
     }
+    case CanvasWidget::Tool::Text: {
+        QFont font(QStringLiteral("Times New Roman"));
+        font.setPixelSize(24);
+        font.setBold(true);
+        p.setFont(font);
+        p.setPen(ink);
+        p.drawText(QRectF(0, 0, 32, 32), Qt::AlignCenter, QStringLiteral("A"));
+        break;
+    }
     case CanvasWidget::Tool::Rectangle:
         p.drawRect(QRectF(6, 9, 20, 14));
         break;
@@ -136,6 +147,7 @@ MainWindow::MainWindow(QWidget *parent)
     addToolBar(Qt::TopToolBarArea, m_propertyBar);
     addToolBar(Qt::TopToolBarArea, m_nodeBar);
     m_nodeBar->hide();
+    createTextBar();
     connect(m_canvas, &CanvasWidget::nodeSelectionChanged, this, &MainWindow::updateNodeActions);
     connect(m_document, &Document::changed, this, &MainWindow::updateNodeActions);
     updateNodeActions();
@@ -316,6 +328,7 @@ void MainWindow::createActions()
         {CanvasWidget::Tool::Bezier, tr("Bézier"), QKeySequence(Qt::SHIFT | Qt::Key_B)},
         {CanvasWidget::Tool::Rectangle, tr("Rectangle"), QKeySequence(Qt::Key_F6)},
         {CanvasWidget::Tool::Ellipse, tr("Ellipse"), QKeySequence(Qt::Key_F7)},
+        {CanvasWidget::Tool::Text, tr("Text"), QKeySequence(Qt::Key_F8)},
     };
     for (const ToolDef &def : defs) {
         QAction *action = tools->addAction(toolIcon(def.tool, ink), def.name);
@@ -327,6 +340,7 @@ void MainWindow::createActions()
             m_canvas->setTool(tool);
             m_nodeBar->setVisible(tool == CanvasWidget::Tool::Node);
             updateNodeActions();
+            updateTextBar();
         });
         toolBar->addAction(action);
         toolsMenu->addAction(action);
@@ -530,6 +544,103 @@ void MainWindow::applyOutline(const QColor &color)
     updateStyleIndicators();
 }
 
+void MainWindow::createTextBar()
+{
+    m_textBar = new QToolBar(tr("Text"), this);
+    m_textBar->setObjectName(QStringLiteral("text"));
+    m_textBar->setMovable(false);
+
+    m_fontBox = new QFontComboBox(this);
+    m_fontBox->setToolTip(tr("Font"));
+    m_textBar->addWidget(m_fontBox);
+
+    m_fontSizeBox = new QDoubleSpinBox(this);
+    m_fontSizeBox->setRange(1.0, 2000.0);
+    m_fontSizeBox->setDecimals(1);
+    m_fontSizeBox->setSuffix(tr(" pt"));
+    m_fontSizeBox->setKeyboardTracking(false);
+    m_fontSizeBox->setToolTip(tr("Font size"));
+    m_textBar->addWidget(m_fontSizeBox);
+    m_textBar->addSeparator();
+
+    auto addToggle = [this](const QString &text, const QString &tip) {
+        QAction *action = m_textBar->addAction(text);
+        action->setCheckable(true);
+        action->setToolTip(tip);
+        return action;
+    };
+    m_boldAction = addToggle(tr("B"), tr("Bold"));
+    QFont boldFont = font();
+    boldFont.setBold(true);
+    m_boldAction->setFont(boldFont);
+    m_italicAction = addToggle(tr("I"), tr("Italic"));
+    QFont italicFont = font();
+    italicFont.setItalic(true);
+    m_italicAction->setFont(italicFont);
+    m_textBar->addSeparator();
+
+    auto *alignGroup = new QActionGroup(this);
+    const std::pair<QString, TextAlign> aligns[] = {
+        {tr("Left"), TextAlign::Left}, {tr("Center"), TextAlign::Center}, {tr("Right"), TextAlign::Right}};
+    for (const auto &[text, align] : aligns) {
+        QAction *action = addToggle(text, tr("Align text: %1").arg(text));
+        action->setData(int(align));
+        alignGroup->addAction(action);
+        m_textAlignActions << action;
+    }
+
+    // Any change sends the whole format; the canvas applies it to the right target.
+    auto apply = [this] {
+        if (m_updatingTextBar)
+            return;
+        TextFormat format = m_canvas->currentTextFormat();
+        format.family = m_fontBox->currentFont().family();
+        format.size = m_fontSizeBox->value() * 96.0 / 72.0;
+        format.bold = m_boldAction->isChecked();
+        format.italic = m_italicAction->isChecked();
+        for (QAction *action : std::as_const(m_textAlignActions)) {
+            if (action->isChecked())
+                format.align = TextAlign(action->data().toInt());
+        }
+        m_canvas->setTextFormat(format);
+        if (m_canvas->editedText())
+            m_canvas->setFocus();
+    };
+    connect(m_fontBox, &QFontComboBox::currentFontChanged, this, apply);
+    connect(m_fontSizeBox, &QDoubleSpinBox::valueChanged, this, apply);
+    connect(m_boldAction, &QAction::triggered, this, apply);
+    connect(m_italicAction, &QAction::triggered, this, apply);
+    connect(alignGroup, &QActionGroup::triggered, this, apply);
+
+    addToolBar(Qt::TopToolBarArea, m_textBar);
+    m_textBar->hide();
+    connect(m_canvas, &CanvasWidget::textEditingChanged, this, &MainWindow::updateTextBar);
+    connect(m_canvas, &CanvasWidget::selectionChanged, this, &MainWindow::updateTextBar);
+    connect(m_document, &Document::changed, this, &MainWindow::updateTextBar);
+}
+
+// Shown with the text tool, while typing, or when a text is selected; always shows the
+// format that a change would start from.
+void MainWindow::updateTextBar()
+{
+    const Shape *selected = m_canvas->selectedShape();
+    const bool visible = m_canvas->tool() == CanvasWidget::Tool::Text || m_canvas->editedText()
+                         || (selected && selected->kind() == ShapeKind::Text);
+    m_textBar->setVisible(visible);
+    if (!visible)
+        return;
+
+    const TextFormat format = m_canvas->currentTextFormat();
+    m_updatingTextBar = true;
+    m_fontBox->setCurrentFont(QFont(format.family));
+    m_fontSizeBox->setValue(format.size * 72.0 / 96.0);
+    m_boldAction->setChecked(format.bold);
+    m_italicAction->setChecked(format.italic);
+    for (QAction *action : std::as_const(m_textAlignActions))
+        action->setChecked(TextAlign(action->data().toInt()) == format.align);
+    m_updatingTextBar = false;
+}
+
 void MainWindow::updateNodeActions()
 {
     const bool hasNode = m_canvas->hasActiveNode();
@@ -570,6 +681,11 @@ void MainWindow::updateStyleIndicators()
         case ShapeKind::Group:
             prefix = tr("Group of %n object(s)", nullptr, int(selected->children().size()));
             break;
+        case ShapeKind::Text: {
+            const TextFormat &f = selected->textData().format;
+            prefix = tr("Text, %1 %2 pt").arg(f.family).arg(f.size * 72.0 / 96.0, 0, 'f', 1);
+            break;
+        }
         }
     }
     m_styleLabel->setText(tr("%1 — Fill: %2   Outline: %3").arg(prefix, describeColor(style.fill), outline));

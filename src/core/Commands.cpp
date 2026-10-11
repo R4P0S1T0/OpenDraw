@@ -27,6 +27,9 @@ AddShapeCommand::AddShapeCommand(Document *document, std::unique_ptr<Shape> shap
     case ShapeKind::Group:
         setText(QCoreApplication::translate("Commands", "Add group"));
         break;
+    case ShapeKind::Text:
+        setText(QCoreApplication::translate("Commands", "Add text"));
+        break;
     }
 }
 
@@ -230,6 +233,28 @@ void ReorderCommand::redo()
 void ReorderCommand::undo()
 {
     m_document->setOrder(m_oldOrder);
+}
+
+SetTextCommand::SetTextCommand(Document *document, Shape *shape, TextData oldText, TextData newText,
+                               const QString &text, QUndoCommand *parent)
+    : QUndoCommand(text, parent)
+    , m_document(document)
+    , m_shape(shape)
+    , m_oldText(std::move(oldText))
+    , m_newText(std::move(newText))
+{
+}
+
+void SetTextCommand::redo()
+{
+    m_shape->setTextData(m_newText);
+    m_document->notifyShapeChanged(m_shape);
+}
+
+void SetTextCommand::undo()
+{
+    m_shape->setTextData(m_oldText);
+    m_document->notifyShapeChanged(m_shape);
 }
 
 SetStyleCommand::SetStyleCommand(Document *document, Shape *shape, const Style &style, QUndoCommand *parent)

@@ -24,7 +24,7 @@ class CanvasWidget : public QWidget {
     Q_OBJECT
 
 public:
-    enum class Tool { Select, Node, Freehand, Bezier, Rectangle, Ellipse };
+    enum class Tool { Select, Node, Freehand, Bezier, Rectangle, Ellipse, Text };
 
     CanvasWidget(Document *document, QUndoStack *undoStack, QWidget *parent = nullptr);
 
@@ -45,6 +45,13 @@ public:
 
     bool hasActiveNode() const { return activeNodeIsValid(); }
     bool hasNodePairToJoin() const;
+
+    // Text being typed into, if any (it may not be in the document yet).
+    Shape *editedText() const { return m_editText; }
+    // Format of the text being edited or the selected text; otherwise the one new text gets.
+    TextFormat currentTextFormat() const;
+
+    QPointF documentToWidget(const QPointF &documentPosition) const { return toWidget(documentPosition); }
 
 public slots:
     void zoomIn();
@@ -79,13 +86,19 @@ public slots:
     void breakNode();
     void joinNodes();
 
+    // Applies to the text being edited, else to the selected texts, else to new text.
+    void setTextFormat(const TextFormat &format);
+    void finishTextEdit();
+
 signals:
     void zoomChanged(double zoom);
     void cursorMoved(const QPointF &documentPosition);
     void selectionChanged();
     void nodeSelectionChanged();
+    void textEditingChanged();
 
 protected:
+    bool event(QEvent *event) override;
     void paintEvent(QPaintEvent *event) override;
     void resizeEvent(QResizeEvent *event) override;
     void mousePressEvent(QMouseEvent *event) override;
@@ -141,6 +154,14 @@ private:
     Style curveStyle(bool closed) const;
     void addNewShape(std::unique_ptr<Shape> shape);
 
+    // Text tool
+    void beginTextEdit(Shape *text);
+    void beginNewText(const QPointF &origin);
+    void setEditedText(const QString &text, int cursor);
+    bool handleTextKey(QKeyEvent *event);
+    static bool isTextEditingKey(const QKeyEvent *event);
+    void paintTextEdit(QPainter &painter);
+
     void paintShape(QPainter &painter, const Shape &shape);
     void paintSelection(QPainter &painter);
     void paintNodes(QPainter &painter, const Shape &shape);
@@ -176,6 +197,12 @@ private:
 
     SubPath m_bezier; // curve being drawn with the Bézier tool; empty when idle
     std::vector<QPointF> m_freehand;
+
+    Shape *m_editText = nullptr;           // text receiving key presses
+    std::unique_ptr<Shape> m_pendingText;  // new text, added to the document when editing ends
+    TextData m_textBeforeEdit;
+    int m_textCursor = 0;
+    TextFormat m_defaultTextFormat;
 };
 
 } // namespace opendraw

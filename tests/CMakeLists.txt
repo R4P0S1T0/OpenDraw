@@ -6,11 +6,13 @@ function(opendraw_add_test name)
     set_target_properties(${name} PROPERTIES WIN32_EXECUTABLE FALSE)
     target_link_libraries(${name} PRIVATE ${ARGN} Qt6::Test)
     add_test(NAME ${name} COMMAND ${name})
+    # Fonts and widgets need a GUI application; the offscreen platform needs no display.
+    set_tests_properties(${name} PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 endfunction()
 
 opendraw_add_test(test_core opendraw_core)
 opendraw_add_test(test_paths opendraw_core)
+opendraw_add_test(test_text opendraw_core)
 
-# Drives the drawing canvas with simulated mouse and keyboard input, without a display.
+# Drives the drawing canvas with simulated mouse and keyboard input.
 opendraw_add_test(test_canvas opendraw_ui)
-set_tests_properties(test_canvas PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")

@@ -161,6 +161,22 @@ private:
     std::vector<Shape *> m_newOrder;
 };
 
+// Changes a text object's content and/or format. The shape may already hold `newText`.
+class SetTextCommand : public QUndoCommand {
+public:
+    SetTextCommand(Document *document, Shape *shape, TextData oldText, TextData newText, const QString &text,
+                   QUndoCommand *parent = nullptr);
+
+    void redo() override;
+    void undo() override;
+
+private:
+    Document *m_document;
+    Shape *m_shape;
+    TextData m_oldText;
+    TextData m_newText;
+};
+
 class SetStyleCommand : public QUndoCommand {
 public:
     SetStyleCommand(Document *document, Shape *shape, const Style &style, QUndoCommand *parent = nullptr);

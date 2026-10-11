@@ -81,6 +81,11 @@ private slots:
     void marqueeAndShiftClickSelection();
     void moveAndResizeSeveralShapes();
     void groupUngroupAlignAndOrder();
+    void textToolTypesAndFinishes();
+    void emptyTextIsDiscarded();
+    void shortcutsWaitWhileTyping();
+    void doubleClickEditsTextAndUndo();
+    void textConvertsToCurves();
     void screenshot();
 
 private:
@@ -358,6 +363,102 @@ void CanvasTests::groupUngroupAlignAndOrder()
     QCOMPARE(m_doc->shapes().back().get(), b);
 }
 
+void CanvasTests::textToolTypesAndFinishes()
+{
+    m_canvas->setTool(CanvasWidget::Tool::Text);
+    click(m_canvas, {300, 300});
+    QVERIFY(m_canvas->editedText());
+    QTest::keyClicks(m_canvas, QStringLiteral("Hello"));
+    QTest::keyClick(m_canvas, Qt::Key_Return);
+    QTest::keyClicks(m_canvas, QStringLiteral("World"));
+    QTest::keyClick(m_canvas, Qt::Key_Backspace);
+    QCOMPARE(m_doc->count(), 0); // added only when editing ends
+
+    QTest::keyClick(m_canvas, Qt::Key_Escape);
+    QVERIFY(!m_canvas->editedText());
+    QCOMPARE(m_doc->count(), 1);
+    const Shape &text = *m_doc->shapes()[0];
+    QCOMPARE(text.kind(), ShapeKind::Text);
+    QCOMPARE(text.textData().text, QStringLiteral("Hello\nWorl"));
+    QCOMPARE(m_canvas->selectedShape(), &text);
+
+    m_undo->undo();
+    QCOMPARE(m_doc->count(), 0);
+}
+
+void CanvasTests::emptyTextIsDiscarded()
+{
+    m_canvas->setTool(CanvasWidget::Tool::Text);
+    click(m_canvas, {300, 300});
+    QTest::keyClicks(m_canvas, QStringLiteral("   "));
+    QTest::keyClick(m_canvas, Qt::Key_Escape);
+    QCOMPARE(m_doc->count(), 0);
+    QCOMPARE(m_undo->count(), 0);
+}
+
+void CanvasTests::shortcutsWaitWhileTyping()
+{
+    m_canvas->setTool(CanvasWidget::Tool::Text);
+    click(m_canvas, {300, 300});
+    QTest::keyClicks(m_canvas, QStringLiteral("Hi"));
+
+    // A plain letter belongs to the text, so the window must not treat it as a shortcut.
+    QKeyEvent letter(QEvent::ShortcutOverride, Qt::Key_L, Qt::NoModifier, QStringLiteral("l"));
+    QApplication::sendEvent(m_canvas, &letter);
+    QVERIFY(letter.isAccepted());
+    QVERIFY(m_canvas->editedText());
+
+    // Ctrl+Z is a real shortcut: the text is committed first so undo has something to undo.
+    QKeyEvent undo(QEvent::ShortcutOverride, Qt::Key_Z, Qt::ControlModifier);
+    QApplication::sendEvent(m_canvas, &undo);
+    QVERIFY(!m_canvas->editedText());
+    QCOMPARE(m_doc->count(), 1);
+}
+
+void CanvasTests::doubleClickEditsTextAndUndo()
+{
+    m_canvas->setTool(CanvasWidget::Tool::Text);
+    click(m_canvas, {300, 300});
+    QTest::keyClicks(m_canvas, QStringLiteral("Hello"));
+    QTest::keyClick(m_canvas, Qt::Key_Escape);
+    Shape *text = m_doc->shapes()[0].get();
+
+    m_canvas->setTool(CanvasWidget::Tool::Select);
+    doubleClick(m_canvas, m_canvas->documentToWidget(text->bounds().center()));
+    QCOMPARE(m_canvas->editedText(), text);
+    QTest::keyClick(m_canvas, Qt::Key_Home);
+    QTest::keyClicks(m_canvas, QStringLiteral(">"));
+    QTest::keyClick(m_canvas, Qt::Key_End);
+    QTest::keyClicks(m_canvas, QStringLiteral("!"));
+    QTest::keyClick(m_canvas, Qt::Key_Escape);
+    QCOMPARE(text->textData().text, QStringLiteral(">Hello!"));
+
+    m_undo->undo();
+    QCOMPARE(text->textData().text, QStringLiteral("Hello"));
+
+    // Changing the format of the selected text is undoable too.
+    m_canvas->setSelectedShape(text);
+    TextFormat bold = m_canvas->currentTextFormat();
+    bold.bold = true;
+    m_canvas->setTextFormat(bold);
+    QVERIFY(text->textData().format.bold);
+    m_undo->undo();
+    QVERIFY(!text->textData().format.bold);
+}
+
+void CanvasTests::textConvertsToCurves()
+{
+    m_canvas->setTool(CanvasWidget::Tool::Text);
+    click(m_canvas, {300, 300});
+    QTest::keyClicks(m_canvas, QStringLiteral("OK"));
+    QTest::keyClick(m_canvas, Qt::Key_Escape);
+
+    m_canvas->convertSelectionToCurves();
+    QCOMPARE(m_doc->count(), 1);
+    QCOMPARE(m_doc->shapes()[0]->kind(), ShapeKind::Path);
+    QVERIFY(m_doc->shapes()[0]->pathData().size() >= 2); // the outlines of O (two) and K
+}
+
 // Not an assertion: saves a picture of the canvas for manual review when
 // OPENDRAW_SCREENSHOT_DIR is set.
 void CanvasTests::screenshot()
@@ -389,6 +490,13 @@ void CanvasTests::screenshot()
     m_canvas->setTool(CanvasWidget::Tool::Select);
     m_canvas->selectAll();
     QVERIFY(m_canvas->grab().save(dir + QStringLiteral("/canvas-selection.png")));
+
+    m_canvas->setTool(CanvasWidget::Tool::Text);
+    click(m_canvas, {470, 120});
+    QTest::keyClicks(m_canvas, QStringLiteral("OpenDraw"));
+    QTest::keyClick(m_canvas, Qt::Key_Return);
+    QTest::keyClicks(m_canvas, QStringLiteral("text tool"));
+    QVERIFY(m_canvas->grab().save(dir + QStringLiteral("/canvas-text.png")));
 }
 
 QTEST_MAIN(CanvasTests)

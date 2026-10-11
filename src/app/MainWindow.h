@@ -8,6 +8,8 @@
 
 class QAction;
 class QActionGroup;
+class QDoubleSpinBox;
+class QFontComboBox;
 class QLabel;
 class QToolBar;
 class QUndoStack;
@@ -42,9 +44,11 @@ private slots:
     void updateTitle();
     void updateStyleIndicators();
     void updateNodeActions();
+    void updateTextBar();
 
 private:
     void createActions();
+    void createTextBar();
     const Style &displayedStyle() const;
     void restyleSelection(const QString &text, const std::function<void(Style &)> &change);
     bool maybeSave();
@@ -62,6 +66,14 @@ private:
     QToolBar *m_nodeBar = nullptr;
     QList<QAction *> m_nodeActions; // need an active node
     QAction *m_joinAction = nullptr; // needs two end nodes
+
+    QToolBar *m_textBar = nullptr;
+    QFontComboBox *m_fontBox = nullptr;
+    QDoubleSpinBox *m_fontSizeBox = nullptr;
+    QAction *m_boldAction = nullptr;
+    QAction *m_italicAction = nullptr;
+    QList<QAction *> m_textAlignActions;
+    bool m_updatingTextBar = false;
     QLabel *m_styleLabel = nullptr;
     QLabel *m_zoomLabel = nullptr;
     QLabel *m_positionLabel = nullptr;

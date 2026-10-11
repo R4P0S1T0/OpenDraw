@@ -4,6 +4,7 @@
 #include <QPainterPath>
 #include <QPointF>
 #include <QRectF>
+#include <QString>
 #include <QTransform>
 
 #include <memory>
@@ -51,7 +52,28 @@ struct SubPath {
 
 using PathData = std::vector<SubPath>;
 
-enum class ShapeKind { Rectangle, Ellipse, Path, Group };
+enum class TextAlign { Left, Center, Right };
+
+struct TextFormat {
+    QString family = QStringLiteral("Arial");
+    double size = 32.0; // document units (px); 24 pt
+    bool bold = false;
+    bool italic = false;
+    TextAlign align = TextAlign::Left;
+    double lineSpacing = 1.2; // multiple of the font size
+
+    bool operator==(const TextFormat &) const = default;
+};
+
+// Content of a text object.
+struct TextData {
+    QString text; // lines separated by '\n'
+    TextFormat format;
+
+    bool operator==(const TextData &) const = default;
+};
+
+enum class ShapeKind { Rectangle, Ellipse, Path, Group, Text };
 
 // A drawable object. Geometry is stored in document units (SVG user units, 96 per inch).
 class Shape {
@@ -62,6 +84,9 @@ public:
     explicit Shape(PathData path, const Style &style = {});
     // Group of shapes, in paint order.
     explicit Shape(std::vector<std::unique_ptr<Shape>> children);
+    // Text whose first line sits on a baseline through `origin`; `origin.x` is the left edge,
+    // centre or right edge depending on the alignment.
+    Shape(TextData text, const QPointF &origin, const Style &style);
 
     Shape(const Shape &) = delete;
     Shape &operator=(const Shape &) = delete;
@@ -84,6 +109,11 @@ public:
     // Only meaningful for ShapeKind::Path.
     const PathData &pathData() const { return m_path; }
     void setPathData(PathData path) { m_path = std::move(path); }
+
+    // Only meaningful for ShapeKind::Text.
+    const TextData &textData() const { return m_text; }
+    void setTextData(TextData text) { m_text = std::move(text); }
+    QPointF textOrigin() const { return m_textOrigin; }
 
     // Only meaningful for ShapeKind::Group.
     const std::vector<std::unique_ptr<Shape>> &children() const { return m_children; }
@@ -114,6 +144,8 @@ private:
     QRectF m_bounds;                              // rectangles and ellipses
     PathData m_path;                              // paths
     std::vector<std::unique_ptr<Shape>> m_children; // groups
+    TextData m_text;                                // text
+    QPointF m_textOrigin;                           // text
     Style m_style;
 };
 

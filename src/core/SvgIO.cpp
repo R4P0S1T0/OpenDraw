@@ -82,6 +82,35 @@ void writeShape(QXmlStreamWriter &w, const Shape &shape)
             writeShape(w, *child);
         w.writeEndElement();
         return;
+    case ShapeKind::Text: {
+        const TextFormat &f = shape.textData().format;
+        const QPointF origin = shape.textOrigin();
+        w.writeStartElement(QStringLiteral("text"));
+        w.writeAttribute(QStringLiteral("xml:space"), QStringLiteral("preserve"));
+        w.writeAttribute(QStringLiteral("x"), number(origin.x()));
+        w.writeAttribute(QStringLiteral("y"), number(origin.y()));
+        w.writeAttribute(QStringLiteral("font-family"), f.family);
+        w.writeAttribute(QStringLiteral("font-size"), number(f.size));
+        if (f.bold)
+            w.writeAttribute(QStringLiteral("font-weight"), QStringLiteral("bold"));
+        if (f.italic)
+            w.writeAttribute(QStringLiteral("font-style"), QStringLiteral("italic"));
+        if (f.align != TextAlign::Left)
+            w.writeAttribute(QStringLiteral("text-anchor"),
+                             f.align == TextAlign::Center ? QStringLiteral("middle") : QStringLiteral("end"));
+        writeStyle(w, shape.style());
+        // One tspan per line, each on its own baseline.
+        const QStringList lines = shape.textData().text.split(QLatin1Char('\n'));
+        for (int i = 0; i < lines.size(); ++i) {
+            w.writeStartElement(QStringLiteral("tspan"));
+            w.writeAttribute(QStringLiteral("x"), number(origin.x()));
+            w.writeAttribute(QStringLiteral("y"), number(origin.y() + i * f.size * f.lineSpacing));
+            w.writeCharacters(lines[i]);
+            w.writeEndElement();
+        }
+        w.writeEndElement();
+        return;
+    }
     }
     writeStyle(w, shape.style());
     w.writeEndElement();
@@ -196,8 +225,10 @@ std::optional<QColor> parseColor(QStringView text)
 
 // Presentation properties that children inherit from their groups.
 const QString kInheritedProperties[] = {
-    QStringLiteral("fill"),           QStringLiteral("stroke"),         QStringLiteral("stroke-width"),
-    QStringLiteral("fill-opacity"),   QStringLiteral("stroke-opacity"), QStringLiteral("color"),
+    QStringLiteral("fill"),        QStringLiteral("stroke"),      QStringLiteral("stroke-width"),
+    QStringLiteral("fill-opacity"), QStringLiteral("stroke-opacity"), QStringLiteral("color"),
+    QStringLiteral("font-family"), QStringLiteral("font-size"),   QStringLiteral("font-weight"),
+    QStringLiteral("font-style"),  QStringLiteral("text-anchor"), QStringLiteral("xml:space"),
 };
 
 // Elements whose children are never drawn directly.
@@ -212,7 +243,7 @@ bool isNonRendering(QStringView name)
 // Drawing elements OpenDraw does not import yet; reported so nothing disappears silently.
 bool isUnsupportedGraphic(QStringView name)
 {
-    static const QStringView names[] = {u"text", u"image", u"use", u"foreignObject", u"switch"};
+    static const QStringView names[] = {u"image", u"use", u"foreignObject", u"switch", u"textPath"};
     return std::find(std::begin(names), std::end(names), name) != std::end(names);
 }
 
@@ -328,6 +359,103 @@ std::unique_ptr<Shape> makePathShape(PathData path, const QTransform &t, const S
     return std::make_unique<Shape>(std::move(path), style);
 }
 
+std::optional<double> firstNumber(QStringView text)
+{
+    const std::vector<double> values = parseNumberList(text);
+    if (values.empty())
+        return std::nullopt;
+    return values.front();
+}
+
+TextFormat textFormat(const Properties &props)
+{
+    TextFormat format;
+    QString family = props.value(QStringLiteral("font-family")).section(QLatin1Char(','), 0, 0).trimmed();
+    family.remove(QLatin1Char('"')).remove(QLatin1Char('\''));
+    if (!family.isEmpty())
+        format.family = family;
+    format.size = props.length(QStringLiteral("font-size"), 16.0);
+    const QString weight = props.value(QStringLiteral("font-weight"));
+    format.bold = weight == u"bold" || weight == u"bolder" || weight.toInt() >= 600;
+    const QString style = props.value(QStringLiteral("font-style"));
+    format.italic = style == u"italic" || style == u"oblique";
+    const QString anchor = props.value(QStringLiteral("text-anchor"));
+    if (anchor == u"middle")
+        format.align = TextAlign::Center;
+    else if (anchor == u"end")
+        format.align = TextAlign::Right;
+    return format;
+}
+
+// Reads a whole <text> element (the reader sits on its start tag) into a text object.
+// Each <tspan> with its own y or dy starts a new line.
+std::unique_ptr<Shape> readText(QXmlStreamReader &r, const Properties &props, const Context &context,
+                                ReadReport &report)
+{
+    const QXmlStreamAttributes attributes = r.attributes();
+    std::optional<double> x = firstNumber(attributes.value(QStringLiteral("x")));
+    std::optional<double> y = firstNumber(attributes.value(QStringLiteral("y")));
+    const bool preserveSpace = props.value(QStringLiteral("xml:space")) == u"preserve";
+    TextFormat format = textFormat(props);
+
+    QStringList lines;
+    QString current;
+    std::vector<double> lineBaselines;
+    int depth = 1;
+    while (depth > 0 && !r.atEnd()) {
+        r.readNext();
+        if (r.isStartElement()) {
+            ++depth;
+            if (r.name() != u"tspan")
+                continue;
+            const QXmlStreamAttributes a = r.attributes();
+            const auto tx = firstNumber(a.value(QStringLiteral("x")));
+            const auto ty = firstNumber(a.value(QStringLiteral("y")));
+            if (!x && tx)
+                x = tx;
+            if (!y && ty)
+                y = ty;
+            const bool newLine = ty || a.hasAttribute(QStringLiteral("dy"));
+            if (newLine && (!current.isEmpty() || !lines.isEmpty())) {
+                lines << current;
+                current.clear();
+            }
+            if (ty)
+                lineBaselines.push_back(*ty);
+        } else if (r.isEndElement()) {
+            --depth;
+        } else if (r.isCharacters()) {
+            // Whitespace directly inside <text> is layout of the XML file, not content.
+            if (depth == 1 && r.isWhitespace())
+                continue;
+            current += r.text();
+        }
+    }
+    lines << current;
+
+    if (!preserveSpace) {
+        static const QRegularExpression spaces(QStringLiteral("\\s+"));
+        for (QString &line : lines)
+            line = line.replace(spaces, QStringLiteral(" ")).trimmed();
+    }
+    while (lines.size() > 1 && lines.back().isEmpty())
+        lines.removeLast();
+    if (lines.join(QString()).trimmed().isEmpty())
+        return nullptr;
+
+    if (lineBaselines.size() >= 2 && format.size > 0.0)
+        format.lineSpacing = (lineBaselines[1] - lineBaselines[0]) / format.size;
+
+    const QTransform &t = context.transform;
+    const double scale = std::sqrt(std::abs(t.determinant()));
+    if (t.type() > QTransform::TxScale)
+        ++report.skippedElements[QCoreApplication::translate("SvgIO", "rotated or skewed text (shown upright)")];
+    format.size *= scale;
+    const QPointF origin = t.map(QPointF(x.value_or(0.0), y.value_or(0.0)));
+    Style style = props.style(scale, report);
+    return std::make_unique<Shape>(TextData{lines.join(QLatin1Char('\n')), format}, origin, style);
+}
+
 PathData pointsToPath(QStringView points, bool closed)
 {
     const std::vector<double> v = parseNumberList(points);
@@ -435,6 +563,10 @@ bool read(QIODevice *device, Document &document, QString *errorMessage, ReadRepo
                 pageSize = {props.length(QStringLiteral("width"), pageSize.width()),
                             props.length(QStringLiteral("height"), pageSize.height())};
             }
+        } else if (name == u"text" && context.rendering) {
+            if (auto text = readText(r, props, context, localReport))
+                containers.back().push_back(std::move(text));
+            continue; // readText consumed the whole element, end tag included
         } else if (context.rendering) {
             const QTransform &t = context.transform;
             const double strokeScale = std::sqrt(std::abs(t.determinant()));

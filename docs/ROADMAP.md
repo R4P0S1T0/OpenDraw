@@ -30,7 +30,8 @@ Rough order of work. Items move as contributors pick them up.
 - [x] Packaged builds: Windows .zip and Linux AppImage from CI, GitHub release on version tags
 - [x] Multiple selection (Shift+click, rubber band, select all), moving and resizing several objects
 - [x] Groups (also imported from and saved as SVG `<g>`), ordering, alignment and distribution
-- [ ] Text objects
+- [x] Text objects: font, size, bold, italic, alignment, multiple lines; SVG `<text>` import and export; convert to curves
+- [ ] Text: selecting part of a text, per-character formatting, text on a path, paragraph frames
 - [ ] Layers and multiple pages
 
 ## 0.4 — No more locked files

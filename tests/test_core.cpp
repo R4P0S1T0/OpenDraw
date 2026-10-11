@@ -87,7 +87,9 @@ void CoreTests::readsCircleUnitsAndStyleAttribute()
     Document doc;
     QVERIFY(svg::read(&buffer, doc));
     QCOMPARE(doc.pageSize(), QSizeF(100 * kUnitsPerMm, 50 * kUnitsPerMm));
-    QCOMPARE(doc.count(), 1);
+    QCOMPARE(doc.count(), 2);
+    QCOMPARE(doc.shapes()[1]->kind(), ShapeKind::Text);
+    QCOMPARE(doc.shapes()[1]->textData().text, QStringLiteral("ignored"));
     QCOMPARE(doc.shapes()[0]->kind(), ShapeKind::Group);
     const Shape &circle = *doc.shapes()[0]->children()[0];
     QCOMPARE(circle.kind(), ShapeKind::Ellipse);
@@ -224,13 +226,12 @@ void CoreTests::opensNewerFormatAndReportsSkipped()
     Document doc;
     svg::ReadReport report;
     QVERIFY(svg::read(&buffer, doc, nullptr, &report));
-    QCOMPARE(doc.count(), 2);
+    QCOMPARE(doc.count(), 3); // rect, path and text
     QCOMPARE(doc.pageSize(), QSizeF(200, 100));
     QCOMPARE(report.formatVersion, 99);
     QVERIFY(report.isNewerFormat());
     QCOMPARE(report.skippedElements.value(QStringLiteral("<image>")), 2);
-    QCOMPARE(report.skippedElements.value(QStringLiteral("<text>")), 1);
-    QCOMPARE(report.skippedCount(), 3);
+    QCOMPARE(report.skippedCount(), 2);
 }
 
 void CoreTests::importsGroupsTransformsAndInheritedStyle()
@@ -406,5 +407,5 @@ void CoreTests::pathsSurviveSaveAndOpen()
     QCOMPARE(loaded.shapes()[0]->pathData(), original.shapes()[0]->pathData());
 }
 
-QTEST_GUILESS_MAIN(CoreTests)
+QTEST_MAIN(CoreTests)
 #include "test_core.moc"

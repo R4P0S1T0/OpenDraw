@@ -3,6 +3,7 @@
 #include "core/Commands.h"
 #include "core/Document.h"
 #include "core/PathOps.h"
+#include "core/TextLayout.h"
 
 #include <QKeyEvent>
 #include <QMouseEvent>
@@ -51,6 +52,10 @@ CanvasWidget::CanvasWidget(Document *document, QUndoStack *undoStack, QWidget *p
 
     connect(m_document, &Document::changed, this, qOverload<>(&QWidget::update));
     connect(m_document, &Document::shapeRemoved, this, [this](Shape *shape) {
+        if (shape == m_editText && !m_pendingText) {
+            m_editText = nullptr;
+            emit textEditingChanged();
+        }
         if (!isSelected(shape))
             return;
         std::vector<Shape *> remaining = m_selection;
@@ -67,6 +72,7 @@ void CanvasWidget::setTool(Tool tool)
 {
     if (tool == m_tool)
         return;
+    finishTextEdit();
     if (m_tool == Tool::Bezier)
         finishCurve();
     m_tool = tool;
@@ -163,8 +169,217 @@ void CanvasWidget::updateCursor()
         setCursor(Qt::OpenHandCursor);
     else if (m_tool == Tool::Select || m_tool == Tool::Node)
         unsetCursor();
+    else if (m_tool == Tool::Text)
+        setCursor(Qt::IBeamCursor);
     else
         setCursor(Qt::CrossCursor);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Text tool
+
+TextFormat CanvasWidget::currentTextFormat() const
+{
+    if (m_editText)
+        return m_editText->textData().format;
+    if (const Shape *shape = selectedShape(); shape && shape->kind() == ShapeKind::Text)
+        return shape->textData().format;
+    return m_defaultTextFormat;
+}
+
+void CanvasWidget::setTextFormat(const TextFormat &format)
+{
+    if (m_editText) {
+        TextData data = m_editText->textData();
+        data.format = format;
+        m_editText->setTextData(std::move(data));
+        m_defaultTextFormat = format;
+        if (m_pendingText)
+            update();
+        else
+            m_document->notifyShapeChanged(m_editText);
+        return;
+    }
+
+    std::vector<Shape *> texts;
+    for (Shape *shape : m_selection) {
+        shape->forEachLeaf([&texts](Shape &leaf) {
+            if (leaf.kind() == ShapeKind::Text)
+                texts.push_back(&leaf);
+        });
+    }
+    if (texts.empty()) {
+        m_defaultTextFormat = format;
+        return;
+    }
+    m_undoStack->beginMacro(tr("Text format"));
+    for (Shape *text : texts) {
+        TextData data = text->textData();
+        data.format = format;
+        if (data != text->textData())
+            m_undoStack->push(new SetTextCommand(m_document, text, text->textData(), data, tr("Text format")));
+    }
+    m_undoStack->endMacro();
+}
+
+void CanvasWidget::beginTextEdit(Shape *text)
+{
+    finishTextEdit();
+    setSelectedShape(text);
+    m_editText = text;
+    m_textBeforeEdit = text->textData();
+    m_textCursor = int(text->textData().text.size());
+    update();
+    emit textEditingChanged();
+}
+
+void CanvasWidget::beginNewText(const QPointF &origin)
+{
+    finishTextEdit();
+    setSelection({});
+    const Style style{QColor(Qt::black), QColor(Qt::transparent), 0.0};
+    m_pendingText = std::make_unique<Shape>(TextData{QString(), m_defaultTextFormat}, origin, style);
+    m_editText = m_pendingText.get();
+    m_textBeforeEdit = {};
+    m_textCursor = 0;
+    update();
+    emit textEditingChanged();
+}
+
+void CanvasWidget::finishTextEdit()
+{
+    if (!m_editText)
+        return;
+    Shape *text = m_editText;
+    m_editText = nullptr;
+
+    if (m_pendingText) {
+        std::unique_ptr<Shape> pending = std::move(m_pendingText);
+        if (!pending->textData().text.trimmed().isEmpty())
+            addNewShape(std::move(pending));
+    } else {
+        const TextData now = text->textData();
+        if (now.text.trimmed().isEmpty()) {
+            // Typing everything away deletes the text; undo brings back the original.
+            text->setTextData(m_textBeforeEdit);
+            m_undoStack->push(new RemoveShapeCommand(m_document, text));
+        } else if (now != m_textBeforeEdit) {
+            m_undoStack->push(new SetTextCommand(m_document, text, m_textBeforeEdit, now, tr("Edit text")));
+        }
+    }
+    update();
+    emit textEditingChanged();
+}
+
+void CanvasWidget::setEditedText(const QString &text, int cursor)
+{
+    TextData data = m_editText->textData();
+    data.text = text;
+    m_editText->setTextData(std::move(data));
+    m_textCursor = std::clamp(cursor, 0, int(text.size()));
+    if (m_pendingText)
+        update();
+    else
+        m_document->notifyShapeChanged(m_editText);
+}
+
+bool CanvasWidget::isTextEditingKey(const QKeyEvent *event)
+{
+    switch (event->key()) {
+    case Qt::Key_Backspace:
+    case Qt::Key_Delete:
+    case Qt::Key_Return:
+    case Qt::Key_Enter:
+    case Qt::Key_Left:
+    case Qt::Key_Right:
+    case Qt::Key_Home:
+    case Qt::Key_End:
+    case Qt::Key_Escape:
+        return true;
+    default:
+        break;
+    }
+    if (event->modifiers() & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier))
+        return false;
+    const QString text = event->text();
+    return !text.isEmpty() && text.at(0).isPrint();
+}
+
+bool CanvasWidget::handleTextKey(QKeyEvent *event)
+{
+    const QString text = m_editText->textData().text;
+    const int cursor = m_textCursor;
+    switch (event->key()) {
+    case Qt::Key_Escape:
+        finishTextEdit();
+        return true;
+    case Qt::Key_Return:
+    case Qt::Key_Enter:
+        setEditedText(text.left(cursor) + QLatin1Char('\n') + text.mid(cursor), cursor + 1);
+        return true;
+    case Qt::Key_Backspace:
+        if (cursor > 0)
+            setEditedText(text.left(cursor - 1) + text.mid(cursor), cursor - 1);
+        return true;
+    case Qt::Key_Delete:
+        if (cursor < text.size())
+            setEditedText(text.left(cursor) + text.mid(cursor + 1), cursor);
+        return true;
+    case Qt::Key_Left:
+        m_textCursor = std::max(0, cursor - 1);
+        update();
+        return true;
+    case Qt::Key_Right:
+        m_textCursor = std::min(int(text.size()), cursor + 1);
+        update();
+        return true;
+    case Qt::Key_Home:
+        m_textCursor = int(text.lastIndexOf(QLatin1Char('\n'), cursor - 1)) + 1;
+        update();
+        return true;
+    case Qt::Key_End: {
+        const int end = int(text.indexOf(QLatin1Char('\n'), cursor));
+        m_textCursor = end < 0 ? int(text.size()) : end;
+        update();
+        return true;
+    }
+    default:
+        break;
+    }
+    if (!isTextEditingKey(event))
+        return false;
+    const QString typed = event->text();
+    setEditedText(text.left(cursor) + typed + text.mid(cursor), cursor + int(typed.size()));
+    return true;
+}
+
+bool CanvasWidget::event(QEvent *event)
+{
+    // While typing, keys that edit text must not trigger the window's shortcuts (L aligns,
+    // Delete removes the object...). Other shortcuts end the editing and then run.
+    if (event->type() == QEvent::ShortcutOverride && m_editText) {
+        auto *key = static_cast<QKeyEvent *>(event);
+        if (isTextEditingKey(key)) {
+            event->accept();
+            return true;
+        }
+        finishTextEdit();
+    }
+    return QWidget::event(event);
+}
+
+void CanvasWidget::paintTextEdit(QPainter &painter)
+{
+    if (!m_editText)
+        return;
+    const QColor highlight = palette().color(QPalette::Highlight);
+    painter.setPen(QPen(highlight, 1, Qt::DashLine));
+    painter.setBrush(Qt::NoBrush);
+    painter.drawRect(viewTransform().mapRect(m_editText->bounds()).adjusted(-3, -3, 3, 3));
+
+    const QLineF caret = textlayout::caret(m_editText->textData(), m_editText->textOrigin(), m_textCursor);
+    painter.setPen(QPen(Qt::black, 1.5));
+    painter.drawLine(toWidget(caret.p1()), toWidget(caret.p2()));
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -594,6 +809,8 @@ void CanvasWidget::paintEvent(QPaintEvent *)
 
     for (const auto &shape : m_document->shapes())
         paintShape(painter, *shape);
+    if (m_pendingText)
+        paintShape(painter, *m_pendingText);
 
     QPen preview(palette().color(QPalette::Highlight), 0, Qt::DashLine);
     preview.setCosmetic(true);
@@ -612,7 +829,10 @@ void CanvasWidget::paintEvent(QPaintEvent *)
     }
 
     painter.resetTransform();
-    paintSelection(painter);
+    if (m_editText)
+        paintTextEdit(painter);
+    else
+        paintSelection(painter);
     paintBezierPreview(painter);
 
     if (m_drag == Drag::Marquee) {
@@ -771,10 +991,32 @@ void CanvasWidget::mousePressEvent(QMouseEvent *event)
     if (event->button() != Qt::LeftButton)
         return;
 
+    if (m_editText) {
+        // Clicking inside the text being edited keeps editing; anywhere else ends it.
+        if (m_editText->bounds().contains(docPos)) {
+            m_textCursor = int(m_editText->textData().text.size());
+            update();
+            return;
+        }
+        finishTextEdit();
+    }
+
     m_dragStart = m_dragLast = docPos;
     const double tolerance = kHitTolerancePx / m_zoom;
 
     switch (m_tool) {
+    case Tool::Text: {
+        Shape *hit = m_document->shapeAt(docPos, tolerance);
+        if (hit && hit->kind() == ShapeKind::Text) {
+            beginTextEdit(hit);
+        } else {
+            // The click marks the top-left of the text; the first baseline sits one ascent below.
+            const double ascent = m_defaultTextFormat.size * 0.8;
+            beginNewText(docPos + QPointF(0, ascent));
+        }
+        break;
+    }
+
     case Tool::Select: {
         if (const int handle = resizeHandleAt(pos); handle >= 0 && !shift) {
             m_drag = Drag::Resize;
@@ -1099,6 +1341,14 @@ void CanvasWidget::mouseDoubleClickEvent(QMouseEvent *event)
         return;
     }
 
+    if (m_tool == Tool::Select) {
+        // Double-click a text to type into it.
+        Shape *hit = m_document->shapeAt(toDocument(event->position()), kHitTolerancePx / m_zoom);
+        if (hit && hit->kind() == ShapeKind::Text)
+            beginTextEdit(hit);
+        return;
+    }
+
     if (m_tool == Tool::Node && selectedPath()) {
         // Double-click a node to delete it, or a segment to add a node there.
         if (const NodeRef node = nodeAt(event->position()); node.isValid()) {
@@ -1134,6 +1384,8 @@ void CanvasWidget::wheelEvent(QWheelEvent *event)
 
 void CanvasWidget::keyPressEvent(QKeyEvent *event)
 {
+    if (m_editText && handleTextKey(event))
+        return;
     if (event->key() == Qt::Key_Space && !event->isAutoRepeat()) {
         m_spaceHeld = true;
         updateCursor();

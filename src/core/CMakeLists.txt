@@ -11,6 +11,8 @@ add_library(opendraw_core STATIC
     Shape.h
     SvgIO.cpp
     SvgIO.h
+    TextLayout.cpp
+    TextLayout.h
 )
 
 target_include_directories(opendraw_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/..)
