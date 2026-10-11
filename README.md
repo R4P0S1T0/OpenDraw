@@ -66,7 +66,7 @@ The workspace follows the layout desktop designers know: menu bar and standard t
 | Zoom | Mouse wheel (around the cursor), `Ctrl` `+` / `Ctrl` `-`, the zoom box on the standard toolbar, `Shift` `F4` fits the page, `Shift` `F2` the selection. Zoom tool (`Z`): click to zoom in, `Shift`+click or right-click to zoom out, drag around an area |
 | Pan | Pan tool (`H`, in the zoom flyout), the scroll bars, the middle mouse button, or hold `Space` and drag |
 | Delete | `Delete` |
-| Layers | Layers panel on the right: checkbox shows/hides, Locked column locks, double-click renames, the bold layer receives new objects. `+` / `−` / `↑` / `↓` add, delete and reorder; *Move here* moves the selection to the highlighted layer |
+| Objects docker | On the right (Window › Dockers › Objects): every page, its layers and their objects, topmost first, with groups that open. Click objects to select them on the drawing (and the other way round), double-click to rename a page, layer or object (names are saved), drag objects to restack them or onto another layer. The eye and lock icons show/hide and lock layers; the bold layer receives new objects. Buttons: new layer, delete, move up/down, *Move here* (selection to the active layer); right-click for more |
 | Pages | Page navigator under the drawing: ⊕ inserts a page before or after the current one, arrows go to the first, previous, next and last page, right-click or double-click a page tab to rename or delete it. `PgUp` / `PgDn` also switch pages |
 | Open CorelDRAW files | `Ctrl` `O` and pick a `.cdr` file, or pass it on the command line. A report lists anything that could not be imported |
 | Import | `Ctrl` `I` adds the objects of an SVG or CorelDRAW file to the current page |

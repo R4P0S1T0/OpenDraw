@@ -16,10 +16,10 @@ add_library(opendraw_ui STATIC
     Icons.h
     Language.cpp
     Language.h
-    LayersPanel.cpp
-    LayersPanel.h
     MainWindow.cpp
     MainWindow.h
+    ObjectsPanel.cpp
+    ObjectsPanel.h
     PageBar.cpp
     PageBar.h
     PropertyBar.cpp

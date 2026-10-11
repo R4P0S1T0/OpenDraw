@@ -24,7 +24,8 @@ Rough order of work. Items move as contributors pick them up.
 - [x] Polygon, star, spiral, graph paper and 2-point line tools; rounded rectangle corners; colour eyedropper; Ctrl/Shift constraints and Space to switch to the pick tool
 - [x] Rotating and skewing: second click on a selection, rotation centre, angle on the property bar, rotate 90°/180°; rectangles, ellipses and text keep their kind (saved as SVG transforms with non-scaling outlines)
 - [ ] Drop shadow and transparency tools, smart fill
-- [ ] Objects docker (pages, layers and objects as a tree) and Properties docker
+- [x] Objects docker: pages, layers and objects as a tree, selection in both directions, renaming (object names saved as Inkscape labels), drag and drop to restack or change layers
+- [ ] Properties docker (fill, outline and transparency of the selection)
 - [ ] Several documents open at once (one tab each)
 - [x] Translatable interface; Brazilian Portuguese translation, chosen from the system language or View › Language
 - [ ] More languages (see CONTRIBUTING.md › Translations)

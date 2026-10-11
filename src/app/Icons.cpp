@@ -372,6 +372,69 @@ void draw(QPainter &p, Icon id, const QColor &ink, const QColor &accent, const Q
         polygon({tip + QPointF(-3.5, -2.5), tip + QPointF(3, -3.5), tip + QPointF(0.5, 3)});
         break;
     }
+    case Icon::Eye:
+    case Icon::EyeOff: {
+        QPainterPath eye;
+        eye.moveTo(2.5, 12);
+        eye.quadTo(12, 3, 21.5, 12);
+        eye.quadTo(12, 21, 2.5, 12);
+        p.drawPath(eye);
+        p.drawEllipse(QPointF(12, 12), 3, 3);
+        if (id == Icon::EyeOff) {
+            p.setPen(QPen(ink, 1.8, Qt::SolidLine, Qt::RoundCap));
+            p.drawLine(QPointF(4, 20), QPointF(20, 4));
+        }
+        break;
+    }
+    case Icon::Lock:
+    case Icon::Unlock: {
+        p.drawRoundedRect(QRectF(6, 11, 12, 9), 1.5, 1.5);
+        QPainterPath shackle;
+        shackle.moveTo(8.5, 11);
+        shackle.lineTo(8.5, 8);
+        shackle.arcTo(QRectF(8.5, 4, 7, 7), 180, -180);
+        if (id == Icon::Lock)
+            shackle.lineTo(15.5, 11);
+        else
+            shackle.lineTo(15.5, 8.5);
+        p.drawPath(shackle);
+        if (id == Icon::Lock) {
+            p.setBrush(ink);
+            p.drawEllipse(QPointF(12, 15.5), 1.2, 1.2);
+        }
+        break;
+    }
+    case Icon::Layer: {
+        // Three stacked sheets.
+        auto sheet = [&](double y) {
+            polygon({{12, y}, {21, y + 4.5}, {12, y + 9}, {3, y + 4.5}});
+        };
+        p.setBrush(paper);
+        sheet(10);
+        sheet(7);
+        p.setPen(QPen(accent, 1.5, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        sheet(4);
+        break;
+    }
+    case Icon::Page:
+        polygon({{6, 3}, {14, 3}, {18, 7}, {18, 21}, {6, 21}});
+        polyline({{14, 3}, {14, 7}, {18, 7}});
+        break;
+    case Icon::Group:
+        p.drawRect(QRectF(4, 4, 9, 9));
+        p.setBrush(paper);
+        p.drawEllipse(QRectF(10, 10, 10, 10));
+        p.setPen(QPen(accent, 1, Qt::DashLine));
+        p.setBrush(Qt::NoBrush);
+        p.drawRect(QRectF(2, 2, 20, 20));
+        break;
+    case Icon::Bitmap:
+        p.drawRect(QRectF(3, 5, 18, 14));
+        polyline({{3, 17}, {9, 11}, {13, 15}, {16, 12}, {21, 17}});
+        p.setBrush(accent);
+        p.setPen(Qt::NoPen);
+        p.drawEllipse(QPointF(16, 9), 1.8, 1.8);
+        break;
     case Icon::ScrollUp:
     case Icon::ScrollDown:
     case Icon::ScrollLeft:

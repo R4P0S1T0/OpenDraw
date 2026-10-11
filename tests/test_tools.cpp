@@ -50,7 +50,31 @@ private slots:
     void readsInkscapeGuides();
     void rotatedShapesStayEditable();
     void rotatedTextAndSvg();
+    void objectNamesAreSaved();
 };
+
+// Names given in the Objects docker are stored as Inkscape labels.
+void ToolTests::objectNamesAreSaved()
+{
+    Document doc;
+    Shape *rect = doc.insertShape(-1, std::make_unique<Shape>(ShapeKind::Rectangle, QRectF(0, 0, 10, 10)));
+    std::vector<std::unique_ptr<Shape>> members;
+    members.push_back(std::make_unique<Shape>(ShapeKind::Ellipse, QRectF(20, 0, 10, 10)));
+    Shape *group = doc.insertShape(-1, std::make_unique<Shape>(std::move(members)));
+    QUndoStack undo;
+    undo.push(new RenameShapeCommand(&doc, rect, QStringLiteral("Logo")));
+    group->setName(QStringLiteral("Ícones"));
+    group->children().front()->setName(QStringLiteral("Círculo"));
+
+    const QByteArray data = writeSvg(doc);
+    QVERIFY(data.contains("inkscape:label=\"Logo\""));
+    auto copy = readSvg(data);
+    QCOMPARE(copy->shapes()[0]->name(), QStringLiteral("Logo"));
+    QCOMPARE(copy->shapes()[1]->name(), QStringLiteral("Ícones"));
+    QCOMPARE(copy->shapes()[1]->children().front()->name(), QStringLiteral("Círculo"));
+    undo.undo();
+    QVERIFY(rect->name().isEmpty());
+}
 
 namespace {
 QTransform rotationAround(const QPointF &c, double degrees)

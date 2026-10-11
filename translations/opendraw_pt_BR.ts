@@ -103,6 +103,10 @@
         <translation>Renomear página</translation>
     </message>
     <message>
+        <source>Rename object</source>
+        <translation>Renomear objeto</translation>
+    </message>
+    <message>
         <source>Corner radius</source>
         <translation>Raio do canto</translation>
     </message>
@@ -445,73 +449,14 @@ Clique esquerdo: preenchimento · Clique direito: contorno</translation>
     </message>
 </context>
 <context>
-    <name>opendraw::LayersPanel</name>
-    <message>
-        <source>Layer (visible)</source>
-        <translation>Camada (visível)</translation>
-    </message>
-    <message>
-        <source>Locked</source>
-        <translation>Travada</translation>
-    </message>
-    <message>
-        <source>Double-click a name to rename the layer. The highlighted layer receives new objects.</source>
-        <translation>Clique duas vezes em um nome para renomear a camada. A camada destacada recebe os novos objetos.</translation>
-    </message>
-    <message>
-        <source>New layer</source>
-        <translation>Nova camada</translation>
-    </message>
-    <message>
-        <source>Delete layer</source>
-        <translation>Excluir camada</translation>
-    </message>
-    <message>
-        <source>Move layer up</source>
-        <translation>Mover camada para cima</translation>
-    </message>
-    <message>
-        <source>Move layer down</source>
-        <translation>Mover camada para baixo</translation>
-    </message>
-    <message>
-        <source>Move here</source>
-        <translation>Mover para cá</translation>
-    </message>
-    <message>
-        <source>Move the selected objects to this layer</source>
-        <translation>Mover os objetos selecionados para esta camada</translation>
-    </message>
-    <message>
-        <source>Rename layer</source>
-        <translation>Renomear camada</translation>
-    </message>
-    <message>
-        <source>Show layer</source>
-        <translation>Mostrar camada</translation>
-    </message>
-    <message>
-        <source>Hide layer</source>
-        <translation>Ocultar camada</translation>
-    </message>
-    <message>
-        <source>Lock layer</source>
-        <translation>Travar camada</translation>
-    </message>
-    <message>
-        <source>Unlock layer</source>
-        <translation>Destravar camada</translation>
-    </message>
-</context>
-<context>
     <name>opendraw::MainWindow</name>
     <message>
         <source>Document palette: the colours used in this drawing</source>
         <translation>Paleta de documentos: as cores usadas neste desenho</translation>
     </message>
     <message>
-        <source>Layers</source>
-        <translation>Camadas</translation>
+        <source>Objects</source>
+        <translation>Objetos</translation>
     </message>
     <message>
         <source>Color Palette</source>
@@ -1352,6 +1297,140 @@ Clique esquerdo: preenchimento · Clique direito: contorno</translation>
     <message>
         <source>&lt;p&gt;&lt;img src=&quot;:/opendraw-icon-256.png&quot; width=&quot;96&quot; height=&quot;96&quot;&gt;&lt;/p&gt;&lt;h3&gt;OpenDraw %1&lt;/h3&gt;&lt;p&gt;A free, open-source, cross-platform vector graphics editor.&lt;/p&gt;&lt;p&gt;Licensed under the GNU General Public License v3.0 or later.&lt;/p&gt;&lt;p&gt;&lt;a href=&quot;https://github.com/R4P0S1T0/OpenDraw&quot;&gt;github.com/R4P0S1T0/OpenDraw&lt;/a&gt;&lt;/p&gt;</source>
         <translation>&lt;p&gt;&lt;img src=&quot;:/opendraw-icon-256.png&quot; width=&quot;96&quot; height=&quot;96&quot;&gt;&lt;/p&gt;&lt;h3&gt;OpenDraw %1&lt;/h3&gt;&lt;p&gt;Um editor de gráficos vetoriais livre, de código aberto e multiplataforma.&lt;/p&gt;&lt;p&gt;Licenciado sob a GNU General Public License v3.0 ou posterior.&lt;/p&gt;&lt;p&gt;&lt;a href=&quot;https://github.com/R4P0S1T0/OpenDraw&quot;&gt;github.com/R4P0S1T0/OpenDraw&lt;/a&gt;&lt;/p&gt;</translation>
+    </message>
+</context>
+<context>
+    <name>opendraw::ObjectsPanel</name>
+    <message>
+        <source>Rectangle</source>
+        <translation>Retângulo</translation>
+    </message>
+    <message>
+        <source>Ellipse</source>
+        <translation>Elipse</translation>
+    </message>
+    <message>
+        <source>Curve</source>
+        <translation>Curva</translation>
+    </message>
+    <message numerus="yes">
+        <source>Group of %n object(s)</source>
+        <translation>
+            <numerusform>Grupo de %n objeto</numerusform>
+            <numerusform>Grupo de %n objetos</numerusform>
+        </translation>
+    </message>
+    <message>
+        <source>Text: %1</source>
+        <translation>Texto: %1</translation>
+    </message>
+    <message>
+        <source>Bitmap</source>
+        <translation>Bitmap</translation>
+    </message>
+    <message>
+        <source>Click to select, double-click to rename, drag objects to restack them or move them to another layer. The bold layer receives new objects.</source>
+        <translation>Clique para selecionar, clique duas vezes para renomear, arraste objetos para mudar a ordem ou levá-los a outra camada. A camada em negrito recebe os novos objetos.</translation>
+    </message>
+    <message>
+        <source>New layer</source>
+        <translation>Nova camada</translation>
+    </message>
+    <message>
+        <source>Delete the selected objects, or the layer</source>
+        <translation>Excluir os objetos selecionados, ou a camada</translation>
+    </message>
+    <message>
+        <source>Move up: selected objects one step forward, or the layer up</source>
+        <translation>Subir: objetos selecionados um nível à frente, ou a camada para cima</translation>
+    </message>
+    <message>
+        <source>Move down: selected objects one step back, or the layer down</source>
+        <translation>Descer: objetos selecionados um nível para trás, ou a camada para baixo</translation>
+    </message>
+    <message>
+        <source>Move here</source>
+        <translation>Mover para cá</translation>
+    </message>
+    <message>
+        <source>Move the selected objects to this layer</source>
+        <translation>Mover os objetos selecionados para esta camada</translation>
+    </message>
+    <message>
+        <source>Visible: click to hide</source>
+        <translation>Visível: clique para ocultar</translation>
+    </message>
+    <message>
+        <source>Hidden: click to show</source>
+        <translation>Oculta: clique para mostrar</translation>
+    </message>
+    <message>
+        <source>Locked: click to unlock</source>
+        <translation>Travada: clique para destravar</translation>
+    </message>
+    <message>
+        <source>Editable: click to lock</source>
+        <translation>Editável: clique para travar</translation>
+    </message>
+    <message>
+        <source>Hide layer</source>
+        <translation>Ocultar camada</translation>
+    </message>
+    <message>
+        <source>Show layer</source>
+        <translation>Mostrar camada</translation>
+    </message>
+    <message>
+        <source>Unlock layer</source>
+        <translation>Destravar camada</translation>
+    </message>
+    <message>
+        <source>Lock layer</source>
+        <translation>Travar camada</translation>
+    </message>
+    <message>
+        <source>Rename layer</source>
+        <translation>Renomear camada</translation>
+    </message>
+    <message>
+        <source>Move objects</source>
+        <translation>Mover objetos</translation>
+    </message>
+    <message>
+        <source>Rename</source>
+        <translation>Renomear</translation>
+    </message>
+    <message>
+        <source>Group</source>
+        <translation>Agrupar</translation>
+    </message>
+    <message>
+        <source>Ungroup</source>
+        <translation>Desagrupar</translation>
+    </message>
+    <message>
+        <source>To Front</source>
+        <translation>Para a frente</translation>
+    </message>
+    <message>
+        <source>To Back</source>
+        <translation>Para trás</translation>
+    </message>
+    <message>
+        <source>Delete</source>
+        <translation>Excluir</translation>
+    </message>
+    <message>
+        <source>New Layer</source>
+        <translation>Nova camada</translation>
+    </message>
+    <message>
+        <source>Delete Layer</source>
+        <translation>Excluir camada</translation>
+    </message>
+    <message>
+        <source>Delete Page</source>
+        <translation>Excluir página</translation>
     </message>
 </context>
 <context>

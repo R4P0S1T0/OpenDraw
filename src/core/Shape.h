@@ -145,6 +145,10 @@ public:
     quint64 id() const { return m_id; }
     ShapeKind kind() const { return m_kind; }
 
+    // Name given by the user in the Objects docker (empty: described by its kind).
+    const QString &name() const { return m_name; }
+    void setName(const QString &name) { m_name = name; }
+
     // Bounding box on the page.
     QRectF bounds() const;
     // Rectangles and ellipses take the new bounds; paths and groups are scaled to fit them.
@@ -213,6 +217,7 @@ public:
 private:
     quint64 m_id;
     ShapeKind m_kind;
+    QString m_name;
     QRectF m_bounds;                              // rectangles and ellipses
     double m_cornerRadius = 0.0;                  // rectangles
     QTransform m_shapeTransform;                  // rectangles, ellipses, text

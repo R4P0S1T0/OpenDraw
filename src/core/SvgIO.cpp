@@ -85,9 +85,18 @@ QString matrix(const QTransform &t)
 const QString kXlinkNamespace = QStringLiteral("http://www.w3.org/1999/xlink");
 
 // An <image> filling the unit square, placed by a matrix (no aspect-ratio fitting).
-void writeImageElement(QXmlStreamWriter &w, const QImage &image, const QRectF &rect, const QTransform &placement)
+// The name given in the Objects docker, as Inkscape stores object labels.
+void writeLabel(QXmlStreamWriter &w, const QString &name)
+{
+    if (!name.isEmpty())
+        w.writeAttribute(QString::fromLatin1(kInkscapeNamespace), QStringLiteral("label"), name);
+}
+
+void writeImageElement(QXmlStreamWriter &w, const QImage &image, const QRectF &rect, const QTransform &placement,
+                       const QString &label = QString())
 {
     w.writeStartElement(QStringLiteral("image"));
+    writeLabel(w, label);
     w.writeAttribute(QStringLiteral("x"), number(rect.x()));
     w.writeAttribute(QStringLiteral("y"), number(rect.y()));
     w.writeAttribute(QStringLiteral("width"), number(rect.width()));
@@ -153,7 +162,7 @@ void writeShape(QXmlStreamWriter &w, const Shape &shape, int &gradientCount)
 
     switch (shape.kind()) {
     case ShapeKind::Image:
-        writeImageElement(w, shape.image(), QRectF(0, 0, 1, 1), shape.imagePlacement());
+        writeImageElement(w, shape.image(), QRectF(0, 0, 1, 1), shape.imagePlacement(), shape.name());
         return;
     case ShapeKind::Rectangle: {
         const QRectF r = shape.localBounds();
@@ -184,6 +193,7 @@ void writeShape(QXmlStreamWriter &w, const Shape &shape, int &gradientCount)
         break;
     case ShapeKind::Group:
         w.writeStartElement(QStringLiteral("g"));
+        writeLabel(w, shape.name());
         for (const auto &child : shape.children())
             writeShape(w, *child, gradientCount);
         w.writeEndElement();
@@ -192,6 +202,7 @@ void writeShape(QXmlStreamWriter &w, const Shape &shape, int &gradientCount)
         const TextFormat &f = shape.textData().format;
         const QPointF origin = shape.textOrigin();
         w.writeStartElement(QStringLiteral("text"));
+        writeLabel(w, shape.name());
         w.writeAttribute(QStringLiteral("xml:space"), QStringLiteral("preserve"));
         w.writeAttribute(QStringLiteral("x"), number(origin.x()));
         w.writeAttribute(QStringLiteral("y"), number(origin.y()));
@@ -219,6 +230,7 @@ void writeShape(QXmlStreamWriter &w, const Shape &shape, int &gradientCount)
         return;
     }
     }
+    writeLabel(w, shape.name());
     writeShapeTransform(w, shape);
     writeStyle(w, shape.style(), gradientId);
     w.writeEndElement();
@@ -367,6 +379,7 @@ struct Context {
     Layer *layer = nullptr; // for Role::Layer
     bool inPage = false;    // inside a page group
     bool inLayer = false;   // inside a layer (nested layers become groups)
+    QString label;          // for Role::Group: the name the group was given
 };
 
 // The presentation properties of one element: style attribute, then attributes, then inherited values.
@@ -1027,8 +1040,11 @@ bool read(QIODevice *device, Document &document, QString *errorMessage, ReadRepo
                 case Role::Group: {
                     ShapeList children = std::move(containers.back());
                     containers.pop_back();
-                    if (!children.empty())
-                        containers.back().push_back(std::make_unique<Shape>(std::move(children)));
+                    if (!children.empty()) {
+                        auto group = std::make_unique<Shape>(std::move(children));
+                        group->setName(stack.back().label);
+                        containers.back().push_back(std::move(group));
+                    }
                     break;
                 }
                 case Role::Layer:
@@ -1146,6 +1162,7 @@ bool read(QIODevice *device, Document &document, QString *errorMessage, ReadRepo
         } else if (name == u"text" && context.rendering) {
             if (auto text = readText(r, props, context, localReport)) {
                 applyFillPaint(*text, props, context.transform, paintServers, localReport);
+                text->setName(attributes.value(QString::fromLatin1(kInkscapeNamespace), QStringLiteral("label")).toString());
                 containers.back().push_back(std::move(text));
             }
             continue; // readText consumed the whole element, end tag included
@@ -1224,11 +1241,13 @@ bool read(QIODevice *device, Document &document, QString *errorMessage, ReadRepo
 
             if (shape) {
                 applyFillPaint(*shape, props, t, paintServers, localReport);
+                shape->setName(attributes.value(QString::fromLatin1(kInkscapeNamespace), QStringLiteral("label")).toString());
                 containers.back().push_back(std::move(shape));
             }
 
             if (name == u"g") {
                 context.role = Role::Group;
+                context.label = attributes.value(QString::fromLatin1(kInkscapeNamespace), QStringLiteral("label")).toString();
                 containers.emplace_back();
             }
         }

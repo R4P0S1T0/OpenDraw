@@ -358,6 +358,20 @@ private:
     bool m_skipRedo;
 };
 
+class RenameShapeCommand : public QUndoCommand {
+public:
+    RenameShapeCommand(Document *document, Shape *shape, const QString &name, QUndoCommand *parent = nullptr);
+
+    void redo() override;
+    void undo() override;
+
+private:
+    Document *m_document;
+    Shape *m_shape;
+    QString m_oldName;
+    QString m_newName;
+};
+
 class SetCornerRadiusCommand : public QUndoCommand {
 public:
     SetCornerRadiusCommand(Document *document, Shape *shape, double radius, QUndoCommand *parent = nullptr);

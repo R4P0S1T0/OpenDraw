@@ -7,7 +7,7 @@
 #include "FillDialog.h"
 #include "Icons.h"
 #include "Language.h"
-#include "LayersPanel.h"
+#include "ObjectsPanel.h"
 #include "PageBar.h"
 #include "PropertyBar.h"
 #include "Theme.h"
@@ -158,12 +158,12 @@ MainWindow::MainWindow(QWidget *parent)
     updateNodeActions();
 
     // Dockers sit between the drawing and the colour palette, which hugs the window edge.
-    auto *layersDock = new QDockWidget(tr("Layers"), this);
-    layersDock->setObjectName(QStringLiteral("layers"));
-    layersDock->setWidget(new LayersPanel(m_document, m_undoStack, m_canvas, layersDock));
+    auto *layersDock = new QDockWidget(tr("Objects"), this);
+    layersDock->setObjectName(QStringLiteral("objects"));
+    layersDock->setWidget(new ObjectsPanel(m_document, m_undoStack, m_canvas, layersDock));
     addDockWidget(Qt::RightDockWidgetArea, layersDock);
     // Sizes only stick once the window is laid out.
-    QTimer::singleShot(0, this, [this, layersDock] { resizeDocks({layersDock}, {230}, Qt::Horizontal); });
+    QTimer::singleShot(0, this, [this, layersDock] { resizeDocks({layersDock}, {260}, Qt::Horizontal); });
 
     auto *palette = new ColorPalette(Qt::Vertical, this);
     m_paletteBar = new QToolBar(tr("Color Palette"), this);

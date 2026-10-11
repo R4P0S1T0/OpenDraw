@@ -2,7 +2,7 @@
 #include "CanvasWidget.h"
 #include "FillDialog.h"
 #include "Language.h"
-#include "LayersPanel.h"
+#include "ObjectsPanel.h"
 #include "MainWindow.h"
 #include "PageBar.h"
 #include "PropertyBar.h"
@@ -105,7 +105,7 @@ private slots:
     void doubleClickEditsTextAndUndo();
     void textConvertsToCurves();
     void hiddenLayersAndPagesLimitSelection();
-    void layersPanelEditsLayers();
+    void objectsDockerEditsLayersAndObjects();
     void fillDialogBuildsGradients();
     void propertyBarSetsOpacity();
     void propertyBarEditsThePage();
@@ -526,9 +526,9 @@ void CanvasTests::hiddenLayersAndPagesLimitSelection()
     QCOMPARE(m_canvas->selection().front()->kind(), ShapeKind::Rectangle);
 }
 
-void CanvasTests::layersPanelEditsLayers()
+void CanvasTests::objectsDockerEditsLayersAndObjects()
 {
-    LayersPanel panel(m_doc, m_undo, m_canvas);
+    ObjectsPanel panel(m_doc, m_undo, m_canvas);
     auto button = [&panel](const QString &tip) {
         for (QToolButton *b : panel.findChildren<QToolButton *>()) {
             if (b->toolTip() == tip)
@@ -536,35 +536,76 @@ void CanvasTests::layersPanelEditsLayers()
         }
         return static_cast<QToolButton *>(nullptr);
     };
-    auto *tree = panel.findChild<QTreeWidget *>();
+    auto *tree = panel.findChild<ObjectsTree *>();
     QVERIFY(tree);
-    QCOMPARE(tree->topLevelItemCount(), 1);
+    QCOMPARE(tree->topLevelItemCount(), 1); // one page
+    QCOMPARE(tree->topLevelItem(0)->childCount(), 1); // one layer
 
     button(QStringLiteral("New layer"))->click();
-    QCoreApplication::processEvents(); // the panel refreshes on the next event loop pass
-    QCOMPARE(m_doc->currentPage()->layers.size(), std::size_t(2));
-    QCOMPARE(tree->topLevelItemCount(), 2);
-    QCOMPARE(tree->topLevelItem(0)->text(0), QStringLiteral("Layer 2")); // topmost first
+    panel.refresh();
+    QTreeWidgetItem *page = tree->topLevelItem(0);
+    QCOMPARE(page->childCount(), 2);
+    QCOMPARE(page->child(0)->text(0), QStringLiteral("Layer 2")); // topmost first
 
-    // Unchecking the box hides the layer, as one undoable step.
-    tree->topLevelItem(0)->setCheckState(0, Qt::Unchecked);
+    // Clicking the eye hides the layer, as one undoable step.
+    emit tree->itemClicked(page->child(0), 1);
     QVERIFY(!m_doc->activeLayer()->visible);
     m_undo->undo();
     QVERIFY(m_doc->activeLayer()->visible);
 
-    // Draw on the new layer, then move the object down to the first layer.
+    // A new object shows under its layer, selected like on the drawing.
     m_canvas->setTool(CanvasWidget::Tool::Rectangle);
     dragFromTo(m_canvas, {300, 200}, {350, 250});
-    Layer *first = m_doc->currentPage()->layers[0].get();
-    m_doc->setActiveLayer(first);
-    QCoreApplication::processEvents();
-    button(QStringLiteral("Move the selected objects to this layer"))->click();
-    QCOMPARE(first->shapes.size(), std::size_t(1));
+    panel.refresh();
+    QTreeWidgetItem *layer2 = tree->topLevelItem(0)->child(0);
+    QCOMPARE(layer2->childCount(), 1);
+    QTreeWidgetItem *rectItem = layer2->child(0);
+    QCOMPARE(rectItem->text(0), QStringLiteral("Rectangle"));
+    QVERIFY(rectItem->isSelected());
+    Shape *rect = m_canvas->selection().front();
 
-    button(QStringLiteral("Delete layer"))->click(); // deletes the active (first) layer
+    // Renaming in the tree names the object (saved with it), undoably.
+    rectItem->setText(0, QStringLiteral("Logo"));
+    QCOMPARE(rect->name(), QStringLiteral("Logo"));
+    m_undo->undo();
+    QVERIFY(rect->name().isEmpty());
+
+    // Selecting in the tree selects on the drawing.
+    m_canvas->setSelection({});
+    panel.refresh();
+    tree->topLevelItem(0)->child(0)->child(0)->setSelected(true);
+    QCOMPARE(m_canvas->selection().size(), std::size_t(1));
+    QCOMPARE(m_canvas->selection().front(), rect);
+
+    // Dragging the object onto the first layer moves it there.
+    Layer *first = m_doc->currentPage()->layers[0].get();
+    panel.refresh();
+    QTreeWidgetItem *firstLayerItem = tree->topLevelItem(0)->child(1);
+    emit tree->itemsDropped({tree->topLevelItem(0)->child(0)->child(0)}, firstLayerItem, ObjectsTree::DropPosition::On);
+    QCOMPARE(first->shapes.size(), std::size_t(1));
+    QCOMPARE(first->shapes.front().get(), rect);
+
+    // Dropping below another object restacks.
+    Shape *ellipse = m_doc->insertShape(first, -1, std::make_unique<Shape>(ShapeKind::Ellipse, QRectF(0, 0, 10, 10)));
+    panel.refresh();
+    firstLayerItem = tree->topLevelItem(0)->child(1);
+    QCOMPARE(firstLayerItem->child(0)->text(0), QStringLiteral("Ellipse")); // on top
+    emit tree->itemsDropped({firstLayerItem->child(1)}, firstLayerItem->child(0), ObjectsTree::DropPosition::Above);
+    QCOMPARE(m_doc->order(first).back(), rect);
+    m_undo->undo();
+    QCOMPARE(m_doc->order(first).back(), ellipse);
+
+    // Move here, and deleting the active layer when nothing is selected.
+    m_canvas->setSelection({});
+    m_doc->setActiveLayer(m_doc->currentPage()->layers[1].get());
+    panel.refresh();
+    button(QStringLiteral("Delete the selected objects, or the layer"))->click();
     QCOMPARE(m_doc->currentPage()->layers.size(), std::size_t(1));
     m_undo->undo();
     QCOMPARE(m_doc->currentPage()->layers.size(), std::size_t(2));
+    m_canvas->setSelectedShape(rect);
+    button(QStringLiteral("Move the selected objects to this layer"))->click();
+    QCOMPARE(m_doc->layerOf(rect), m_doc->currentPage()->layers[1].get());
 }
 
 void CanvasTests::fillDialogBuildsGradients()

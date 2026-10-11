@@ -507,6 +507,27 @@ void TransformShapeCommand::undo()
     m_document->notifyShapeChanged(m_shape);
 }
 
+RenameShapeCommand::RenameShapeCommand(Document *document, Shape *shape, const QString &name, QUndoCommand *parent)
+    : QUndoCommand(QCoreApplication::translate("Commands", "Rename object"), parent)
+    , m_document(document)
+    , m_shape(shape)
+    , m_oldName(shape->name())
+    , m_newName(name)
+{
+}
+
+void RenameShapeCommand::redo()
+{
+    m_shape->setName(m_newName);
+    m_document->notifyShapeChanged(m_shape);
+}
+
+void RenameShapeCommand::undo()
+{
+    m_shape->setName(m_oldName);
+    m_document->notifyShapeChanged(m_shape);
+}
+
 SetCornerRadiusCommand::SetCornerRadiusCommand(Document *document, Shape *shape, double radius, QUndoCommand *parent)
     : QUndoCommand(QCoreApplication::translate("Commands", "Corner radius"), parent)
     , m_document(document)

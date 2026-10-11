@@ -16,6 +16,7 @@ enum class Icon {
     ScrollUp, ScrollDown, ScrollLeft, ScrollRight,
     Line, Polygon, Star, Spiral, GraphPaper, Eyedropper, Grid, Guidelines, Snap, CornerRadius,
     Rotate, RotateCounterclockwise,
+    Eye, EyeOff, Lock, Unlock, Layer, Page, Group, Bitmap,
 };
 
 QIcon icon(Icon id);
