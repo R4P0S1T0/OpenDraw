@@ -10,6 +10,7 @@
 #include "Theme.h"
 #include "Units.h"
 #include "core/Generators.h"
+#include "core/TextLayout.h"
 #include "core/Commands.h"
 #include "core/Document.h"
 #include "core/Export.h"
@@ -124,6 +125,7 @@ private slots:
     void spaceTogglesThePickTool();
     void secondClickRotatesAndSkews();
     void propertiesDockerAppliesStyles();
+    void textToolDrawsParagraphFrames();
     void screenshot();
 
 private:
@@ -1133,6 +1135,43 @@ void CanvasTests::propertiesDockerAppliesStyles()
     button(QStringLiteral("Square ends"))->click();
     QCOMPARE(m_canvas->defaultStyle().cap, LineCap::Square);
     QCOMPARE(m_undo->index(), before); // not an undoable document change
+}
+
+void CanvasTests::textToolDrawsParagraphFrames()
+{
+    m_canvas->setZoom(1.0);
+    m_canvas->setTool(CanvasWidget::Tool::Text);
+    dragFromTo(m_canvas, {200, 200}, {400, 500}); // a frame
+    QVERIFY(m_canvas->editedText());
+    QVERIFY(m_canvas->editedText()->textData().isParagraph());
+    QTest::keyClicks(m_canvas, QStringLiteral("Paragraph text wraps inside its frame when it gets too long"));
+    m_canvas->finishTextEdit();
+    QCOMPARE(m_doc->count(), 1);
+    Shape *text = m_doc->shapes().front().get();
+    const QRectF frame = m_canvas->viewTransform().mapRect(text->bounds());
+    QVERIFY(std::abs(frame.width() - 200) < 1e-6 && std::abs(frame.height() - 300) < 1e-6);
+    QVERIFY(textlayout::layout(text->textData(), text->textOrigin()).lines.size() > 1);
+
+    // A click (no drag) still makes artistic text.
+    click(m_canvas, {600, 200});
+    QVERIFY(m_canvas->editedText() && !m_canvas->editedText()->textData().isParagraph());
+    QTest::keyClicks(m_canvas, QStringLiteral("Title"));
+    m_canvas->finishTextEdit();
+    QCOMPARE(m_doc->count(), 2);
+
+    // Ctrl+F8 converts both ways, undoably, keeping the words.
+    m_canvas->setTool(CanvasWidget::Tool::Select);
+    m_canvas->setSelectedShape(text);
+    m_canvas->convertTextKind();
+    Shape *artistic = m_canvas->selectedShape();
+    QVERIFY(artistic && !artistic->textData().isParagraph());
+    QVERIFY(artistic->textData().text.contains(QLatin1Char('\n')));
+    m_canvas->convertTextKind();
+    QVERIFY(m_canvas->selectedShape()->textData().isParagraph());
+    m_undo->undo();
+    m_undo->undo();
+    QCOMPARE(m_doc->shapes().front()->textData().text,
+             QStringLiteral("Paragraph text wraps inside its frame when it gets too long"));
 }
 
 // Not an assertion: saves a picture of the canvas for manual review when

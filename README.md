@@ -18,7 +18,7 @@ OpenDraw is a free, open-source, cross-platform vector graphics editor for Linux
 
 - **Works with files from other programs.** SVG import understands paths, transforms, groups and inherited styles, so drawings exported from other editors open as editable objects.
 - **Files you can always open.** Drawings are stored in open formats (SVG today). Every file records its format version, and an older OpenDraw never refuses a newer file: it opens everything it understands and tells you exactly what it had to leave out.
-- **Import from proprietary formats.** CorelDRAW (`.cdr`, `.cdt`) files open through [libcdr](https://wiki.documentfoundation.org/DLP/Libraries/libcdr), so existing work is not trapped: every page, with curves, groups, colours, gradients, bitmaps, texture fills and text, as editable objects. The original is never overwritten; *Save* asks for a new `.svg` file. Not imported yet (limits of libcdr): PowerClip clipping, transparency effects other than uniform opacity, lenses and paragraph text wrapping.
+- **Import from proprietary formats.** CorelDRAW (`.cdr`, `.cdt`) files open through [libcdr](https://wiki.documentfoundation.org/DLP/Libraries/libcdr), so existing work is not trapped: every page, with curves, groups, colours, gradients, bitmaps, texture fills and text, as editable objects. The original is never overwritten; *Save* asks for a new `.svg` file. Not imported yet (limits of libcdr): PowerClip clipping, transparency effects other than uniform opacity, lenses, and mixed fonts or sizes inside one text (each text takes one format).
 - **A familiar workflow.** Toolbox, property bar, colour palette and keyboard shortcuts that experienced designers already know.
 - **Same app on Linux and Windows**, built with C++20 and Qt 6.
 
@@ -58,6 +58,7 @@ The workspace follows the layout desktop designers know: menu bar and standard t
 | Bézier curve | `Shift` `B`. Click for a corner node, click and drag for a smooth node. Click the first node to close the shape; `Enter`, `Esc` or double-click to finish. `Backspace` removes the last node while drawing |
 | Freehand | `F5`, drag to draw. The stroke is smoothed into a few curve segments; end near the start to close it |
 | Edit nodes | Shape tool (`F10`): drag nodes and handles, double-click a segment to add a node, double-click a node or press `Delete` to remove it. Hold `Alt` while dragging a handle to make a corner |
+| Paragraph text | With the text tool, drag a frame instead of clicking: the text wraps to its width. Resizing the frame reflows the text; text that does not fit is hidden and the frame turns red. Text › Convert (`Ctrl` `F8`) switches between paragraph and artistic text. Paragraph text from CorelDRAW files keeps its frame |
 | Text | `F8`, click on the page and type. `Enter` starts a new line, `Esc` finishes. Click a text with the tool, or double-click it with the Select tool, to edit it. Font, size (pt), bold, italic and alignment are on the text bar |
 | Convert to curves | `Ctrl` `Q` turns a rectangle, ellipse or text into editable curves |
 | Fill / outline colour | Colour palette on the right or document palette at the bottom: left click = fill, right click = outline, the crossed swatch = none. With nothing selected it sets the colour for new shapes |

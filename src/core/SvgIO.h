@@ -24,6 +24,8 @@ inline constexpr int kFormatVersion = 2;
 inline constexpr char kNamespace[] = "https://github.com/R4P0S1T0/OpenDraw/ns/1";
 inline constexpr char kInkscapeNamespace[] = "http://www.inkscape.org/namespaces/inkscape";
 inline constexpr char kSodipodiNamespace[] = "http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd";
+// Marks the end of a paragraph inside imported text (see the CorelDRAW import).
+inline constexpr QChar kParagraphMark{0xE000};
 
 struct ReadReport {
     int formatVersion = 0;               // 0 when the file was not written by OpenDraw

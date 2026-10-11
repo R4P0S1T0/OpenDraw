@@ -143,6 +143,12 @@ QRectF Shape::bounds() const
 void Shape::setBounds(const QRectF &bounds)
 {
     const QRectF target = bounds.normalized();
+    if (m_kind == ShapeKind::Text && m_text.isParagraph() && m_shapeTransform.isIdentity()) {
+        // Resizing a paragraph frame reflows the text instead of scaling it.
+        m_textOrigin = target.topLeft();
+        m_text.frame = target.size();
+        return;
+    }
     if ((m_kind == ShapeKind::Rectangle || m_kind == ShapeKind::Ellipse) && !m_style.pattern
         && m_shapeTransform.isIdentity()) {
         m_bounds = target;
@@ -211,11 +217,18 @@ void Shape::transform(const QTransform &t)
             child->transform(t);
         break;
     case ShapeKind::Text: {
-        // Text keeps its proportions: the font size follows the overall scale.
-        m_textOrigin = t.map(m_textOrigin);
+        // Text keeps its proportions: the font size follows the overall scale. A paragraph
+        // frame scales with the drawing (its origin stays its top-left corner).
         const double scale = std::sqrt(std::abs(t.determinant()));
         if (scale > 0.0)
             m_text.format.size *= scale;
+        if (m_text.isParagraph()) {
+            const QRectF frame = t.mapRect(QRectF(m_textOrigin, m_text.frame));
+            m_textOrigin = frame.topLeft();
+            m_text.frame = frame.size();
+        } else {
+            m_textOrigin = t.map(m_textOrigin);
+        }
         break;
     }
     }

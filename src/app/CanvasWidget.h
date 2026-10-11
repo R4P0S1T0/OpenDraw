@@ -126,6 +126,8 @@ public slots:
     // Deletes the selected node (shape tool), the last node of a curve being drawn, or the selection.
     void deleteSelection();
     void convertSelectionToCurves();
+    // Artistic text becomes paragraph text in a frame around it, and the other way round.
+    void convertTextKind();
     // Completes the curve being drawn with the Bézier tool.
     void finishCurve();
 
@@ -184,7 +186,7 @@ protected:
 private:
     enum class Drag {
         None, Pan, Move, Resize, Marquee, Create, NodeMove, NodeHandle, BezierHandle, Freehand, ZoomBox, Guide,
-        Rotate, Skew, RotationCenter,
+        Rotate, Skew, RotationCenter, TextFrame,
     };
     enum class NodeHandle { In, Out };
 
@@ -253,7 +255,9 @@ private:
 
     // Text tool
     void beginTextEdit(Shape *text);
-    void beginNewText(const QPointF &origin);
+    // Artistic text with its first baseline through `origin`, or paragraph text in a frame
+    // whose top-left corner is `origin`.
+    void beginNewText(const QPointF &origin, const QSizeF &frame = QSizeF());
     void setEditedText(const QString &text, int cursor);
     bool handleTextKey(QKeyEvent *event);
     static bool isTextEditingKey(const QKeyEvent *event);
@@ -275,6 +279,7 @@ private:
     double m_zoom = 1.0;
     QPointF m_pan; // widget position of the document origin
     bool m_needsInitialFit = true;
+    bool m_fitOnResize = true; // the page was fitted and the user has not zoomed or scrolled since
     bool m_spaceHeld = false;
     bool m_spacePanned = false;          // Space was used for panning, so releasing it keeps the tool
     std::optional<Tool> m_toolBeforeSpace; // Space switches to the pick tool and back

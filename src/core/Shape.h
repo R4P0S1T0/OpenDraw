@@ -123,9 +123,13 @@ struct TextFormat {
 
 // Content of a text object.
 struct TextData {
-    QString text; // lines separated by '\n'
+    QString text; // paragraphs (artistic text: lines) separated by '\n'
     TextFormat format;
+    // Paragraph text flows inside a frame this size, wrapping at its width; lines that do not
+    // fit its height are hidden. Empty for artistic text, which only breaks at '\n'.
+    QSizeF frame;
 
+    bool isParagraph() const { return frame.width() > 0.0; }
     bool operator==(const TextData &) const = default;
 };
 

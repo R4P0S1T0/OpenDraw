@@ -2,6 +2,7 @@
 
 #include "core/Document.h"
 #include "core/PathOps.h"
+#include "core/TextLayout.h"
 
 #include <QBuffer>
 #include <QCoreApplication>
@@ -230,6 +231,34 @@ void writeShape(QXmlStreamWriter &w, const Shape &shape, int &gradientCount)
                              f.align == TextAlign::Center ? QStringLiteral("middle") : QStringLiteral("end"));
         writeShapeTransform(w, shape);
         writeStyle(w, shape.style(), gradientId);
+        if (shape.textData().isParagraph()) {
+            // Paragraph text: the frame, then every laid-out line as it is wrapped now, so any
+            // viewer shows the same lines. Wrapped lines are marked, to rebuild the paragraphs.
+            const TextData &data = shape.textData();
+            const QString ns = QString::fromLatin1(kNamespace);
+            w.writeAttribute(ns, QStringLiteral("frame"),
+                             QStringLiteral("%1 %2 %3 %4").arg(number(origin.x()), number(origin.y()),
+                                                               number(data.frame.width()), number(data.frame.height())));
+            double anchorX = origin.x();
+            if (f.align == TextAlign::Center)
+                anchorX += data.frame.width() / 2.0;
+            else if (f.align == TextAlign::Right)
+                anchorX += data.frame.width();
+            for (const textlayout::Line &line : textlayout::layout(data, origin).lines) {
+                w.writeStartElement(QStringLiteral("tspan"));
+                w.writeAttribute(QStringLiteral("x"), number(anchorX));
+                w.writeAttribute(QStringLiteral("y"), number(line.baselineStart.y()));
+                if (line.softBreak) {
+                    w.writeAttribute(ns, QStringLiteral("soft"), QStringLiteral("true"));
+                    w.writeCharacters(data.text.mid(line.start, line.next - line.start)); // with its spaces
+                } else {
+                    w.writeCharacters(line.text);
+                }
+                w.writeEndElement();
+            }
+            w.writeEndElement();
+            return;
+        }
         // One tspan per line, each on its own baseline.
         const QStringList lines = shape.textData().text.split(QLatin1Char('\n'));
         for (int i = 0; i < lines.size(); ++i) {
@@ -849,9 +878,15 @@ std::unique_ptr<Shape> readText(QXmlStreamReader &r, const Properties &props, co
     const bool preserveSpace = props.value(QStringLiteral("xml:space")) == u"preserve";
     TextFormat format = textFormat(props);
 
+    // Paragraph text written by OpenDraw (or marked up by the CorelDRAW import): its frame.
+    const QString ns = QString::fromLatin1(kNamespace);
+    const std::vector<double> frame = parseNumberList(attributes.value(ns, QStringLiteral("frame")));
+    const bool paragraph = frame.size() == 4 && frame[2] > 0.0;
+
     QStringList lines;
     QString current;
     std::vector<double> lineBaselines;
+    bool previousSoft = false; // the previous line was wrapped: the next one continues it
     int depth = 1;
     while (depth > 0 && !r.atEnd()) {
         r.readNext();
@@ -867,10 +902,12 @@ std::unique_ptr<Shape> readText(QXmlStreamReader &r, const Properties &props, co
             if (!y && ty)
                 y = ty;
             const bool newLine = ty || a.hasAttribute(QStringLiteral("dy"));
-            if (newLine && (!current.isEmpty() || !lines.isEmpty())) {
+            if (newLine && (!current.isEmpty() || !lines.isEmpty()) && !previousSoft) {
                 lines << current;
                 current.clear();
             }
+            if (newLine)
+                previousSoft = a.value(ns, QStringLiteral("soft")) == u"true";
             if (ty)
                 lineBaselines.push_back(*ty);
         } else if (r.isEndElement()) {
@@ -898,9 +935,23 @@ std::unique_ptr<Shape> readText(QXmlStreamReader &r, const Properties &props, co
         format.lineSpacing = (lineBaselines[1] - lineBaselines[0]) / format.size;
 
     const QTransform &t = context.transform;
-    const QPointF position(x.value_or(0.0), y.value_or(0.0));
+    QPointF position(x.value_or(0.0), y.value_or(0.0));
     const Style style = props.style(strokeScaleOf(t, props), report);
-    TextData text{lines.join(QLatin1Char('\n')), format};
+    QString content = lines.join(QLatin1Char('\n'));
+    // The CorelDRAW import marks paragraph ends with U+E000 (a private-use character).
+    if (content.contains(kParagraphMark)) {
+        QStringList paragraphs = content.split(kParagraphMark);
+        for (QString &p : paragraphs)
+            p = p.trimmed();
+        while (paragraphs.size() > 1 && paragraphs.back().isEmpty())
+            paragraphs.removeLast();
+        content = paragraphs.join(QLatin1Char('\n'));
+    }
+    TextData text{content, format};
+    if (paragraph) {
+        position = QPointF(frame[0], frame[1]);
+        text.frame = QSizeF(frame[2], frame[3]);
+    }
     if (t.type() > QTransform::TxScale) {
         // Rotated or skewed: the text keeps its own size and position, turned by the transform.
         auto shape = std::make_unique<Shape>(std::move(text), position, style);
@@ -908,6 +959,11 @@ std::unique_ptr<Shape> readText(QXmlStreamReader &r, const Properties &props, co
         return shape;
     }
     text.format.size *= std::sqrt(std::abs(t.determinant()));
+    if (paragraph) {
+        const QRectF box = t.mapRect(QRectF(position, text.frame));
+        text.frame = box.size();
+        return std::make_unique<Shape>(std::move(text), box.topLeft(), style);
+    }
     return std::make_unique<Shape>(std::move(text), t.map(position), style);
 }
 

@@ -606,6 +606,7 @@ QRectF CanvasWidget::visibleDocumentRect() const
 
 void CanvasWidget::viewUpdated(bool zoomChanged)
 {
+    m_fitOnResize = false; // fitPage() sets it again
     update();
     if (zoomChanged)
         emit this->zoomChanged(m_zoom);
@@ -693,6 +694,7 @@ void CanvasWidget::fitPage()
                         kMinZoom, kMaxZoom);
     m_pan = QPointF((width() - page.width() * m_zoom) / 2.0, (height() - page.height() * m_zoom) / 2.0);
     viewUpdated(true);
+    m_fitOnResize = true;
 }
 
 void CanvasWidget::updateCursor()
@@ -774,12 +776,12 @@ void CanvasWidget::beginTextEdit(Shape *text)
     emit textEditingChanged();
 }
 
-void CanvasWidget::beginNewText(const QPointF &origin)
+void CanvasWidget::beginNewText(const QPointF &origin, const QSizeF &frame)
 {
     finishTextEdit();
     setSelection({});
     const Style style{QColor(Qt::black), QColor(Qt::transparent), 0.0};
-    m_pendingText = std::make_unique<Shape>(TextData{QString(), m_defaultTextFormat}, origin, style);
+    m_pendingText = std::make_unique<Shape>(TextData{QString(), m_defaultTextFormat, frame}, origin, style);
     m_editText = m_pendingText.get();
     m_textBeforeEdit = {};
     m_textCursor = 0;
@@ -984,6 +986,57 @@ void CanvasWidget::convertSelectionToCurves()
     Shape *created = command->newShape();
     m_undoStack->push(command);
     setSelectedShape(created);
+}
+
+void CanvasWidget::convertTextKind()
+{
+    finishTextEdit();
+    std::vector<Shape *> texts;
+    for (Shape *shape : m_selection) {
+        if (shape->kind() == ShapeKind::Text)
+            texts.push_back(shape);
+    }
+    if (texts.empty())
+        return;
+    std::vector<Shape *> converted;
+    m_undoStack->beginMacro(tr("Convert text"));
+    for (Shape *shape : texts) {
+        const TextData &data = shape->textData();
+        const textlayout::Layout layout = textlayout::layout(data, shape->textOrigin());
+        TextData result = data;
+        QPointF origin;
+        if (data.isParagraph()) {
+            // The lines stay as they are now, each ending in a line break.
+            QString text;
+            for (std::size_t i = 0; i < layout.lines.size(); ++i) {
+                if (i > 0)
+                    text += QLatin1Char('\n');
+                text += layout.lines[i].text;
+            }
+            result.text = text;
+            result.frame = QSizeF();
+            const QRectF frame = shape->localBounds();
+            double x = frame.left();
+            if (data.format.align == TextAlign::Center)
+                x = frame.center().x();
+            else if (data.format.align == TextAlign::Right)
+                x = frame.right();
+            origin = QPointF(x, layout.lines.front().baselineStart.y());
+        } else {
+            // A frame just around the text (a little wider, so it does not wrap).
+            const QRectF box = layout.bounds;
+            result.frame = QSizeF(box.width() + data.format.size * 0.1, box.height() + data.format.size * 0.1);
+            origin = box.topLeft();
+        }
+        auto replacement = std::make_unique<Shape>(result, origin, shape->style());
+        replacement->setShapeTransform(shape->shapeTransform());
+        replacement->setName(shape->name());
+        auto *command = new ReplaceShapeCommand(m_document, shape, std::move(replacement), tr("Convert text"));
+        converted.push_back(command->newShape());
+        m_undoStack->push(command);
+    }
+    m_undoStack->endMacro();
+    setSelection(std::move(converted));
 }
 
 void CanvasWidget::finishCurve()
@@ -1505,8 +1558,30 @@ void CanvasWidget::paintEvent(QPaintEvent *)
     paintGrid(painter);
     paintGuides(painter);
 
+    // Frames of selected (or edited) paragraph text; red when text does not fit.
+    auto paintFrame = [&](const Shape *shape) {
+        if (shape->kind() != ShapeKind::Text || !shape->textData().isParagraph())
+            return;
+        const bool overflow = textlayout::layout(shape->textData(), shape->textOrigin()).overflow;
+        QPen pen(overflow ? QColor(0xe5, 0x39, 0x35) : palette().color(QPalette::Highlight), overflow ? 1.5 : 1,
+                 Qt::DashLine);
+        pen.setCosmetic(true);
+        painter.setPen(pen);
+        painter.setBrush(Qt::NoBrush);
+        painter.drawPolygon(shape->shapeTransform().map(QPolygonF(shape->localBounds())));
+    };
+    for (const Shape *shape : m_selection)
+        paintFrame(shape);
+    if (m_editText && !isSelected(m_editText))
+        paintFrame(m_editText);
+
     QPen preview(palette().color(QPalette::Highlight), 0, Qt::DashLine);
     preview.setCosmetic(true);
+    if (m_drag == Drag::TextFrame && !m_creating.isEmpty()) {
+        painter.setPen(preview);
+        painter.setBrush(Qt::NoBrush);
+        painter.drawRect(m_creating);
+    }
     if (m_drag == Drag::Create) {
         painter.setPen(preview);
         painter.setBrush(Qt::NoBrush);
@@ -1662,7 +1737,8 @@ void CanvasWidget::paintBezierPreview(QPainter &painter)
 void CanvasWidget::resizeEvent(QResizeEvent *event)
 {
     QWidget::resizeEvent(event);
-    if (m_needsInitialFit && width() > 0 && height() > 0) {
+    // Until the user zooms or scrolls, the page stays fitted as the window changes size.
+    if ((m_needsInitialFit || m_fitOnResize) && width() > 0 && height() > 0) {
         m_needsInitialFit = false;
         fitPage();
     }
@@ -1720,9 +1796,10 @@ void CanvasWidget::mousePressEvent(QMouseEvent *event)
         if (hit && hit->kind() == ShapeKind::Text) {
             beginTextEdit(hit);
         } else {
-            // The click marks the top-left of the text; the first baseline sits one ascent below.
-            const double ascent = m_defaultTextFormat.size * 0.8;
-            beginNewText(docPos + QPointF(0, ascent));
+            // A click starts artistic text, a drag draws a paragraph frame (on release).
+            m_drag = Drag::TextFrame;
+            m_dragStart = m_dragLast = snapPoint(docPos);
+            m_creating = QRectF(m_dragStart, m_dragStart);
         }
         break;
     }
@@ -1940,6 +2017,11 @@ void CanvasWidget::mouseMoveEvent(QMouseEvent *event)
         update();
         break;
 
+    case Drag::TextFrame:
+        m_creating = QRectF(m_dragStart, snapPoint(docPos)).normalized();
+        update();
+        break;
+
     case Drag::Resize: {
         // Handles 0-7 go clockwise from top-left; each moves the edges it sits on.
         const int h = m_resizeHandle;
@@ -2118,6 +2200,19 @@ void CanvasWidget::mouseReleaseEvent(QMouseEvent *event)
 
     case Drag::RotationCenter:
         break;
+
+    case Drag::TextFrame: {
+        const QRectF frame = m_creating;
+        m_creating = QRectF();
+        if (frame.width() * m_zoom >= 8 && frame.height() * m_zoom >= 8) {
+            beginNewText(frame.topLeft(), frame.size());
+        } else {
+            // The click marks the top-left of the text; the first baseline sits one ascent below.
+            const double ascent = m_defaultTextFormat.size * 0.8;
+            beginNewText(m_dragStart + QPointF(0, ascent));
+        }
+        break;
+    }
 
     case Drag::Resize: {
         bool changed = false;
@@ -2298,9 +2393,11 @@ void CanvasWidget::keyPressEvent(QKeyEvent *event)
 void CanvasWidget::keyReleaseEvent(QKeyEvent *event)
 {
     if (event->key() == Qt::Key_Space && !event->isAutoRepeat()) {
+        // Only a Space pressed outside text editing counts (typing a space must not switch tools).
+        const bool wasHeld = m_spaceHeld;
         m_spaceHeld = false;
         // A tap (no panning) switches to the pick tool, and the next tap back.
-        if (!m_spacePanned && m_drag == Drag::None) {
+        if (wasHeld && !m_spacePanned && m_drag == Drag::None && !m_editText) {
             if (m_tool != Tool::Select) {
                 const Tool previous = m_tool;
                 setTool(Tool::Select);

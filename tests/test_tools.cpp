@@ -3,6 +3,7 @@
 #include "core/Generators.h"
 #include "core/PathOps.h"
 #include "core/Render.h"
+#include "core/TextLayout.h"
 
 #include <QPen>
 #include "core/SvgIO.h"
@@ -55,7 +56,102 @@ private slots:
     void rotatedTextAndSvg();
     void objectNamesAreSaved();
     void outlineStyles();
+    void paragraphTextWraps();
+    void paragraphTextSvg();
 };
+
+void ToolTests::paragraphTextWraps()
+{
+    TextFormat format;
+    format.size = 20;
+    const QString words = QStringLiteral("one two three four five six seven eight nine ten");
+    TextData data{words + QStringLiteral("\nthe end"), format, QSizeF(120, 1000)};
+    const QPointF origin(10, 20);
+    const auto layout = textlayout::layout(data, origin);
+    QVERIFY(layout.lines.size() >= 4); // wrapped, plus the second paragraph
+    QCOMPARE(layout.bounds, QRectF(origin, data.frame));
+    for (const auto &line : layout.lines) {
+        QVERIFY(line.width <= 120 + 1e-6);
+        QVERIFY(!line.text.startsWith(QLatin1Char(' ')) && !line.text.endsWith(QLatin1Char(' ')));
+        QVERIFY(!line.hidden);
+    }
+    // The first paragraph's lines put back together give the original words.
+    QString rebuilt;
+    for (const auto &line : layout.lines) {
+        if (line.start >= words.size())
+            break;
+        rebuilt += data.text.mid(line.start, std::min(line.next, int(words.size())) - line.start);
+    }
+    QCOMPARE(rebuilt, words);
+    QVERIFY(layout.lines.front().softBreak);
+    QVERIFY(!layout.lines.back().softBreak);
+    QCOMPARE(layout.lines.back().text, QStringLiteral("the end"));
+    // First baseline one ascent below the top of the frame.
+    QVERIFY(std::abs(layout.lines.front().baselineStart.y() - (20 + layout.ascent)) < 1e-9);
+
+    // The caret follows the wrap.
+    const int inSecondLine = layout.lines[1].start + 1;
+    const QLineF caret = textlayout::caret(data, origin, inSecondLine);
+    QVERIFY(std::abs(caret.p2().y() - (layout.lines[1].baselineStart.y() + layout.descent)) < 1e-9);
+
+    // A word too long for the frame is broken inside; centred lines sit in the middle.
+    TextData narrow{QStringLiteral("Incomprehensibilities"), format, QSizeF(60, 1000)};
+    narrow.format.align = TextAlign::Center;
+    const auto broken = textlayout::layout(narrow, origin);
+    QVERIFY(broken.lines.size() >= 3);
+    const auto &mid = broken.lines[1];
+    QVERIFY(std::abs((mid.baselineStart.x() + mid.width / 2) - (origin.x() + 30)) < 1e-6);
+
+    // Lines below the frame are hidden.
+    TextData shortFrame{words, format, QSizeF(120, 30)};
+    const auto clipped = textlayout::layout(shortFrame, origin);
+    QVERIFY(clipped.overflow);
+    QVERIFY(!clipped.lines.front().hidden);
+    QVERIFY(clipped.lines.back().hidden);
+
+    // Resizing the frame reflows; scaling scales.
+    Shape text(data, origin, Style{});
+    const std::size_t lines = textlayout::layout(text.textData(), text.textOrigin()).lines.size();
+    text.setBounds(QRectF(0, 0, 400, 300));
+    QCOMPARE(text.bounds(), QRectF(0, 0, 400, 300));
+    QCOMPARE(text.textData().format.size, 20.0);
+    QVERIFY(textlayout::layout(text.textData(), text.textOrigin()).lines.size() < lines);
+    text.transform(QTransform::fromScale(2, 2));
+    QCOMPARE(text.bounds(), QRectF(0, 0, 800, 600));
+    QCOMPARE(text.textData().format.size, 40.0);
+}
+
+void ToolTests::paragraphTextSvg()
+{
+    TextFormat format;
+    format.size = 20;
+    format.align = TextAlign::Right;
+    const QString content = QStringLiteral("Lorem ipsum  dolor sit amet, consectetur adipiscing\n\nelit sed do");
+    Document doc;
+    doc.insertShape(-1, std::make_unique<Shape>(TextData{content, format, QSizeF(150, 400)}, QPointF(30, 40), Style{}));
+    const QByteArray data = writeSvg(doc);
+    QVERIFY(data.contains("opendraw:frame=\"30 40 150 400\""));
+    QVERIFY(data.contains("opendraw:soft=\"true\""));
+    auto copy = readSvg(data);
+    const Shape &read = *copy->shapes().front();
+    QCOMPARE(read.textData().text, content);
+    QCOMPARE(read.textData().frame, QSizeF(150, 400));
+    QCOMPARE(read.textOrigin(), QPointF(30, 40));
+    QCOMPARE(read.textData().format.align, TextAlign::Right);
+
+    // As the CorelDRAW import marks it up: a frame and paragraph marks.
+    auto imported = readSvg(QStringLiteral(
+        R"svg(<svg xmlns="http://www.w3.org/2000/svg" xmlns:opendraw="https://github.com/R4P0S1T0/OpenDraw/ns/1"
+                   width="200" height="200">
+                <text x="0" y="190" opendraw:frame="10 20 100 150" font-size="12">
+                  <tspan>First paragraph</tspan><tspan>%1</tspan><tspan>Second</tspan>
+                </text>
+              </svg>)svg").arg(QChar(0xE000)).toUtf8());
+    const Shape &paragraph = *imported->shapes().front();
+    QCOMPARE(paragraph.textData().text, QStringLiteral("First paragraph\nSecond"));
+    QCOMPARE(paragraph.textData().frame, QSizeF(100, 150));
+    QCOMPARE(paragraph.textOrigin(), QPointF(10, 20));
+}
 
 // Dashes (relative to the outline width), ends and corners survive SVG, and the renderer uses them.
 void ToolTests::outlineStyles()

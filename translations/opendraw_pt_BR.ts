@@ -237,6 +237,10 @@
         <translation>Converter em curvas</translation>
     </message>
     <message>
+        <source>Convert text</source>
+        <translation>Converter texto</translation>
+    </message>
+    <message>
         <source>Ungroup</source>
         <translation>Desagrupar</translation>
     </message>
@@ -823,6 +827,14 @@ Clique esquerdo: preenchimento · Clique direito: contorno</translation>
         <translation>Unir dois nós finais (Shift+clique no segundo nó)</translation>
     </message>
     <message>
+        <source>Te&amp;xt</source>
+        <translation>&amp;Texto</translation>
+    </message>
+    <message>
+        <source>&amp;Convert to Paragraph/Artistic Text</source>
+        <translation>&amp;Converter em texto de parágrafo/artístico</translation>
+    </message>
+    <message>
         <source>&amp;Tools</source>
         <translation>&amp;Ferramentas</translation>
     </message>
@@ -1051,8 +1063,8 @@ Clique esquerdo: preenchimento · Clique direito: contorno</translation>
         <translation>Arraste para desenhar uma grade de retângulos; Ctrl a mantém quadrada</translation>
     </message>
     <message>
-        <source>Click to place text and type; Esc finishes</source>
-        <translation>Clique para posicionar o texto e digite; Esc termina</translation>
+        <source>Click for artistic text, or drag a frame for paragraph text, then type; Esc finishes</source>
+        <translation>Clique para texto artístico, ou arraste um quadro para texto de parágrafo, e digite; Esc termina</translation>
     </message>
     <message>
         <source>Click inside an object to fill it, on its outline to colour the outline; Shift+click or Esc picks another colour</source>

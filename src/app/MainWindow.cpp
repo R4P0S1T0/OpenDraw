@@ -491,6 +491,11 @@ void MainWindow::createActions()
             m_nodeActions << action;
     }
 
+    // Text
+    QMenu *textMenu = menuBar()->addMenu(tr("Te&xt"));
+    textMenu->addAction(tr("&Convert to Paragraph/Artistic Text"), QKeySequence(Qt::CTRL | Qt::Key_F8), m_canvas,
+                        &CanvasWidget::convertTextKind);
+
     // Tools
     QMenu *toolsMenu = menuBar()->addMenu(tr("&Tools"));
     createToolbox(toolsMenu);
@@ -838,7 +843,7 @@ QString MainWindow::toolHint() const
     case CanvasWidget::Tool::GraphPaper:
         return tr("Drag to draw a grid of rectangles; Ctrl keeps it square");
     case CanvasWidget::Tool::Text:
-        return tr("Click to place text and type; Esc finishes");
+        return tr("Click for artistic text, or drag a frame for paragraph text, then type; Esc finishes");
     case CanvasWidget::Tool::Eyedropper:
         return m_canvas->eyedropperColor()
                    ? tr("Click inside an object to fill it, on its outline to colour the outline; Shift+click or Esc "
