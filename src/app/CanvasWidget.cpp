@@ -414,8 +414,119 @@ void CanvasWidget::setSelection(std::vector<Shape *> shapes)
         return;
     m_selection = std::move(shapes);
     setActiveNode({});
+    m_rotationCenter.reset();
+    setRotateMode(false);
     update();
     emit selectionChanged();
+}
+
+// ---------------------------------------------------------------------------------------------
+// Rotating and skewing (second click on the selection)
+
+void CanvasWidget::setRotateMode(bool rotating)
+{
+    rotating = rotating && !m_selection.empty();
+    if (rotating == m_rotateMode)
+        return;
+    m_rotateMode = rotating;
+    update();
+    emit transformModeChanged(rotating);
+}
+
+QPointF CanvasWidget::rotationCenter() const
+{
+    return m_rotationCenter.value_or(selectionBounds().center());
+}
+
+bool CanvasWidget::rotationCenterAt(const QPointF &widgetPosition) const
+{
+    return m_rotateMode && m_tool == Tool::Select && !m_selection.empty()
+           && distance(toWidget(rotationCenter()), widgetPosition) <= kNodeHitPx + 2;
+}
+
+void CanvasWidget::applyLiveTransform(const QTransform &t)
+{
+    const QTransform delta = m_liveTransform.inverted() * t;
+    for (Shape *shape : m_selection)
+        shape->transform(delta);
+    m_liveTransform = t;
+    if (!m_selection.empty())
+        m_document->notifyShapeChanged(m_selection.front());
+}
+
+void CanvasWidget::commitLiveTransform(const QString &text)
+{
+    const QTransform t = m_liveTransform;
+    m_liveTransform = QTransform();
+    if (t.isIdentity() || m_selection.empty())
+        return;
+    m_undoStack->beginMacro(text);
+    for (Shape *shape : m_selection)
+        m_undoStack->push(new TransformShapeCommand(m_document, shape, t, text, true));
+    m_undoStack->endMacro();
+}
+
+void CanvasWidget::rotateSelection(double degrees)
+{
+    if (m_selection.empty() || std::abs(degrees) < 1e-9)
+        return;
+    const QPointF c = rotationCenter();
+    QTransform t = QTransform::fromTranslate(-c.x(), -c.y());
+    t *= QTransform().rotate(degrees);
+    t *= QTransform::fromTranslate(c.x(), c.y());
+    const QString text = tr("Rotate");
+    m_undoStack->beginMacro(text);
+    for (Shape *shape : m_selection)
+        m_undoStack->push(new TransformShapeCommand(m_document, shape, t, text));
+    m_undoStack->endMacro();
+}
+
+void CanvasWidget::paintTransformHandles(QPainter &painter, const QRectF &box)
+{
+    const QColor highlight = palette().color(QPalette::Highlight);
+    painter.setRenderHint(QPainter::Antialiasing);
+    const QPen pen(highlight, 1.6, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
+    auto arrowHead = [&painter](const QPointF &tip, double angle) {
+        const double a = angle * std::numbers::pi / 180.0;
+        const QPointF back(std::cos(a), std::sin(a));
+        const QPointF side(-back.y(), back.x());
+        painter.drawLine(tip, tip - back * 4 + side * 3);
+        painter.drawLine(tip, tip - back * 4 - side * 3);
+    };
+    // Corners: curved double arrows (rotate).
+    const QPointF corners[] = {box.topLeft(), box.topRight(), box.bottomRight(), box.bottomLeft()};
+    const double startAngles[] = {90, 0, 270, 180}; // arc bulging away from the box
+    for (int i = 0; i < 4; ++i) {
+        const QRectF arc = squareAround(corners[i], 14);
+        painter.setPen(pen);
+        painter.setBrush(Qt::NoBrush);
+        QPainterPath path;
+        path.arcMoveTo(arc, startAngles[i]);
+        path.arcTo(arc, startAngles[i], 90);
+        painter.drawPath(path);
+        const QPointF a = path.pointAtPercent(0), b = path.pointAtPercent(1);
+        arrowHead(a, std::atan2(a.y() - b.y(), a.x() - b.x()) * 180.0 / std::numbers::pi);
+        arrowHead(b, std::atan2(b.y() - a.y(), b.x() - a.x()) * 180.0 / std::numbers::pi);
+    }
+    // Edges: straight double arrows along the edge (skew).
+    const QPointF top(box.center().x(), box.top()), bottom(box.center().x(), box.bottom());
+    const QPointF left(box.left(), box.center().y()), right(box.right(), box.center().y());
+    for (const QPointF &p : {top, bottom}) {
+        painter.drawLine(p - QPointF(7, 0), p + QPointF(7, 0));
+        arrowHead(p - QPointF(7, 0), 180);
+        arrowHead(p + QPointF(7, 0), 0);
+    }
+    for (const QPointF &p : {left, right}) {
+        painter.drawLine(p - QPointF(0, 7), p + QPointF(0, 7));
+        arrowHead(p - QPointF(0, 7), 270);
+        arrowHead(p + QPointF(0, 7), 90);
+    }
+    // Rotation centre: a circle with a dot.
+    const QPointF c = toWidget(rotationCenter());
+    painter.setBrush(Qt::white);
+    painter.drawEllipse(c, 5, 5);
+    painter.setBrush(highlight);
+    painter.drawEllipse(c, 1.5, 1.5);
 }
 
 bool CanvasWidget::isSelected(const Shape *shape) const
@@ -768,7 +879,9 @@ void CanvasWidget::paintTextEdit(QPainter &painter)
     painter.setBrush(Qt::NoBrush);
     painter.drawRect(viewTransform().mapRect(m_editText->bounds()).adjusted(-3, -3, 3, 3));
 
-    const QLineF caret = textlayout::caret(m_editText->textData(), m_editText->textOrigin(), m_textCursor);
+    // The caret turns with rotated text.
+    const QLineF caret = m_editText->shapeTransform().map(
+        textlayout::caret(m_editText->textData(), m_editText->textOrigin(), m_textCursor));
     painter.setPen(QPen(Qt::black, 1.5));
     painter.drawLine(toWidget(caret.p1()), toWidget(caret.p2()));
 }
@@ -1303,7 +1416,12 @@ void CanvasWidget::setHoverCursor(const QPointF &widgetPosition)
                                              Qt::SizeHorCursor,   Qt::SizeFDiagCursor, Qt::SizeVerCursor,
                                              Qt::SizeBDiagCursor, Qt::SizeHorCursor};
     const int handle = m_spaceHeld ? -1 : resizeHandleAt(widgetPosition);
-    if (handle >= 0)
+    if (m_rotateMode && !m_spaceHeld && rotationCenterAt(widgetPosition))
+        setCursor(Qt::SizeAllCursor);
+    else if (m_rotateMode && handle >= 0)
+        setCursor(handle % 2 == 0 ? QCursor(icon(Icon::Rotate).pixmap(QSize(24, 24)), 12, 12)
+                                  : QCursor(handle == 1 || handle == 5 ? Qt::SplitHCursor : Qt::SplitVCursor));
+    else if (handle >= 0)
         setCursor(shapes[handle]);
     else if (m_tool == Tool::Node && !m_spaceHeld && (nodeAt(widgetPosition).isValid() || nodeHandleAt(widgetPosition)))
         setCursor(Qt::SizeAllCursor);
@@ -1414,7 +1532,9 @@ void CanvasWidget::paintSelection(QPainter &painter)
     painter.setPen(QPen(highlight, 1, Qt::DashLine));
     painter.setBrush(Qt::NoBrush);
     painter.drawRect(box);
-    if (m_tool == Tool::Select) {
+    if (m_tool == Tool::Select && m_rotateMode) {
+        paintTransformHandles(painter, box);
+    } else if (m_tool == Tool::Select) {
         painter.setPen(QPen(highlight, 1));
         painter.setBrush(Qt::white);
         for (const QRectF &handle : resizeHandleRects())
@@ -1569,6 +1689,21 @@ void CanvasWidget::mousePressEvent(QMouseEvent *event)
     }
 
     case Tool::Select: {
+        if (m_rotateMode && !shift) {
+            if (rotationCenterAt(pos)) {
+                m_drag = Drag::RotationCenter;
+                break;
+            }
+            if (const int handle = resizeHandleAt(pos); handle >= 0) {
+                // Corners rotate, edge midpoints skew.
+                m_drag = handle % 2 == 0 ? Drag::Rotate : Drag::Skew;
+                m_resizeHandle = handle;
+                m_transformBox = selectionBounds();
+                m_transformCenter = rotationCenter();
+                m_liveTransform = QTransform();
+                break;
+            }
+        }
         if (const int handle = resizeHandleAt(pos); handle >= 0 && !shift) {
             m_drag = Drag::Resize;
             m_resizeHandle = handle;
@@ -1603,7 +1738,8 @@ void CanvasWidget::mousePressEvent(QMouseEvent *event)
             setSelection(std::move(selection));
             break;
         }
-        if (!isSelected(hit))
+        m_pressedSelected = isSelected(hit);
+        if (!m_pressedSelected)
             setSelectedShape(hit);
         m_drag = Drag::Move; // moves everything selected
         m_moveOriginal = selectionBounds();
@@ -1728,6 +1864,41 @@ void CanvasWidget::mouseMoveEvent(QMouseEvent *event)
 
     case Drag::Guide:
         updateGuideDrag(pos);
+        break;
+
+    case Drag::Rotate: {
+        const QPointF c = m_transformCenter;
+        const double from = std::atan2(m_dragStart.y() - c.y(), m_dragStart.x() - c.x());
+        const double to = std::atan2(docPos.y() - c.y(), docPos.x() - c.x());
+        double degrees = (to - from) * 180.0 / std::numbers::pi;
+        if (event->modifiers() & Qt::ControlModifier)
+            degrees = std::round(degrees / 15.0) * 15.0; // Ctrl: 15° steps
+        applyLiveTransform(QTransform::fromTranslate(-c.x(), -c.y()) * QTransform().rotate(degrees)
+                           * QTransform::fromTranslate(c.x(), c.y()));
+        break;
+    }
+
+    case Drag::Skew: {
+        // The dragged edge slides along itself; the rotation centre stays put.
+        const QPointF c = m_transformCenter;
+        const QPointF d = docPos - m_dragStart;
+        QTransform shear;
+        if (m_resizeHandle == 1 || m_resizeHandle == 5) {
+            const double edge = m_resizeHandle == 1 ? m_transformBox.top() : m_transformBox.bottom();
+            if (std::abs(edge - c.y()) > 1e-9)
+                shear = QTransform(1, 0, d.x() / (edge - c.y()), 1, 0, 0);
+        } else {
+            const double edge = m_resizeHandle == 3 ? m_transformBox.right() : m_transformBox.left();
+            if (std::abs(edge - c.x()) > 1e-9)
+                shear = QTransform(1, d.y() / (edge - c.x()), 0, 1, 0, 0);
+        }
+        applyLiveTransform(QTransform::fromTranslate(-c.x(), -c.y()) * shear * QTransform::fromTranslate(c.x(), c.y()));
+        break;
+    }
+
+    case Drag::RotationCenter:
+        m_rotationCenter = snapPoint(docPos);
+        update();
         break;
 
     case Drag::Resize: {
@@ -1890,9 +2061,24 @@ void CanvasWidget::mouseReleaseEvent(QMouseEvent *event)
             for (Shape *shape : m_selection)
                 m_undoStack->push(new MoveShapeCommand(m_document, shape, total, true));
             m_undoStack->endMacro();
+        } else if (m_pressedSelected && !(event->modifiers() & Qt::ShiftModifier)) {
+            // Clicking the selection again switches between resize and rotate/skew handles.
+            setRotateMode(!m_rotateMode);
         }
+        m_pressedSelected = false;
         break;
     }
+
+    case Drag::Rotate:
+        commitLiveTransform(tr("Rotate"));
+        break;
+
+    case Drag::Skew:
+        commitLiveTransform(tr("Skew"));
+        break;
+
+    case Drag::RotationCenter:
+        break;
 
     case Drag::Resize: {
         bool changed = false;

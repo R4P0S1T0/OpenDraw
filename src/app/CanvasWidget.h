@@ -42,6 +42,8 @@ public:
     Shape *selectedShape() const { return m_selection.size() == 1 ? m_selection.front() : nullptr; }
     void setSelectedShape(Shape *shape);
     void setSelection(std::vector<Shape *> shapes);
+    // Second click on the selection: rotate and skew handles instead of resize handles.
+    bool rotateMode() const { return m_rotateMode; }
 
     const Style &defaultStyle() const { return m_defaultStyle; }
     void setDefaultStyle(const Style &style) { m_defaultStyle = style; }
@@ -110,6 +112,8 @@ public slots:
     // Copies the selection, offset by duplicateOffset(), and selects the copies.
     void duplicateSelection();
     void mirrorSelection(Qt::Orientation orientation);
+    // Turns the selection by `degrees` (clockwise on screen) around its rotation centre.
+    void rotateSelection(double degrees);
     void nudgeSelection(const QPointF &offset);
 
     void selectAll();
@@ -149,6 +153,8 @@ signals:
     // Zoom or scroll position changed.
     void viewChanged();
     void toolChanged(opendraw::CanvasWidget::Tool tool);
+    // The selection switched between resize handles and rotate/skew handles.
+    void transformModeChanged(bool rotating);
     void cursorMoved(const QPointF &documentPosition);
     void selectionChanged();
     void nodeSelectionChanged();
@@ -170,6 +176,7 @@ protected:
 private:
     enum class Drag {
         None, Pan, Move, Resize, Marquee, Create, NodeMove, NodeHandle, BezierHandle, Freehand, ZoomBox, Guide,
+        Rotate, Skew, RotationCenter,
     };
     enum class NodeHandle { In, Out };
 
@@ -217,6 +224,14 @@ private:
     QPointF snapBox(const QRectF &box) const;
     std::vector<double> snapTargets(Qt::Orientation axis) const;
     int guideAt(const QPointF &widgetPosition) const;
+    // Rotate/skew mode: the point the selection turns around (document coordinates).
+    QPointF rotationCenter() const;
+    bool rotationCenterAt(const QPointF &widgetPosition) const;
+    void setRotateMode(bool rotating);
+    // Applies `t` to the selection live, replacing what the current drag applied so far.
+    void applyLiveTransform(const QTransform &t);
+    void commitLiveTransform(const QString &text);
+    void paintTransformHandles(QPainter &painter, const QRectF &box);
     QPainterPath toolShapePreview(const QRectF &box) const;
     std::unique_ptr<Shape> createToolShape(const QRectF &box) const;
     QColor colorAt(const QPointF &widgetPosition) const;
@@ -275,6 +290,12 @@ private:
     QRectF m_marquee;    // rubber-band selection, document coordinates
     QRectF m_zoomBox;    // zoom tool rectangle, document coordinates
     QRectF m_moveOriginal; // selection bounds when a move started
+    bool m_pressedSelected = false;        // the click landed on an object that was already selected
+    bool m_rotateMode = false;             // second click: rotate and skew handles
+    std::optional<QPointF> m_rotationCenter; // moved by the user; otherwise the selection centre
+    QTransform m_liveTransform;            // applied to the selection by the current rotate/skew drag
+    QRectF m_transformBox;                 // selection bounds when that drag started
+    QPointF m_transformCenter;             // rotation centre when that drag started
     bool m_marqueeAdds = false;
     int m_resizeHandle = -1;
     QRectF m_resizeOriginal;                // selection bounds when the resize started

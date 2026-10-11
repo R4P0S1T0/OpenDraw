@@ -341,11 +341,12 @@ private:
     QString m_newName;
 };
 
-// Applies an invertible transform (mirroring, for example) to a shape.
+// Applies an invertible transform (mirroring, rotating, skewing) to a shape. With
+// `alreadyApplied`, the shape was transformed live while dragging and the first redo does nothing.
 class TransformShapeCommand : public QUndoCommand {
 public:
     TransformShapeCommand(Document *document, Shape *shape, const QTransform &transform, const QString &text,
-                          QUndoCommand *parent = nullptr);
+                          bool alreadyApplied = false, QUndoCommand *parent = nullptr);
 
     void redo() override;
     void undo() override;
@@ -354,6 +355,7 @@ private:
     Document *m_document;
     Shape *m_shape;
     QTransform m_transform;
+    bool m_skipRedo;
 };
 
 class SetCornerRadiusCommand : public QUndoCommand {

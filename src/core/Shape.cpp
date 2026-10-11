@@ -4,6 +4,7 @@
 #include "core/TextLayout.h"
 
 #include <QPainterPathStroker>
+#include <QPolygonF>
 
 #include <algorithm>
 #include <atomic>
@@ -89,12 +90,40 @@ Shape::Shape(QImage image, const QTransform &placement)
 
 Shape::~Shape() = default;
 
-QRectF Shape::bounds() const
+QRectF Shape::localBounds() const
 {
     switch (m_kind) {
     case ShapeKind::Rectangle:
     case ShapeKind::Ellipse:
         return m_bounds;
+    case ShapeKind::Text:
+        return textlayout::layout(m_text, m_textOrigin).bounds;
+    default:
+        return bounds();
+    }
+}
+
+double Shape::rotation() const
+{
+    QTransform t;
+    if (m_kind == ShapeKind::Image)
+        t = m_imagePlacement;
+    else if (m_kind == ShapeKind::Rectangle || m_kind == ShapeKind::Ellipse || m_kind == ShapeKind::Text)
+        t = m_shapeTransform;
+    else
+        return 0.0;
+    double degrees = std::atan2(t.m12(), t.m11()) * 180.0 / kPi;
+    if (std::abs(degrees) < 1e-9)
+        degrees = 0.0;
+    return degrees;
+}
+
+QRectF Shape::bounds() const
+{
+    switch (m_kind) {
+    case ShapeKind::Rectangle:
+    case ShapeKind::Ellipse:
+        return m_shapeTransform.isIdentity() ? m_bounds : path().boundingRect();
     case ShapeKind::Path:
         return path().boundingRect();
     case ShapeKind::Group: {
@@ -104,7 +133,7 @@ QRectF Shape::bounds() const
         return united;
     }
     case ShapeKind::Text:
-        return textlayout::layout(m_text, m_textOrigin).bounds;
+        return m_shapeTransform.mapRect(textlayout::layout(m_text, m_textOrigin).bounds);
     case ShapeKind::Image:
         return m_imagePlacement.mapRect(QRectF(0, 0, 1, 1));
     }
@@ -114,7 +143,8 @@ QRectF Shape::bounds() const
 void Shape::setBounds(const QRectF &bounds)
 {
     const QRectF target = bounds.normalized();
-    if ((m_kind == ShapeKind::Rectangle || m_kind == ShapeKind::Ellipse) && !m_style.pattern) {
+    if ((m_kind == ShapeKind::Rectangle || m_kind == ShapeKind::Ellipse) && !m_style.pattern
+        && m_shapeTransform.isIdentity()) {
         m_bounds = target;
         return;
     }
@@ -136,13 +166,32 @@ void Shape::moveBy(const QPointF &delta)
 
 void Shape::transform(const QTransform &t)
 {
-    // A texture fill scales along with the shape it fills.
-    if (m_style.pattern) {
+    // Rectangles, ellipses and texts take a move or scale directly into their geometry while
+    // they are upright; a rotation or skew (and anything after one) goes into shapeTransform().
+    const bool boxed = m_kind == ShapeKind::Rectangle || m_kind == ShapeKind::Ellipse || m_kind == ShapeKind::Text;
+    const bool direct = !boxed || (m_shapeTransform.isIdentity() && t.type() <= QTransform::TxScale);
+
+    // A texture fill scales along with the shape it fills (under shapeTransform() the
+    // painter scales it already).
+    if (m_style.pattern && direct) {
         const double sx = std::hypot(t.m11(), t.m12());
         const double sy = std::hypot(t.m21(), t.m22());
         m_style.pattern->tileSize = QSizeF(m_style.pattern->tileSize.width() * sx,
                                            m_style.pattern->tileSize.height() * sy);
         m_style.pattern->origin = QPointF(m_style.pattern->origin.x() * sx, m_style.pattern->origin.y() * sy);
+    }
+
+    if (!direct) {
+        m_shapeTransform = m_shapeTransform * t;
+        // Back upright (rotated there and back, for example): fold it into the geometry again.
+        const bool upright = m_kind == ShapeKind::Text ? m_shapeTransform.type() <= QTransform::TxTranslate
+                                                       : m_shapeTransform.type() <= QTransform::TxScale;
+        if (upright) {
+            const QTransform fold = m_shapeTransform;
+            m_shapeTransform = QTransform();
+            transform(fold);
+        }
+        return;
     }
 
     switch (m_kind) {
@@ -173,6 +222,15 @@ void Shape::transform(const QTransform &t)
 }
 
 QPainterPath Shape::path() const
+{
+    if (m_kind == ShapeKind::Rectangle || m_kind == ShapeKind::Ellipse || m_kind == ShapeKind::Text) {
+        const QPainterPath local = localPath();
+        return m_shapeTransform.isIdentity() ? local : m_shapeTransform.map(local);
+    }
+    return localPath();
+}
+
+QPainterPath Shape::localPath() const
 {
     QPainterPath path;
     switch (m_kind) {
@@ -213,8 +271,11 @@ bool Shape::contains(const QPointF &point, double tolerance) const
         return std::any_of(m_children.begin(), m_children.end(),
                            [&](const auto &child) { return child->contains(point, tolerance); });
     }
-    if (m_kind == ShapeKind::Text) // letters are thin: the whole text box is clickable
-        return bounds().adjusted(-tolerance, -tolerance, tolerance, tolerance).contains(point);
+    if (m_kind == ShapeKind::Text) { // letters are thin: the whole text box is clickable
+        const QRectF box = localBounds().adjusted(-tolerance, -tolerance, tolerance, tolerance);
+        return m_shapeTransform.isIdentity() ? box.contains(point)
+                                             : m_shapeTransform.map(QPolygonF(box)).containsPoint(point, Qt::OddEvenFill);
+    }
     if (m_kind == ShapeKind::Image)
         return path().contains(point);
 

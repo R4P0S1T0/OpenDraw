@@ -38,6 +38,8 @@ public:
 
 signals:
     void mirrorRequested(Qt::Orientation orientation);
+    // Turn the selection by this many degrees (clockwise on screen).
+    void rotateRequested(double degrees);
     void nudgeDistanceChanged(double documentUnits);
     void duplicateOffsetChanged(const QPointF &documentUnits);
     void toolSettingsChanged(const opendraw::ToolSettings &settings);
@@ -89,6 +91,8 @@ private:
     QSpinBox *m_graphRows;
     QLabel *m_eyedropperSwatch;
     QDoubleSpinBox *m_cornerRadius;
+    QDoubleSpinBox *m_angle;
+    double m_shownAngle = 0.0;
 
     // Page
     QComboBox *m_paper;

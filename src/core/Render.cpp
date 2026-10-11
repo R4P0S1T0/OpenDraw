@@ -63,9 +63,26 @@ void paintShape(QPainter &painter, const Shape &shape)
         painter.restore();
         return;
     }
-    painter.setBrush(fillBrush(style, shape.bounds()));
-    painter.setPen(style.hasStroke() ? QPen(style.stroke, style.strokeWidth) : QPen(Qt::NoPen));
-    painter.drawPath(shape.path());
+    const QTransform own = shape.shapeTransform();
+    if (own.isIdentity()) {
+        painter.setBrush(fillBrush(style, shape.bounds()));
+        painter.setPen(style.hasStroke() ? QPen(style.stroke, style.strokeWidth) : QPen(Qt::NoPen));
+        painter.drawPath(shape.path());
+    } else {
+        // Rotated or skewed: the fill (gradient, texture) turns with the shape; the outline
+        // keeps its width, as for any other shape.
+        painter.save();
+        painter.setTransform(own, true);
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(fillBrush(style, shape.localBounds()));
+        painter.drawPath(shape.localPath());
+        painter.restore();
+        if (style.hasStroke()) {
+            painter.setBrush(Qt::NoBrush);
+            painter.setPen(QPen(style.stroke, style.strokeWidth));
+            painter.drawPath(shape.path());
+        }
+    }
     painter.restore();
 }
 

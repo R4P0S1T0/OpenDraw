@@ -145,12 +145,25 @@ public:
     quint64 id() const { return m_id; }
     ShapeKind kind() const { return m_kind; }
 
+    // Bounding box on the page.
     QRectF bounds() const;
     // Rectangles and ellipses take the new bounds; paths and groups are scaled to fit them.
     void setBounds(const QRectF &bounds);
     void moveBy(const QPointF &delta);
-    // Moves and scales the geometry. Only translation and scaling are supported for now.
+    // Moves, scales, rotates or skews the geometry.
     void transform(const QTransform &t);
+
+    // Rectangles, ellipses and texts keep their own geometry (box, text origin and size) and
+    // carry rotation and skew here, mapping that geometry onto the page, so they stay
+    // editable as what they are. Identity unless the shape was rotated or skewed.
+    QTransform shapeTransform() const { return m_shapeTransform; }
+    void setShapeTransform(const QTransform &t) { m_shapeTransform = t; }
+    // Geometry before shapeTransform(): the outline and its bounding box.
+    QPainterPath localPath() const;
+    QRectF localBounds() const;
+    // Rotation of the shape in degrees (clockwise on screen), as far as it has one: taken from
+    // shapeTransform() for rectangles, ellipses and texts, from the placement for bitmaps, 0 otherwise.
+    double rotation() const;
 
     // A group has no style of its own; see forEachLeaf.
     const Style &style() const { return m_style; }
@@ -202,6 +215,7 @@ private:
     ShapeKind m_kind;
     QRectF m_bounds;                              // rectangles and ellipses
     double m_cornerRadius = 0.0;                  // rectangles
+    QTransform m_shapeTransform;                  // rectangles, ellipses, text
     PathData m_path;                              // paths
     std::vector<std::unique_ptr<Shape>> m_children; // groups
     TextData m_text;                                // text

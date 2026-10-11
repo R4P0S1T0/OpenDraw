@@ -126,6 +126,17 @@ void writeStyle(QXmlStreamWriter &w, const Style &style, const QString &gradient
         w.writeAttribute(QStringLiteral("opacity"), number(std::clamp(style.opacity, 0.0, 1.0)));
 }
 
+// Rotation or skew of a rectangle, ellipse or text. The outline width is kept as it is on
+// the page, as OpenDraw draws it.
+void writeShapeTransform(QXmlStreamWriter &w, const Shape &shape)
+{
+    if (shape.shapeTransform().isIdentity())
+        return;
+    w.writeAttribute(QStringLiteral("transform"), matrix(shape.shapeTransform()));
+    if (shape.style().hasStroke())
+        w.writeAttribute(QStringLiteral("vector-effect"), QStringLiteral("non-scaling-stroke"));
+}
+
 void writeShape(QXmlStreamWriter &w, const Shape &shape, int &gradientCount)
 {
     // A gradient is written right before the element that uses it.
@@ -133,7 +144,7 @@ void writeShape(QXmlStreamWriter &w, const Shape &shape, int &gradientCount)
     if (shape.kind() != ShapeKind::Group && shape.kind() != ShapeKind::Image) {
         if (shape.style().pattern) {
             gradientId = QStringLiteral("pattern%1").arg(++gradientCount);
-            writePattern(w, *shape.style().pattern, shape.bounds(), gradientId);
+            writePattern(w, *shape.style().pattern, shape.localBounds(), gradientId);
         } else if (shape.style().gradient) {
             gradientId = QStringLiteral("gradient%1").arg(++gradientCount);
             writeGradient(w, *shape.style().gradient, gradientId);
@@ -145,7 +156,7 @@ void writeShape(QXmlStreamWriter &w, const Shape &shape, int &gradientCount)
         writeImageElement(w, shape.image(), QRectF(0, 0, 1, 1), shape.imagePlacement());
         return;
     case ShapeKind::Rectangle: {
-        const QRectF r = shape.bounds();
+        const QRectF r = shape.localBounds();
         w.writeStartElement(QStringLiteral("rect"));
         w.writeAttribute(QStringLiteral("x"), number(r.x()));
         w.writeAttribute(QStringLiteral("y"), number(r.y()));
@@ -159,7 +170,7 @@ void writeShape(QXmlStreamWriter &w, const Shape &shape, int &gradientCount)
         break;
     }
     case ShapeKind::Ellipse: {
-        const QRectF r = shape.bounds();
+        const QRectF r = shape.localBounds();
         w.writeStartElement(QStringLiteral("ellipse"));
         w.writeAttribute(QStringLiteral("cx"), number(r.center().x()));
         w.writeAttribute(QStringLiteral("cy"), number(r.center().y()));
@@ -193,6 +204,7 @@ void writeShape(QXmlStreamWriter &w, const Shape &shape, int &gradientCount)
         if (f.align != TextAlign::Left)
             w.writeAttribute(QStringLiteral("text-anchor"),
                              f.align == TextAlign::Center ? QStringLiteral("middle") : QStringLiteral("end"));
+        writeShapeTransform(w, shape);
         writeStyle(w, shape.style(), gradientId);
         // One tspan per line, each on its own baseline.
         const QStringList lines = shape.textData().text.split(QLatin1Char('\n'));
@@ -207,6 +219,7 @@ void writeShape(QXmlStreamWriter &w, const Shape &shape, int &gradientCount)
         return;
     }
     }
+    writeShapeTransform(w, shape);
     writeStyle(w, shape.style(), gradientId);
     w.writeEndElement();
 }
@@ -450,17 +463,27 @@ private:
     QHash<QString, QString> m_style;
 };
 
-// Rectangles and ellipses stay editable as such unless rotated or skewed, which needs a path.
-std::unique_ptr<Shape> makeBoxShape(ShapeKind kind, const QRectF &rect, const QTransform &t, const Style &style)
+// Rectangles and ellipses stay editable as such; a rotation or skew becomes their shape transform.
+std::unique_ptr<Shape> makeBoxShape(ShapeKind kind, const QRectF &rect, const QTransform &t, const Style &style,
+                                    double cornerRadius = 0.0)
 {
-    if (t.type() <= QTransform::TxScale)
-        return std::make_unique<Shape>(kind, t.mapRect(rect), style);
-    QPainterPath path;
-    if (kind == ShapeKind::Ellipse)
-        path.addEllipse(rect);
-    else
-        path.addRect(rect);
-    return std::make_unique<Shape>(pathops::fromPainterPath(t.map(path)), style);
+    if (t.type() <= QTransform::TxScale) {
+        auto shape = std::make_unique<Shape>(kind, t.mapRect(rect), style);
+        shape->setCornerRadius(cornerRadius * std::min(std::abs(t.m11()), std::abs(t.m22())));
+        return shape;
+    }
+    auto shape = std::make_unique<Shape>(kind, rect, style);
+    shape->setCornerRadius(cornerRadius);
+    shape->setShapeTransform(t);
+    return shape;
+}
+
+// How much the transform scales outline widths: not at all with vector-effect="non-scaling-stroke".
+double strokeScaleOf(const QTransform &t, const Properties &props)
+{
+    if (props.value(QStringLiteral("vector-effect")).trimmed() == u"non-scaling-stroke")
+        return 1.0;
+    return std::sqrt(std::abs(t.determinant()));
 }
 
 std::unique_ptr<Shape> makePathShape(PathData path, const QTransform &t, const Style &style)
@@ -832,13 +855,17 @@ std::unique_ptr<Shape> readText(QXmlStreamReader &r, const Properties &props, co
         format.lineSpacing = (lineBaselines[1] - lineBaselines[0]) / format.size;
 
     const QTransform &t = context.transform;
-    const double scale = std::sqrt(std::abs(t.determinant()));
-    if (t.type() > QTransform::TxScale)
-        ++report.skippedElements[QCoreApplication::translate("SvgIO", "rotated or skewed text (shown upright)")];
-    format.size *= scale;
-    const QPointF origin = t.map(QPointF(x.value_or(0.0), y.value_or(0.0)));
-    Style style = props.style(scale, report);
-    return std::make_unique<Shape>(TextData{lines.join(QLatin1Char('\n')), format}, origin, style);
+    const QPointF position(x.value_or(0.0), y.value_or(0.0));
+    const Style style = props.style(strokeScaleOf(t, props), report);
+    TextData text{lines.join(QLatin1Char('\n')), format};
+    if (t.type() > QTransform::TxScale) {
+        // Rotated or skewed: the text keeps its own size and position, turned by the transform.
+        auto shape = std::make_unique<Shape>(std::move(text), position, style);
+        shape->setShapeTransform(t);
+        return shape;
+    }
+    text.format.size *= std::sqrt(std::abs(t.determinant()));
+    return std::make_unique<Shape>(std::move(text), t.map(position), style);
 }
 
 PathData pointsToPath(QStringView points, bool closed)
@@ -1124,7 +1151,7 @@ bool read(QIODevice *device, Document &document, QString *errorMessage, ReadRepo
             continue; // readText consumed the whole element, end tag included
         } else if (context.rendering) {
             const QTransform &t = context.transform;
-            const double strokeScale = std::sqrt(std::abs(t.determinant()));
+            const double strokeScale = strokeScaleOf(t, props);
             std::unique_ptr<Shape> shape;
 
             if (name == u"rect") {
@@ -1138,12 +1165,11 @@ bool read(QIODevice *device, Document &document, QString *errorMessage, ReadRepo
                     ry = rx;
                 if (rect.width() > 0.0 && rect.height() > 0.0) {
                     const Style style = props.style(strokeScale, localReport);
-                    const double scale = std::abs(t.m11());
-                    if (rx > 0.0 && std::abs(rx - ry) < 1e-9 && t.type() <= QTransform::TxScale
-                        && std::abs(std::abs(t.m22()) - scale) < 1e-9) {
-                        // Equal radii stay an editable rounded rectangle.
-                        shape = makeBoxShape(ShapeKind::Rectangle, rect, t, style);
-                        shape->setCornerRadius(rx * scale);
+                    // Equal radii stay an editable rounded rectangle (unless stretched unevenly).
+                    const bool even = t.type() > QTransform::TxScale
+                                      || std::abs(std::abs(t.m11()) - std::abs(t.m22())) < 1e-9;
+                    if (rx > 0.0 && std::abs(rx - ry) < 1e-9 && even) {
+                        shape = makeBoxShape(ShapeKind::Rectangle, rect, t, style, rx);
                     } else if (rx > 0.0) {
                         QPainterPath rounded;
                         rounded.addRoundedRect(rect, std::min(rx, rect.width() / 2), std::min(ry, rect.height() / 2));

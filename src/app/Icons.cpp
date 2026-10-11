@@ -356,6 +356,22 @@ void draw(QPainter &p, Icon id, const QColor &ink, const QColor &accent, const Q
         p.drawPath(corner);
         break;
     }
+    case Icon::Rotate:
+    case Icon::RotateCounterclockwise: {
+        if (id == Icon::RotateCounterclockwise) {
+            p.translate(24, 0);
+            p.scale(-1, 1);
+        }
+        // Three quarters of a circle with an arrow head, turning clockwise.
+        QPainterPath arc;
+        arc.arcMoveTo(QRectF(5, 5, 14, 14), 150);
+        arc.arcTo(QRectF(5, 5, 14, 14), 150, -270);
+        p.drawPath(arc);
+        const QPointF tip = arc.pointAtPercent(1.0);
+        p.setBrush(ink);
+        polygon({tip + QPointF(-3.5, -2.5), tip + QPointF(3, -3.5), tip + QPointF(0.5, 3)});
+        break;
+    }
     case Icon::ScrollUp:
     case Icon::ScrollDown:
     case Icon::ScrollLeft:

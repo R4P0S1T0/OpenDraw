@@ -277,7 +277,10 @@ void CoreTests::importsGroupsTransformsAndInheritedStyle()
     QCOMPARE(circle.bounds(), QRectF(100, 50, 20, 20));
     QCOMPARE(circle.style().strokeWidth, 6.0); // scaled with the group
 
-    QCOMPARE(doc.shapes()[1]->kind(), ShapeKind::Path); // rotated rectangle becomes a path
+    // A rotated rectangle stays a rectangle, turned by its shape transform.
+    QCOMPARE(doc.shapes()[1]->kind(), ShapeKind::Rectangle);
+    QVERIFY(std::abs(doc.shapes()[1]->rotation() - 45.0) < 1e-9);
+    QCOMPARE(doc.shapes()[1]->localBounds(), QRectF(0, 0, 10, 10));
     QCOMPARE(doc.shapes()[2]->pathData().front().nodes.size(), std::size_t(3));
     QVERIFY(!doc.shapes()[3]->style().hasFill());
 }

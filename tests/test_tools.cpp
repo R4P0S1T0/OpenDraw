@@ -48,7 +48,88 @@ private slots:
     void roundedRectangles();
     void guidelinesUndoAndSvg();
     void readsInkscapeGuides();
+    void rotatedShapesStayEditable();
+    void rotatedTextAndSvg();
 };
+
+namespace {
+QTransform rotationAround(const QPointF &c, double degrees)
+{
+    return QTransform::fromTranslate(-c.x(), -c.y()) * QTransform().rotate(degrees) * QTransform::fromTranslate(c.x(), c.y());
+}
+
+bool sameRect(const QRectF &a, const QRectF &b)
+{
+    return near(a.x(), b.x(), 1e-6) && near(a.y(), b.y(), 1e-6) && near(a.width(), b.width(), 1e-6)
+           && near(a.height(), b.height(), 1e-6);
+}
+} // namespace
+
+void ToolTests::rotatedShapesStayEditable()
+{
+    Style style;
+    style.strokeWidth = 2;
+    Shape rect(ShapeKind::Rectangle, QRectF(0, 0, 100, 50), style);
+    rect.setCornerRadius(5);
+    rect.transform(rotationAround({50, 25}, 90));
+    QCOMPARE(rect.kind(), ShapeKind::Rectangle);
+    QVERIFY(near(rect.rotation(), 90));
+    QVERIFY(sameRect(rect.bounds(), QRectF(25, -25, 50, 100)));
+    QVERIFY(sameRect(rect.localBounds(), QRectF(0, 0, 100, 50)));
+    QCOMPARE(rect.cornerRadius(), 5.0);
+
+    // Moving and scaling a turned rectangle keep it turned.
+    rect.moveBy({10, 0});
+    QVERIFY(sameRect(rect.bounds(), QRectF(35, -25, 50, 100)));
+    rect.setBounds(QRectF(35, -25, 50, 200));
+    QVERIFY(sameRect(rect.bounds(), QRectF(35, -25, 50, 200)));
+
+    // Turned back upright, it is an ordinary rectangle again.
+    Shape ellipse(ShapeKind::Ellipse, QRectF(0, 0, 40, 20));
+    ellipse.transform(rotationAround({20, 10}, 30));
+    QVERIFY(!ellipse.shapeTransform().isIdentity());
+    ellipse.transform(rotationAround({20, 10}, -30));
+    QVERIFY(ellipse.shapeTransform().isIdentity());
+    QVERIFY(sameRect(ellipse.bounds(), QRectF(0, 0, 40, 20)));
+
+    // Rotated rectangles are saved as rectangles with a transform, outline width unchanged.
+    Document doc;
+    auto owned = std::make_unique<Shape>(ShapeKind::Rectangle, QRectF(0, 0, 100, 50), style);
+    owned->transform(rotationAround({50, 25}, 30) * QTransform::fromScale(2, 2));
+    doc.insertShape(-1, std::move(owned));
+    const QByteArray data = writeSvg(doc);
+    QVERIFY(data.contains("non-scaling-stroke"));
+    auto copy = readSvg(data);
+    const Shape &read = *copy->shapes().front();
+    QCOMPARE(read.kind(), ShapeKind::Rectangle);
+    QVERIFY(near(read.rotation(), 30, 1e-6));
+    QVERIFY(near(read.style().strokeWidth, 2));
+    QVERIFY(sameRect(read.bounds(), doc.shapes().front()->bounds()));
+}
+
+void ToolTests::rotatedTextAndSvg()
+{
+    TextFormat format;
+    format.size = 20;
+    Shape text(TextData{QStringLiteral("Hello"), format}, QPointF(10, 50), Style{});
+    const QRectF upright = text.bounds();
+    text.transform(rotationAround(upright.center(), 90));
+    QVERIFY(near(text.rotation(), 90));
+    QVERIFY(near(text.bounds().width(), upright.height(), 1e-3));
+    QVERIFY(near(text.textData().format.size, 20)); // the font keeps its size
+    QVERIFY(text.contains(text.bounds().center(), 0));
+
+    Document doc;
+    auto owned = std::make_unique<Shape>(TextData{QStringLiteral("Hello"), format}, QPointF(10, 50), Style{});
+    owned->transform(rotationAround(upright.center(), 45));
+    doc.insertShape(-1, std::move(owned));
+    auto copy = readSvg(writeSvg(doc));
+    const Shape &read = *copy->shapes().front();
+    QCOMPARE(read.kind(), ShapeKind::Text);
+    QVERIFY(near(read.rotation(), 45, 1e-6));
+    QVERIFY(near(read.textData().format.size, 20));
+    QVERIFY(sameRect(read.bounds(), doc.shapes().front()->bounds()));
+}
 
 void ToolTests::polygonHasItsCornersOnTheBox()
 {

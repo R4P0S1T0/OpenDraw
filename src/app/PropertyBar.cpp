@@ -105,6 +105,12 @@ PropertyBar::PropertyBar(Document *document, QUndoStack *undoStack, QWidget *par
     m_cornerRadius = addField(tr("Corners"), tr("Corner radius of the rectangle"), 0.0, m_cornerActions);
     m_objectActions << m_cornerActions;
     m_objectActions << addSeparator();
+    m_objectActions << addSeparator();
+    m_angle = addField(tr("Angle"), tr("Rotation angle (degrees, clockwise)"), -360.0, m_objectActions);
+    m_angle->setRange(-360.0, 360.0);
+    m_angle->setDecimals(1);
+    m_angle->setSuffix(QStringLiteral("°"));
+    m_angle->setMinimumWidth(80);
     QToolButton *mirrorH = addButton(icon(Icon::MirrorHorizontal), tr("Mirror horizontally"), m_objectActions);
     QToolButton *mirrorV = addButton(icon(Icon::MirrorVertical), tr("Mirror vertically"), m_objectActions);
     m_objectActions << addSeparator();
@@ -168,6 +174,11 @@ PropertyBar::PropertyBar(Document *document, QUndoStack *undoStack, QWidget *par
         connect(box, &QDoubleSpinBox::editingFinished, this, &PropertyBar::applyGeometry);
     connect(m_outline, &QDoubleSpinBox::editingFinished, this, &PropertyBar::applyOutlineWidth);
     connect(m_opacity, &QDoubleSpinBox::editingFinished, this, &PropertyBar::applyOpacity);
+    connect(m_angle, &QDoubleSpinBox::editingFinished, this, [this] {
+        const double delta = m_angle->value() - m_shownAngle;
+        if (std::abs(delta) > 0.01)
+            emit rotateRequested(delta);
+    });
     connect(mirrorH, &QToolButton::clicked, this, [this] { emit mirrorRequested(Qt::Horizontal); });
     connect(mirrorV, &QToolButton::clicked, this, [this] { emit mirrorRequested(Qt::Vertical); });
 
@@ -401,7 +412,7 @@ void PropertyBar::refresh()
         return;
     }
     const bool enabled = m_shape != nullptr;
-    for (QDoubleSpinBox *box : {m_x, m_y, m_width, m_height, m_outline, m_opacity}) {
+    for (QDoubleSpinBox *box : {m_x, m_y, m_width, m_height, m_outline, m_opacity, m_angle}) {
         box->setEnabled(enabled);
         if (!enabled) {
             const QSignalBlocker blocker(box);
@@ -431,6 +442,8 @@ void PropertyBar::refresh()
     setValueQuietly(m_height, units().toDisplay(r.height()));
     setValueQuietly(m_outline, m_shape->style().hasStroke() ? units().toDisplay(m_shape->style().strokeWidth) : 0.0);
     setValueQuietly(m_opacity, opacity * 100.0);
+    m_shownAngle = m_shape->rotation();
+    setValueQuietly(m_angle, m_shownAngle);
     if (m_shape->kind() == ShapeKind::Rectangle)
         setValueQuietly(m_cornerRadius, units().toDisplay(m_shape->cornerRadius()));
 }

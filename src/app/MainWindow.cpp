@@ -143,6 +143,8 @@ MainWindow::MainWindow(QWidget *parent)
     m_nodeBar->hide();
     createTextBar();
     connect(m_propertyBar, &PropertyBar::mirrorRequested, m_canvas, &CanvasWidget::mirrorSelection);
+    connect(m_propertyBar, &PropertyBar::rotateRequested, m_canvas, &CanvasWidget::rotateSelection);
+    connect(m_canvas, &CanvasWidget::transformModeChanged, this, &MainWindow::updateStyleIndicators);
     connect(m_propertyBar, &PropertyBar::nudgeDistanceChanged, m_canvas, &CanvasWidget::setNudgeDistance);
     connect(m_propertyBar, &PropertyBar::duplicateOffsetChanged, m_canvas, &CanvasWidget::setDuplicateOffset);
     connect(m_propertyBar, &PropertyBar::toolSettingsChanged, m_canvas, &CanvasWidget::setToolSettings);
@@ -234,6 +236,15 @@ MainWindow::MainWindow(QWidget *parent)
     updateTitle();
     updateStyleIndicators();
     updateDocumentPalette();
+}
+
+// The undo stack and the document outlive this destructor (they are deleted with the other
+// children afterwards); clearing the stack would otherwise call back into a half-destroyed window.
+MainWindow::~MainWindow()
+{
+    m_undoStack->disconnect(this);
+    m_document->disconnect(this);
+    m_canvas->disconnect(this);
 }
 
 QWidget *MainWindow::createDocumentTabs()
@@ -424,6 +435,12 @@ void MainWindow::createActions()
                              [this] { m_canvas->mirrorSelection(Qt::Horizontal); });
     transformMenu->addAction(icon(Icon::MirrorVertical), tr("Mirror &Vertically"), m_canvas,
                              [this] { m_canvas->mirrorSelection(Qt::Vertical); });
+    transformMenu->addSeparator();
+    transformMenu->addAction(icon(Icon::Rotate), tr("Rotate 90° &Clockwise"), m_canvas,
+                             [this] { m_canvas->rotateSelection(90); });
+    transformMenu->addAction(icon(Icon::RotateCounterclockwise), tr("Rotate 90° C&ounterclockwise"), m_canvas,
+                             [this] { m_canvas->rotateSelection(-90); });
+    transformMenu->addAction(tr("Rotate &180°"), m_canvas, [this] { m_canvas->rotateSelection(180); });
 
     objectMenu->addSeparator();
     objectMenu->addAction(tr("Convert to &Curves"), QKeySequence(Qt::CTRL | Qt::Key_Q), m_canvas,
@@ -1301,6 +1318,10 @@ void MainWindow::updateStyleIndicators()
         text = tr("%1 on %2").arg(prefix, layer->name);
     if (selected && style.opacity < 1.0)
         text += tr("   Opacity: %1%").arg(qRound(style.opacity * 100));
+    if (m_canvas->rotateMode() && m_canvas->tool() == CanvasWidget::Tool::Select)
+        text += QStringLiteral(" — ")
+                + tr("Drag a corner arrow to rotate (Ctrl: 15° steps), an edge arrow to skew, the centre to move "
+                     "it; click the selection again to resize");
     m_hintLabel->setText(text);
 }
 

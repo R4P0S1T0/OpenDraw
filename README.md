@@ -44,6 +44,7 @@ The workspace follows the layout desktop designers know: menu bar and standard t
 | Exact position and size | Type values in the property bar (in the unit chosen there or from the corner of the rulers); the lock keeps the proportions |
 | Nudge | Arrow keys move the selection by the nudge distance (property bar, nothing selected); `Shift` moves ten times further |
 | Copy, paste, duplicate | `Ctrl` `C` / `Ctrl` `X` / `Ctrl` `V` (objects travel as SVG, so they paste into other programs too), `Ctrl` `D` duplicates with the offset set on the property bar |
+| Rotate and skew | Click a selected object again: the corner arrows rotate it (`Ctrl`: 15° steps), the edge arrows skew it, and the circle in the middle is the centre of rotation, which can be dragged. Click again to go back to resizing. *Angle* on the property bar and Object › Transform rotate by an exact amount. Rectangles, ellipses and text stay editable when turned |
 | Mirror | Mirror buttons on the property bar, or Object › Transform |
 | Page size | With nothing selected: paper type (A3–A6, Letter, Legal, Tabloid), width, height and portrait/landscape on the property bar |
 | Rectangle | `F6`, drag on the page. `Ctrl` for a square, `Shift` to draw from the centre (the same keys work for every shape tool). *Corners* on the property bar rounds the corners of new or selected rectangles |

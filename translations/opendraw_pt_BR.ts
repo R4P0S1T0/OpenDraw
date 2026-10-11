@@ -179,10 +179,6 @@
         <translation>preenchimento com padrão (substituído por cinza)</translation>
     </message>
     <message>
-        <source>rotated or skewed text (shown upright)</source>
-        <translation>texto girado ou inclinado (mostrado na vertical)</translation>
-    </message>
-    <message>
         <source>Layer</source>
         <translation>Camada</translation>
     </message>
@@ -215,6 +211,10 @@
     <message>
         <source>Apply fill colour</source>
         <translation>Aplicar cor de preenchimento</translation>
+    </message>
+    <message>
+        <source>Rotate</source>
+        <translation>Girar</translation>
     </message>
     <message>
         <source>Text format</source>
@@ -323,6 +323,10 @@
     <message>
         <source>Move</source>
         <translation>Mover</translation>
+    </message>
+    <message>
+        <source>Skew</source>
+        <translation>Inclinar</translation>
     </message>
     <message>
         <source>Resize</source>
@@ -796,6 +800,18 @@ Clique esquerdo: preenchimento · Clique direito: contorno</translation>
     <message>
         <source>Mirror &amp;Vertically</source>
         <translation>Espelhar &amp;verticalmente</translation>
+    </message>
+    <message>
+        <source>Rotate 90° &amp;Clockwise</source>
+        <translation>Girar 90° no sentido &amp;horário</translation>
+    </message>
+    <message>
+        <source>Rotate 90° C&amp;ounterclockwise</source>
+        <translation>Girar 90° no sentido &amp;anti-horário</translation>
+    </message>
+    <message>
+        <source>Rotate &amp;180°</source>
+        <translation>Girar &amp;180°</translation>
     </message>
     <message>
         <source>Convert to &amp;Curves</source>
@@ -1326,6 +1342,10 @@ Clique esquerdo: preenchimento · Clique direito: contorno</translation>
         <translation>   Opacidade: %1%</translation>
     </message>
     <message>
+        <source>Drag a corner arrow to rotate (Ctrl: 15° steps), an edge arrow to skew, the centre to move it; click the selection again to resize</source>
+        <translation>Arraste uma seta de canto para girar (Ctrl: passos de 15°), uma seta de borda para inclinar, o centro para movê-lo; clique de novo na seleção para redimensionar</translation>
+    </message>
+    <message>
         <source>About OpenDraw</source>
         <translation>Sobre o OpenDraw</translation>
     </message>
@@ -1482,6 +1502,14 @@ Clique esquerdo: preenchimento · Clique direito: contorno</translation>
     <message>
         <source>Corner radius of the rectangle</source>
         <translation>Raio dos cantos do retângulo</translation>
+    </message>
+    <message>
+        <source>Angle</source>
+        <translation>Ângulo</translation>
+    </message>
+    <message>
+        <source>Rotation angle (degrees, clockwise)</source>
+        <translation>Ângulo de rotação (graus, sentido horário)</translation>
     </message>
     <message>
         <source>Mirror horizontally</source>

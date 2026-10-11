@@ -482,16 +482,21 @@ void RenamePageCommand::undo()
 }
 
 TransformShapeCommand::TransformShapeCommand(Document *document, Shape *shape, const QTransform &transform,
-                                             const QString &text, QUndoCommand *parent)
+                                             const QString &text, bool alreadyApplied, QUndoCommand *parent)
     : QUndoCommand(text, parent)
     , m_document(document)
     , m_shape(shape)
     , m_transform(transform)
+    , m_skipRedo(alreadyApplied)
 {
 }
 
 void TransformShapeCommand::redo()
 {
+    if (m_skipRedo) {
+        m_skipRedo = false;
+        return;
+    }
     m_shape->transform(m_transform);
     m_document->notifyShapeChanged(m_shape);
 }

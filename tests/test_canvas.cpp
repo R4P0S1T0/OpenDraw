@@ -119,6 +119,7 @@ private slots:
     void eyedropperPicksAndApplies();
     void guidelinesFromRulersAndSnapping();
     void spaceTogglesThePickTool();
+    void secondClickRotatesAndSkews();
     void screenshot();
 
 private:
@@ -771,6 +772,26 @@ void CanvasTests::mainWindowWorkspace()
         canvas->setTool(CanvasWidget::Tool::Star);
         QTest::qWait(50);
         QVERIFY(window.grab().save(dir + QStringLiteral("/window-tools.png")));
+
+        // A rotated rectangle and text, with the rotate/skew handles showing.
+        canvas->setTool(CanvasWidget::Tool::Select);
+        TextFormat format;
+        format.size = 48;
+        Style textStyle;
+        textStyle.fill = Qt::black;
+        textStyle.stroke = Qt::transparent;
+        Shape *text = doc->insertShape(-1, std::make_unique<Shape>(TextData{QStringLiteral("OpenDraw"), format},
+                                                                   QPointF(180, 820), textStyle));
+        canvas->setSelectedShape(text);
+        canvas->rotateSelection(-20);
+        canvas->setSelectedShape(rect);
+        canvas->rotateSelection(25);
+        const QPointF onRect = canvas->documentToWidget(rect->path().pointAtPercent(0.1) * 0.8
+                                                        + rect->bounds().center() * 0.2);
+        click(canvas, onRect);
+        QVERIFY(canvas->rotateMode());
+        QTest::qWait(50);
+        QVERIFY(window.grab().save(dir + QStringLiteral("/window-rotate.png")));
         theme::apply(ColorScheme::Light);
     }
 }
@@ -937,6 +958,51 @@ void CanvasTests::spaceTogglesThePickTool()
     dragFromTo(m_canvas, {300, 300}, {350, 300});
     QTest::keyRelease(m_canvas, Qt::Key_Space);
     QCOMPARE(m_canvas->tool(), CanvasWidget::Tool::Rectangle);
+}
+
+void CanvasTests::secondClickRotatesAndSkews()
+{
+    m_canvas->setZoom(1.0);
+    const QTransform toDoc = m_canvas->viewTransform().inverted();
+    Shape *rect = m_doc->insertShape(
+        -1, std::make_unique<Shape>(ShapeKind::Rectangle, toDoc.mapRect(QRectF(300, 300, 200, 100))));
+    m_canvas->setTool(CanvasWidget::Tool::Select);
+    click(m_canvas, {400, 350}); // select
+    QVERIFY(!m_canvas->rotateMode());
+    click(m_canvas, {400, 350}); // click again: rotate/skew handles
+    QVERIFY(m_canvas->rotateMode());
+
+    // Drag the top-right corner arrow a quarter turn around the centre (400, 350), with Ctrl.
+    const QRectF box = m_canvas->viewTransform().mapRect(rect->bounds()).adjusted(-3, -3, 3, 3);
+    const QPointF corner = box.topRight();
+    const QPointF centre(400, 350);
+    const QPointF turned = centre + QTransform().rotate(88).map(corner - centre);
+    sendMouse(m_canvas, QEvent::MouseButtonPress, corner, Qt::LeftButton, Qt::LeftButton, Qt::ControlModifier);
+    sendMouse(m_canvas, QEvent::MouseMove, turned, Qt::NoButton, Qt::LeftButton, Qt::ControlModifier);
+    sendMouse(m_canvas, QEvent::MouseButtonRelease, turned, Qt::LeftButton, Qt::NoButton, Qt::ControlModifier);
+    QCOMPARE(rect->kind(), ShapeKind::Rectangle);
+    QVERIFY(std::abs(rect->rotation() - 90) < 1e-6); // 88° snapped to 90°
+    const QRectF rotated = m_canvas->viewTransform().mapRect(rect->bounds());
+    QVERIFY(std::abs(rotated.width() - 100) < 1e-6 && std::abs(rotated.height() - 200) < 1e-6);
+    QVERIFY(std::abs(rotated.center().x() - 400) < 1e-6 && std::abs(rotated.center().y() - 350) < 1e-6);
+    m_undo->undo();
+    QVERIFY(rect->shapeTransform().isIdentity());
+
+    // An edge arrow skews.
+    const QRectF upright = m_canvas->viewTransform().mapRect(rect->bounds()).adjusted(-3, -3, 3, 3);
+    dragFromTo(m_canvas, QPointF(upright.center().x(), upright.top()), QPointF(upright.center().x() + 40, upright.top()));
+    QVERIFY(!rect->shapeTransform().isIdentity());
+    QVERIFY(rect->bounds().width() > toDoc.mapRect(QRectF(0, 0, 200, 1)).width() + 1);
+    m_undo->undo();
+
+    // Clicking again (away from the centre marker) goes back to resizing; the property bar's
+    // angle rotates too.
+    click(m_canvas, {340, 330});
+    QVERIFY(!m_canvas->rotateMode());
+    m_canvas->rotateSelection(45);
+    QVERIFY(std::abs(rect->rotation() - 45) < 1e-6);
+    m_undo->undo();
+    QVERIFY(rect->shapeTransform().isIdentity());
 }
 
 // Not an assertion: saves a picture of the canvas for manual review when
