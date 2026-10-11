@@ -18,7 +18,7 @@ enum class Icon {
     Rotate, RotateCounterclockwise,
     Eye, EyeOff, Lock, Unlock, Layer, Page, Group, Bitmap,
     FillNone, FillUniform, FillLinear, FillRadial, Transparency,
-    CapButt, CapRound, CapSquare, JoinMiter, JoinRound, JoinBevel,
+    CapButt, CapRound, CapSquare, JoinMiter, JoinRound, JoinBevel, Shadow,
 };
 
 QIcon icon(Icon id);

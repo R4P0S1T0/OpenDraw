@@ -28,7 +28,7 @@ class CanvasWidget : public QWidget {
 public:
     enum class Tool {
         Select, Node, Zoom, Pan, Freehand, Line, Bezier, Rectangle, Ellipse,
-        Polygon, Star, Spiral, GraphPaper, Text, Eyedropper,
+        Polygon, Star, Spiral, GraphPaper, Text, DropShadow, Transparency, Eyedropper,
     };
 
     CanvasWidget(Document *document, QUndoStack *undoStack, QWidget *parent = nullptr);
@@ -196,7 +196,7 @@ protected:
 private:
     enum class Drag {
         None, Pan, Move, Resize, Marquee, Create, NodeMove, NodeHandle, BezierHandle, Freehand, ZoomBox, Guide,
-        Rotate, Skew, RotationCenter, TextFrame, TextSelect,
+        Rotate, Skew, RotationCenter, TextFrame, TextSelect, Effect, EffectHandle,
     };
     enum class NodeHandle { In, Out };
 
@@ -252,6 +252,19 @@ private:
     void applyLiveTransform(const QTransform &t);
     void commitLiveTransform(const QString &text);
     void paintTransformHandles(QPainter &painter, const QRectF &box);
+
+    // Shadow and transparency tools.
+    void captureEffectStyles();
+    void applyEffectDrag(const QPointF &documentPosition, Qt::KeyboardModifiers modifiers);
+    void commitEffectDrag();
+    // The selected object whose transparency gradient shows handles, if any.
+    Shape *transparencyShape() const;
+    // Page position of a fraction of a shape's own box (0..1 each way), and back.
+    static QPointF fromFraction(const Shape &shape, const QPointF &fraction);
+    static QPointF toFraction(const Shape &shape, const QPointF &documentPosition);
+    std::array<QPointF, 2> transparencyHandles(const Shape &shape) const;
+    int transparencyHandleAt(const QPointF &widgetPosition) const;
+    void paintEffectHandles(QPainter &painter);
     QPainterPath toolShapePreview(const QRectF &box) const;
     std::unique_ptr<Shape> createToolShape(const QRectF &box) const;
     QColor colorAt(const QPointF &widgetPosition) const;
@@ -323,6 +336,8 @@ private:
     QTransform m_liveTransform;            // applied to the selection by the current rotate/skew drag
     QRectF m_transformBox;                 // selection bounds when that drag started
     QPointF m_transformCenter;             // rotation centre when that drag started
+    std::vector<std::pair<Shape *, Style>> m_effectBefore; // styles before a shadow/transparency drag
+    int m_effectHandle = -1;               // transparency handle being dragged: 0 start, 1 end
     bool m_marqueeAdds = false;
     int m_resizeHandle = -1;
     QRectF m_resizeOriginal;                // selection bounds when the resize started

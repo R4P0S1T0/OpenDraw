@@ -23,7 +23,8 @@ Rough order of work. Items move as contributors pick them up.
 - [x] Guidelines dragged from the rulers (saved in Inkscape's format), grid, snapping to grid, guidelines, objects and page
 - [x] Polygon, star, spiral, graph paper and 2-point line tools; rounded rectangle corners; colour eyedropper; Ctrl/Shift constraints and Space to switch to the pick tool
 - [x] Rotating and skewing: second click on a selection, rotation centre, angle on the property bar, rotate 90°/180°; rectangles, ellipses and text keep their kind (saved as SVG transforms with non-scaling outlines)
-- [ ] Drop shadow and transparency tools, smart fill
+- [x] Drop shadow tool (offset, feather, opacity, colour) and interactive transparency tool (uniform, linear, radial, with handles); saved as SVG filters and masks
+- [ ] Smart fill, blend, contour, envelope and extrude
 - [x] Objects docker: pages, layers and objects as a tree, selection in both directions, renaming (object names saved as Inkscape labels), drag and drop to restack or change layers
 - [x] Properties docker: outline (colour, width, dashes, ends, corners), fill (none, uniform, linear, radial) and transparency, applied live; dashes, line ends and corners saved in SVG and read from other files
 - [ ] Arrowheads, outline behind fill, scale outline with object

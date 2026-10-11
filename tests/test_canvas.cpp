@@ -128,6 +128,7 @@ private slots:
     void propertiesDockerAppliesStyles();
     void textToolDrawsParagraphFrames();
     void formatPartOfAText();
+    void shadowAndTransparencyTools();
     void screenshot();
 
 private:
@@ -885,6 +886,28 @@ void CanvasTests::mainWindowWorkspace()
         QTest::qWait(150);
         QVERIFY(window.grab().save(dir + QStringLiteral("/window-richtext.png")));
         canvas->finishTextEdit();
+
+        // Drop shadow on the star, a transparency gradient on the hexagon.
+        for (const auto &shape : doc->shapes()) {
+            if (shape->kind() != ShapeKind::Path || shape->style().fill.alpha() == 0)
+                continue;
+            Style s = shape->style();
+            if (s.fill == QColor(0xfd, 0xd8, 0x35)) {
+                s.shadow = DropShadow{QPointF(10, 12), 12.0, QColor(0, 0, 0, 140)};
+            } else {
+                Gradient fade = Gradient::linear(Qt::black, Qt::black, 0);
+                fade.stops = {{0.0, QColor(0, 0, 0, 255)}, {1.0, QColor(0, 0, 0, 0)}};
+                s.transparency = fade;
+                shape->setStyle(s);
+                canvas->setSelectedShape(shape.get());
+                continue;
+            }
+            shape->setStyle(s);
+        }
+        canvas->setTool(CanvasWidget::Tool::Transparency);
+        doc->notifyShapeChanged(nullptr);
+        QTest::qWait(150);
+        QVERIFY(window.grab().save(dir + QStringLiteral("/window-effects.png")));
         theme::apply(ColorScheme::Light);
     }
 }
@@ -1245,6 +1268,60 @@ void CanvasTests::formatPartOfAText()
     m_canvas->finishTextEdit();
     QCOMPARE(m_doc->count(), 1);
     QVERIFY(!m_doc->shapes().front()->textData().runs.empty());
+}
+
+void CanvasTests::shadowAndTransparencyTools()
+{
+    m_canvas->setZoom(1.0);
+    const QTransform toDoc = m_canvas->viewTransform().inverted();
+    Shape *rect = m_doc->insertShape(-1, std::make_unique<Shape>(ShapeKind::Rectangle, toDoc.mapRect(QRectF(200, 200, 200, 100))));
+
+    // Shadow: drag from the object.
+    m_canvas->setTool(CanvasWidget::Tool::DropShadow);
+    dragFromTo(m_canvas, {300, 250}, {320, 280});
+    QVERIFY(rect->style().shadow);
+    QVERIFY(std::abs(rect->style().shadow->offset.x() - toDoc.map(QPointF(20, 0)).x() + toDoc.map(QPointF(0, 0)).x()) < 1e-6);
+    QVERIFY(std::abs(rect->style().shadow->offset.y() - (toDoc.map(QPointF(0, 30)).y() - toDoc.map(QPointF(0, 0)).y())) < 1e-6);
+    m_undo->undo();
+    QVERIFY(!rect->style().shadow);
+    m_undo->redo();
+
+    // The property bar edits it.
+    PropertyBar bar(m_doc, m_undo);
+    bar.setCanvas(m_canvas);
+    bar.setTool(CanvasWidget::Tool::DropShadow);
+    QSpinBox *shadowOpacity = nullptr;
+    for (QSpinBox *box : bar.findChildren<QSpinBox *>()) {
+        if (box->toolTip() == QStringLiteral("How dark the shadow is"))
+            shadowOpacity = box;
+    }
+    QVERIFY(shadowOpacity);
+    shadowOpacity->setValue(25);
+    emit shadowOpacity->editingFinished();
+    QCOMPARE(rect->style().shadow->color.alpha(), qRound(0.25 * 255));
+
+    // Transparency: drag across the object, then move the end handle.
+    m_canvas->setTool(CanvasWidget::Tool::Transparency);
+    dragFromTo(m_canvas, {200, 250}, {400, 250});
+    QVERIFY(rect->style().transparency);
+    const Gradient fade = *rect->style().transparency;
+    QVERIFY(std::abs(fade.start.x()) < 1e-6 && std::abs(fade.end.x() - 1.0) < 1e-6);
+    QCOMPARE(fade.stops.front().color.alpha(), 255);
+    QCOMPARE(fade.stops.back().color.alpha(), 0);
+    dragFromTo(m_canvas, {400, 250}, {300, 250}); // the end square
+    QVERIFY(std::abs(rect->style().transparency->end.x() - 0.5) < 1e-6);
+
+    // Uniform transparency from the property bar replaces the gradient.
+    bar.setTool(CanvasWidget::Tool::Transparency);
+    QComboBox *type = bar.findChild<QComboBox *>(QString(), Qt::FindDirectChildrenOnly);
+    for (QComboBox *box : bar.findChildren<QComboBox *>()) {
+        if (box->toolTip() == QStringLiteral("Kind of transparency"))
+            type = box;
+    }
+    QVERIFY(type);
+    type->setCurrentIndex(1);
+    emit type->activated(1);
+    QVERIFY(!rect->style().transparency);
 }
 
 // Not an assertion: saves a picture of the canvas for manual review when

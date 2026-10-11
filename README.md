@@ -51,6 +51,8 @@ The workspace follows the layout desktop designers know: menu bar and standard t
 | Ellipse | `F7`, drag on the page. `Ctrl` for a circle |
 | Polygon, star, spiral, graph paper | Object flyout in the toolbox: polygon (`Y`), star, spiral (`A`), graph paper (`D`). Sides, points, sharpness, revolutions, columns and rows are on the property bar while the tool is active |
 | Straight line | 2-point line in the freehand flyout; `Ctrl` keeps the angle in 15° steps |
+| Drop shadow | Shadow tool: drag from an object to set where its shadow falls (`Ctrl`: straight). The property bar sets the offset, how soft (feather), how dark and what colour, or removes it |
+| Transparency | Transparency tool: drag across an object, from where it should be solid to where it should be transparent; drag the white and black squares to adjust. The property bar chooses none, uniform, linear or radial and the transparency at the start and end |
 | Colour eyedropper | `I`: click to pick up a colour, then click inside objects to fill them or on their outline to colour it. `Shift`+click or `Esc` picks a new colour |
 | Guidelines | Drag from a ruler onto the drawing; drag a guideline with the pick tool to move it, back onto a ruler to delete it. View › Guidelines shows or hides them |
 | Grid and snapping | View › Grid (spacing in View › Grid Spacing). *Snap To* on the standard toolbar: grid, guidelines, objects and page. While moving, `Ctrl` keeps the move horizontal or vertical |

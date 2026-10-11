@@ -70,6 +70,9 @@ private slots:
     void importsUserSpaceAndInheritedStops();
     void importsPercentagesAndLateDefinitions();
     void missingGradientIsReported();
+    void dropShadowRendersBehind();
+    void transparencyGradientFades();
+    void effectsSurviveSvg();
 };
 
 void GradientTests::linearGradientAngles()
@@ -199,6 +202,79 @@ void GradientTests::missingGradientIsReported()
     QVERIFY(svg::read(&buffer, doc, nullptr, &report));
     QVERIFY(!doc.shapes()[0]->style().gradient);
     QCOMPARE(doc.shapes()[0]->style().fill, QColor(0x80, 0x80, 0x80));
+    QCOMPARE(report.skippedCount(), 1);
+}
+
+// The shadow shows where the object is not, offset and softened; the object stays on top.
+void GradientTests::dropShadowRendersBehind()
+{
+    Style style = noOutline();
+    style.fill = Qt::white;
+    style.shadow = DropShadow{QPointF(20, 20), 4.0, QColor(0, 0, 0, 255)};
+    Document doc;
+    doc.setPageSize(QSizeF(150, 150));
+    doc.insertShape(-1, std::make_unique<Shape>(ShapeKind::Rectangle, QRectF(20, 20, 60, 60), style));
+    exporter::ImageOptions options;
+    options.dpi = 96;
+    const QImage image = exporter::renderImage(doc, options);
+    QVERIFY(closeTo(image.pixelColor(50, 50), Qt::white));          // the object itself
+    QVERIFY(image.pixelColor(95, 95).lightness() < 80);               // shadow beyond its corner
+    QVERIFY(closeTo(image.pixelColor(10, 10), Qt::white));          // nothing up and to the left
+    // Soft edge: between the shadow and the page there are greys.
+    const int edge = image.pixelColor(102, 90).lightness();
+    QVERIFY(edge > 20 && edge < 245);
+}
+
+void GradientTests::transparencyGradientFades()
+{
+    Style style = noOutline();
+    style.fill = Qt::black;
+    Gradient fade = Gradient::linear(Qt::black, Qt::black, 0);
+    fade.stops = {{0.0, QColor(0, 0, 0, 255)}, {1.0, QColor(0, 0, 0, 0)}};
+    style.transparency = fade;
+    const QImage image = renderOne(style, QRectF(10, 10, 200, 40));
+    const int left = image.pixelColor(14, 30).lightness();
+    const int middle = image.pixelColor(110, 30).lightness();
+    const int right = image.pixelColor(206, 30).lightness();
+    QVERIFY(left < 30);
+    QVERIFY(middle > 90 && middle < 170);
+    QVERIFY(right > 225);
+}
+
+void GradientTests::effectsSurviveSvg()
+{
+    Style style = noOutline();
+    style.shadow = DropShadow{QPointF(5, -3), 7.0, QColor(10, 20, 30, 100)};
+    Gradient fade = Gradient::radial(Qt::black, Qt::black);
+    fade.stops = {{0.0, QColor(0, 0, 0, 255)}, {1.0, QColor(0, 0, 0, 51)}};
+    style.transparency = fade;
+    Document doc;
+    doc.insertShape(-1, std::make_unique<Shape>(ShapeKind::Ellipse, QRectF(10, 10, 80, 50), style));
+    QByteArray data;
+    QBuffer buffer(&data);
+    buffer.open(QIODevice::WriteOnly);
+    svg::write(doc, &buffer);
+    QVERIFY(data.contains("<filter"));
+    QVERIFY(data.contains("<mask"));
+    auto copy = readSvg(data);
+    const Style &read = copy->shapes().front()->style();
+    QVERIFY(read.shadow);
+    QCOMPARE(read.shadow->offset, QPointF(5, -3));
+    QCOMPARE(read.shadow->blur, 7.0);
+    QCOMPARE(read.shadow->color.rgb(), QColor(10, 20, 30).rgb());
+    QCOMPARE(read.shadow->color.alpha(), 100);
+    QVERIFY(read.transparency);
+    QCOMPARE(read.transparency->type, Gradient::Type::Radial);
+    QCOMPARE(read.transparency->stops.back().color.alpha(), 51);
+
+    // Filters and masks from other programs are not read, and the report says so.
+    QByteArray other(R"svg(<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">
+        <rect width="10" height="10" filter="url(#blur)"/></svg>)svg");
+    QBuffer otherBuffer(&other);
+    otherBuffer.open(QIODevice::ReadOnly);
+    Document otherDoc;
+    svg::ReadReport report;
+    svg::read(&otherBuffer, otherDoc, nullptr, &report);
     QCOMPARE(report.skippedCount(), 1);
 }
 

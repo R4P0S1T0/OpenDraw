@@ -521,6 +521,132 @@ void CanvasWidget::rotateSelection(double degrees)
     m_undoStack->endMacro();
 }
 
+// ---------------------------------------------------------------------------------------------
+// Shadow and transparency tools
+
+void CanvasWidget::captureEffectStyles()
+{
+    m_effectBefore.clear();
+    for (Shape *shape : m_selection) {
+        shape->forEachLeaf([this](Shape &leaf) { m_effectBefore.emplace_back(&leaf, leaf.style()); });
+    }
+}
+
+QPointF CanvasWidget::fromFraction(const Shape &shape, const QPointF &fraction)
+{
+    const QRectF box = shape.localBounds();
+    return shape.shapeTransform().map(
+        QPointF(box.left() + fraction.x() * box.width(), box.top() + fraction.y() * box.height()));
+}
+
+QPointF CanvasWidget::toFraction(const Shape &shape, const QPointF &documentPosition)
+{
+    const QRectF box = shape.localBounds();
+    const QPointF local = shape.shapeTransform().inverted().map(documentPosition);
+    return QPointF(box.width() > 0 ? (local.x() - box.left()) / box.width() : 0.0,
+                   box.height() > 0 ? (local.y() - box.top()) / box.height() : 0.0);
+}
+
+// Dragging with the shadow tool sets the shadow's offset; with the transparency tool, a
+// gradient from solid (where the drag starts) to transparent (where it ends).
+void CanvasWidget::applyEffectDrag(const QPointF &documentPosition, Qt::KeyboardModifiers modifiers)
+{
+    QPointF delta = documentPosition - m_dragStart;
+    if (modifiers & Qt::ControlModifier) { // Ctrl: horizontal or vertical
+        if (std::abs(delta.x()) >= std::abs(delta.y()))
+            delta.ry() = 0;
+        else
+            delta.rx() = 0;
+    }
+    for (const auto &[leaf, before] : m_effectBefore) {
+        Style style = before;
+        if (m_tool == Tool::DropShadow) {
+            DropShadow shadow = before.shadow.value_or(DropShadow{});
+            shadow.offset = delta;
+            style.shadow = shadow;
+        } else {
+            Gradient g = before.transparency.value_or(Gradient{});
+            if (!before.transparency || g.stops.size() < 2) {
+                g.stops = {{0.0, QColor(0, 0, 0, 255)}, {1.0, QColor(0, 0, 0, 0)}};
+            }
+            g.type = Gradient::Type::Linear;
+            g.start = toFraction(*leaf, m_dragStart);
+            g.end = toFraction(*leaf, m_dragStart + delta);
+            style.transparency = g;
+        }
+        leaf->setStyle(style);
+    }
+    if (!m_selection.empty())
+        m_document->notifyShapeChanged(m_selection.front());
+}
+
+void CanvasWidget::commitEffectDrag()
+{
+    if (m_effectBefore.empty())
+        return;
+    const QString text = m_tool == Tool::DropShadow ? tr("Drop shadow") : tr("Transparency");
+    m_undoStack->beginMacro(text);
+    for (const auto &[leaf, before] : m_effectBefore) {
+        const Style after = leaf->style();
+        leaf->setStyle(before);
+        m_undoStack->push(new SetStyleCommand(m_document, leaf, after));
+    }
+    m_undoStack->endMacro();
+    m_effectBefore.clear();
+}
+
+Shape *CanvasWidget::transparencyShape() const
+{
+    Shape *single = selectedShape();
+    return single && single->kind() != ShapeKind::Group && single->style().transparency ? single : nullptr;
+}
+
+std::array<QPointF, 2> CanvasWidget::transparencyHandles(const Shape &shape) const
+{
+    const Gradient &g = *shape.style().transparency;
+    if (g.type == Gradient::Type::Radial) {
+        const QRectF box = shape.localBounds();
+        const double r = g.radius * std::max(box.width(), box.height());
+        const QPointF centre = fromFraction(shape, g.center);
+        return {centre, centre + shape.shapeTransform().map(QPointF(r, 0)) - shape.shapeTransform().map(QPointF(0, 0))};
+    }
+    return {fromFraction(shape, g.start), fromFraction(shape, g.end)};
+}
+
+int CanvasWidget::transparencyHandleAt(const QPointF &widgetPosition) const
+{
+    const Shape *shape = m_tool == Tool::Transparency ? transparencyShape() : nullptr;
+    if (!shape)
+        return -1;
+    const auto handles = transparencyHandles(*shape);
+    for (int i = 0; i < 2; ++i) {
+        if (distance(toWidget(handles[i]), widgetPosition) <= kNodeHitPx + 2)
+            return i;
+    }
+    return -1;
+}
+
+void CanvasWidget::paintEffectHandles(QPainter &painter)
+{
+    // A line from where the drag started, while dragging a shadow.
+    if (m_drag == Drag::Effect && m_tool == Tool::DropShadow) {
+        painter.setPen(QPen(palette().color(QPalette::Highlight), 1, Qt::DashLine));
+        painter.drawLine(toWidget(m_dragStart), toWidget(m_cursor));
+    }
+    // Transparency: the gradient's two ends, solid (white) to transparent (black), and the line.
+    if (const Shape *shape = transparencyShape(); shape && m_tool == Tool::Transparency) {
+        const auto handles = transparencyHandles(*shape);
+        painter.setPen(QPen(palette().color(QPalette::Highlight), 1.5));
+        painter.drawLine(toWidget(handles[0]), toWidget(handles[1]));
+        painter.setPen(QPen(QColor(0x20, 0x20, 0x20), 1));
+        painter.setBrush(Qt::white);
+        painter.drawRect(squareAround(toWidget(handles[0]), 9));
+        painter.setBrush(Qt::black);
+        painter.drawRect(squareAround(toWidget(handles[1]), 9));
+        painter.setBrush(Qt::NoBrush);
+    }
+}
+
 void CanvasWidget::paintTransformHandles(QPainter &painter, const QRectF &box)
 {
     const QColor highlight = palette().color(QPalette::Highlight);
@@ -1798,6 +1924,7 @@ void CanvasWidget::paintEvent(QPaintEvent *)
     else
         paintSelection(painter);
     paintBezierPreview(painter);
+    paintEffectHandles(painter);
 
     if (m_drag == Drag::Marquee || m_drag == Drag::ZoomBox) {
         QColor fill = palette().color(QPalette::Highlight);
@@ -2119,6 +2246,26 @@ void CanvasWidget::mousePressEvent(QMouseEvent *event)
         m_lineEnd = m_dragStart;
         break;
 
+    case Tool::DropShadow:
+    case Tool::Transparency: {
+        if (const int handle = transparencyHandleAt(pos); handle >= 0) {
+            m_effectHandle = handle;
+            captureEffectStyles();
+            m_drag = Drag::EffectHandle;
+            break;
+        }
+        Shape *hit = m_document->shapeAt(docPos, tolerance);
+        if (!hit) {
+            setSelection({});
+            break;
+        }
+        if (!isSelected(hit))
+            setSelectedShape(hit);
+        captureEffectStyles();
+        m_drag = Drag::Effect;
+        break;
+    }
+
     case Tool::Eyedropper:
         // The first click picks up a colour; later clicks apply it. Shift+click picks again.
         if (!m_eyedropperColor || shift)
@@ -2230,6 +2377,36 @@ void CanvasWidget::mouseMoveEvent(QMouseEvent *event)
             m_textCursor = textIndexAt(pos);
             update();
             emit textEditingChanged();
+        }
+        break;
+
+    case Drag::Effect:
+        applyEffectDrag(docPos, event->modifiers());
+        break;
+
+    case Drag::EffectHandle:
+        if (!m_effectBefore.empty()) {
+            auto &[leaf, before] = m_effectBefore.front();
+            Style style = before;
+            Gradient g = *before.transparency;
+            const QPointF fraction = toFraction(*leaf, snapPoint(docPos));
+            if (g.type == Gradient::Type::Radial) {
+                if (m_effectHandle == 0) {
+                    g.center = fraction;
+                } else {
+                    const QRectF box = leaf->localBounds();
+                    const QPointF local = leaf->shapeTransform().inverted().map(docPos);
+                    const QPointF centre(box.left() + g.center.x() * box.width(), box.top() + g.center.y() * box.height());
+                    g.radius = distance(local, centre) / std::max({box.width(), box.height(), 1e-9});
+                }
+            } else if (m_effectHandle == 0) {
+                g.start = fraction;
+            } else {
+                g.end = fraction;
+            }
+            style.transparency = g;
+            leaf->setStyle(style);
+            m_document->notifyShapeChanged(leaf);
         }
         break;
 
@@ -2415,6 +2592,23 @@ void CanvasWidget::mouseReleaseEvent(QMouseEvent *event)
     case Drag::TextSelect:
         if (m_textAnchor == m_textCursor)
             m_textAnchor = -1;
+        break;
+
+    case Drag::Effect:
+        // A click (no drag) only selects.
+        if (distance(toWidget(m_dragStart), event->position()) < kMinCreateSizePx) {
+            for (const auto &[leaf, before] : m_effectBefore)
+                leaf->setStyle(before);
+            m_effectBefore.clear();
+            update();
+        } else {
+            commitEffectDrag();
+        }
+        break;
+
+    case Drag::EffectHandle:
+        commitEffectDrag();
+        m_effectHandle = -1;
         break;
 
     case Drag::TextFrame: {

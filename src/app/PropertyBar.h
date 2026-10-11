@@ -35,6 +35,8 @@ public:
     void setTool(CanvasWidget::Tool tool);
     void setToolSettings(const ToolSettings &settings);
     void setEyedropperColor(const QColor &color);
+    // The shadow and transparency options act on the canvas selection.
+    void setCanvas(CanvasWidget *canvas);
 
 signals:
     void mirrorRequested(Qt::Orientation orientation);
@@ -62,6 +64,10 @@ private:
     void applyOutlineWidth();
     void applyOpacity();
     void applyPageSize(const QSizeF &size);
+    void createEffectFields();
+    void refreshEffects();
+    void applyShadow(const std::function<void(DropShadow &)> &change);
+    void applyTransparency();
 
     Document *m_document;
     QUndoStack *m_undoStack;
@@ -77,6 +83,18 @@ private:
     QList<QAction *> m_spiralActions;
     QList<QAction *> m_graphActions;
     QList<QAction *> m_eyedropperActions;
+    QList<QAction *> m_shadowActions;
+    QList<QAction *> m_transparencyActions;
+    CanvasWidget *m_canvas = nullptr;
+    bool m_updatingEffects = false;
+    QDoubleSpinBox *m_shadowX;
+    QDoubleSpinBox *m_shadowY;
+    QDoubleSpinBox *m_shadowBlur;
+    QSpinBox *m_shadowOpacity;
+    QToolButton *m_shadowColor;
+    QComboBox *m_transparencyType;
+    QSpinBox *m_transparencyStart;
+    QSpinBox *m_transparencyEnd;
     CanvasWidget::Tool m_tool = CanvasWidget::Tool::Select;
     ToolSettings m_toolSettings;
     bool m_updatingToolFields = false;

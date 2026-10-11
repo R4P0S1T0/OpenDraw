@@ -5,8 +5,11 @@
 #include "core/TextLayout.h"
 
 #include <QPainter>
+#include <QPaintDevice>
 
 #include <algorithm>
+#include <cmath>
+#include <vector>
 
 namespace opendraw::render {
 
@@ -63,29 +66,27 @@ QPen outlinePen(const Style &style)
     return pen;
 }
 
-void paintShape(QPainter &painter, const Shape &shape)
+namespace {
+
+// The shape itself: fill and outline (no opacity, shadow or transparency).
+void paintBody(QPainter &painter, const Shape &shape)
 {
-    if (shape.kind() == ShapeKind::Group) {
-        for (const auto &child : shape.children())
-            paintShape(painter, *child);
-        return;
-    }
     const Style &style = shape.style();
-    painter.save();
-    painter.setOpacity(painter.opacity() * std::clamp(style.opacity, 0.0, 1.0));
     if (shape.kind() == ShapeKind::Image) {
         const QImage &image = shape.image();
         if (!image.isNull()) {
             // The placement maps the unit square to the page; the image is drawn in it.
+            painter.save();
             painter.setRenderHint(QPainter::SmoothPixmapTransform);
             painter.setTransform(QTransform::fromScale(1.0 / image.width(), 1.0 / image.height())
                                      * shape.imagePlacement(),
                                  true);
             painter.drawImage(0, 0, image);
+            painter.restore();
         }
-        painter.restore();
         return;
     }
+    painter.save();
     const QTransform own = shape.shapeTransform();
     if (shape.kind() == ShapeKind::Text) {
         const TextData &data = shape.textData();
@@ -129,6 +130,145 @@ void paintShape(QPainter &painter, const Shape &shape)
             painter.drawPath(shape.path());
         }
     }
+    painter.restore();
+}
+
+// Box blur of an 8-bit alpha image, three passes each way (close to a Gaussian).
+void blurAlpha(QImage &alpha, int radius)
+{
+    if (radius < 1)
+        return;
+    const int w = alpha.width(), h = alpha.height();
+    std::vector<int> line(std::max(w, h));
+    auto pass = [&](bool horizontal) {
+        const int length = horizontal ? w : h;
+        const int count = horizontal ? h : w;
+        for (int c = 0; c < count; ++c) {
+            auto at = [&](int i) -> uchar & {
+                return horizontal ? alpha.scanLine(c)[i] : alpha.scanLine(i)[c];
+            };
+            for (int i = 0; i < length; ++i)
+                line[i] = at(i);
+            int sum = 0;
+            const int window = 2 * radius + 1;
+            for (int i = -radius; i <= radius; ++i)
+                sum += (i >= 0 && i < length) ? line[i] : 0;
+            for (int i = 0; i < length; ++i) {
+                at(i) = uchar(sum / window);
+                const int out = i - radius;
+                const int in = i + radius + 1;
+                sum += (in < length ? line[in] : 0) - (out >= 0 ? line[out] : 0);
+            }
+        }
+    };
+    for (int i = 0; i < 3; ++i) {
+        pass(true);
+        pass(false);
+    }
+}
+
+// Transparency gradient as a brush over `bounds` (alpha only matters).
+QBrush transparencyBrush(const Gradient &g, const QRectF &bounds)
+{
+    auto at = [&bounds](const QPointF &f) {
+        return QPointF(bounds.left() + f.x() * bounds.width(), bounds.top() + f.y() * bounds.height());
+    };
+    QGradient *gradient = nullptr;
+    QLinearGradient linear(at(g.start), at(g.end));
+    QRadialGradient radial(at(g.center), g.radius * std::max(bounds.width(), bounds.height()));
+    gradient = g.type == Gradient::Type::Radial ? static_cast<QGradient *>(&radial) : static_cast<QGradient *>(&linear);
+    for (const GradientStop &stop : g.stops)
+        gradient->setColorAt(std::clamp(stop.offset, 0.0, 1.0), QColor(0, 0, 0, stop.color.alpha()));
+    return QBrush(*gradient);
+}
+
+// Draws a shape with a shadow and/or a transparency gradient: the shape goes into an
+// off-screen layer in device pixels, masked by the transparency; the shadow is the layer's
+// silhouette, blurred and coloured, drawn first.
+void paintWithEffects(QPainter &painter, const Shape &shape)
+{
+    const Style &style = shape.style();
+    // Logical → painter pixels, without the offset a widget painted into its window gets
+    // (resetTransform() below keeps that offset, so it must not be counted twice).
+    const QTransform device = painter.combinedTransform();
+    const double unit = std::sqrt(std::abs(device.determinant())); // device pixels per document unit
+    const double margin = style.hasStroke() ? style.strokeWidth : 1.0;
+    const QRectF body = device.mapRect(shape.bounds().adjusted(-margin, -margin, margin, margin));
+    QPointF offset;
+    double blur = 0.0;
+    if (style.shadow) {
+        offset = device.map(style.shadow->offset) - device.map(QPointF(0, 0));
+        blur = std::max(style.shadow->blur, 0.0) * unit;
+    }
+    QRectF needed = body.united(body.translated(offset)).adjusted(-blur * 2, -blur * 2, blur * 2, blur * 2);
+    // Only what can show on the device (plus room for the blur).
+    if (const QPaintDevice *target = painter.device()) {
+        const QRectF visible = QRectF(0, 0, target->width(), target->height())
+                                   .adjusted(-blur * 3 - std::abs(offset.x()), -blur * 3 - std::abs(offset.y()),
+                                             blur * 3 + std::abs(offset.x()), blur * 3 + std::abs(offset.y()));
+        needed = needed.intersected(visible);
+    }
+    if (needed.isEmpty())
+        return;
+    needed = needed.toAlignedRect();
+    // Sharp on high-DPI screens; never a huge image (PDF export works at 1200 dpi).
+    const double ratio = painter.device() ? painter.device()->devicePixelRatioF() : 1.0;
+    const double scale = std::min(ratio, 3000.0 / std::max(needed.width(), needed.height()));
+    QImage layer(std::max(1, int(std::ceil(needed.width() * scale))), std::max(1, int(std::ceil(needed.height() * scale))),
+                 QImage::Format_ARGB32_Premultiplied);
+    layer.fill(Qt::transparent);
+    {
+        QPainter lp(&layer);
+        lp.setRenderHints(painter.renderHints());
+        lp.scale(scale, scale);
+        lp.translate(-needed.topLeft());
+        lp.setTransform(device, true);
+        paintBody(lp, shape);
+        if (style.transparency) {
+            // Keep the layer only as much as the transparency allows.
+            lp.setCompositionMode(QPainter::CompositionMode_DestinationIn);
+            const QRectF frame = shape.localBounds();
+            lp.setTransform(shape.shapeTransform(), true);
+            lp.fillRect(frame.adjusted(-margin * 4, -margin * 4, margin * 4, margin * 4),
+                        transparencyBrush(*style.transparency, frame));
+        }
+    }
+
+    painter.save();
+    painter.resetTransform();
+    painter.setRenderHint(QPainter::SmoothPixmapTransform);
+    if (style.shadow) {
+        QImage alpha = layer.convertToFormat(QImage::Format_Alpha8);
+        blurAlpha(alpha, int(std::round(blur * scale / 2.0)));
+        QImage shadow(layer.size(), QImage::Format_ARGB32_Premultiplied);
+        shadow.fill(style.shadow->color);
+        {
+            QPainter sp(&shadow);
+            sp.setCompositionMode(QPainter::CompositionMode_DestinationIn);
+            sp.drawImage(0, 0, alpha);
+        }
+        painter.drawImage(QRectF(needed.topLeft() + offset, needed.size()), shadow);
+    }
+    painter.drawImage(needed, layer);
+    painter.restore();
+}
+
+} // namespace
+
+void paintShape(QPainter &painter, const Shape &shape)
+{
+    if (shape.kind() == ShapeKind::Group) {
+        for (const auto &child : shape.children())
+            paintShape(painter, *child);
+        return;
+    }
+    const Style &style = shape.style();
+    painter.save();
+    painter.setOpacity(painter.opacity() * std::clamp(style.opacity, 0.0, 1.0));
+    if (style.shadow || style.transparency)
+        paintWithEffects(painter, shape);
+    else
+        paintBody(painter, shape);
     painter.restore();
 }
 

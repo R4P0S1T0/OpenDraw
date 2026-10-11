@@ -435,6 +435,20 @@ void draw(QPainter &p, Icon id, const QColor &ink, const QColor &accent, const Q
         p.setPen(Qt::NoPen);
         p.drawEllipse(QPointF(16, 9), 1.8, 1.8);
         break;
+    case Icon::Shadow: {
+        // A square with a soft shadow down and to the right.
+        p.setPen(Qt::NoPen);
+        for (int i = 3; i >= 1; --i) {
+            QColor shade = ink;
+            shade.setAlpha(50);
+            p.setBrush(shade);
+            p.drawRoundedRect(QRectF(8 - i * 0.6, 8 - i * 0.6, 13 + i * 1.2, 13 + i * 1.2), 2, 2);
+        }
+        p.setPen(line);
+        p.setBrush(paper);
+        p.drawRect(QRectF(3, 3, 13, 13));
+        break;
+    }
     case Icon::FillNone:
         p.drawRect(QRectF(4, 4, 16, 16));
         p.setPen(QPen(QColor(0xd0, 0x30, 0x30), 1.8, Qt::SolidLine, Qt::RoundCap));

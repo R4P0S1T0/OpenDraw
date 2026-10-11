@@ -150,6 +150,135 @@ void writeStyle(QXmlStreamWriter &w, const Style &style, const QString &gradient
         w.writeAttribute(QStringLiteral("opacity"), number(std::clamp(style.opacity, 0.0, 1.0)));
 }
 
+// --- Effects: drop shadow (an SVG filter) and transparency gradient (an SVG mask). Other
+// programs show them through the filter and mask; OpenDraw reads its own attributes back.
+
+QString shadowText(const DropShadow &s)
+{
+    return QStringLiteral("%1 %2 %3 %4 %5")
+        .arg(number(s.offset.x()), number(s.offset.y()), number(s.blur), s.color.name(), number(s.color.alphaF()));
+}
+
+QString transparencyText(const Gradient &g)
+{
+    QStringList parts{g.type == Gradient::Type::Radial ? QStringLiteral("radial") : QStringLiteral("linear"),
+                      number(g.start.x()), number(g.start.y()), number(g.end.x()), number(g.end.y()),
+                      number(g.center.x()), number(g.center.y()), number(g.radius)};
+    for (const GradientStop &stop : g.stops)
+        parts << number(stop.offset) + QLatin1Char(':') + number(stop.color.alphaF());
+    return parts.join(QLatin1Char(' '));
+}
+
+std::optional<DropShadow> parseShadow(QStringView text)
+{
+    const QStringList parts = text.toString().split(QLatin1Char(' '), Qt::SkipEmptyParts);
+    if (parts.size() != 5)
+        return std::nullopt;
+    DropShadow s;
+    s.offset = QPointF(parts[0].toDouble(), parts[1].toDouble());
+    s.blur = std::max(parts[2].toDouble(), 0.0);
+    s.color = QColor::fromString(parts[3]);
+    if (!s.color.isValid())
+        return std::nullopt;
+    s.color.setAlphaF(std::clamp(parts[4].toDouble(), 0.0, 1.0));
+    return s;
+}
+
+std::optional<Gradient> parseTransparency(QStringView text)
+{
+    const QStringList parts = text.toString().split(QLatin1Char(' '), Qt::SkipEmptyParts);
+    if (parts.size() < 10)
+        return std::nullopt;
+    Gradient g;
+    g.type = parts[0] == u"radial" ? Gradient::Type::Radial : Gradient::Type::Linear;
+    g.start = QPointF(parts[1].toDouble(), parts[2].toDouble());
+    g.end = QPointF(parts[3].toDouble(), parts[4].toDouble());
+    g.center = QPointF(parts[5].toDouble(), parts[6].toDouble());
+    g.radius = parts[7].toDouble();
+    for (int i = 8; i < parts.size(); ++i) {
+        const QStringList stop = parts[i].split(QLatin1Char(':'));
+        if (stop.size() != 2)
+            return std::nullopt;
+        QColor solid(Qt::black);
+        solid.setAlphaF(std::clamp(stop[1].toDouble(), 0.0, 1.0));
+        g.stops.push_back({std::clamp(stop[0].toDouble(), 0.0, 1.0), solid});
+    }
+    return g;
+}
+
+// Writes the filter and mask an element's effects need (before the element); returns their ids.
+std::pair<QString, QString> writeEffectDefinitions(QXmlStreamWriter &w, const Style &style, int &count)
+{
+    QString filterId, maskId;
+    if (style.shadow) {
+        const DropShadow &s = *style.shadow;
+        filterId = QStringLiteral("shadow%1").arg(++count);
+        w.writeStartElement(QStringLiteral("filter"));
+        w.writeAttribute(QStringLiteral("id"), filterId);
+        w.writeAttribute(QStringLiteral("x"), QStringLiteral("-100%"));
+        w.writeAttribute(QStringLiteral("y"), QStringLiteral("-100%"));
+        w.writeAttribute(QStringLiteral("width"), QStringLiteral("300%"));
+        w.writeAttribute(QStringLiteral("height"), QStringLiteral("300%"));
+        w.writeEmptyElement(QStringLiteral("feGaussianBlur"));
+        w.writeAttribute(QStringLiteral("in"), QStringLiteral("SourceAlpha"));
+        w.writeAttribute(QStringLiteral("stdDeviation"), number(s.blur / 2.0));
+        w.writeEmptyElement(QStringLiteral("feOffset"));
+        w.writeAttribute(QStringLiteral("dx"), number(s.offset.x()));
+        w.writeAttribute(QStringLiteral("dy"), number(s.offset.y()));
+        w.writeAttribute(QStringLiteral("result"), QStringLiteral("offset"));
+        w.writeEmptyElement(QStringLiteral("feFlood"));
+        w.writeAttribute(QStringLiteral("flood-color"), s.color.name());
+        w.writeAttribute(QStringLiteral("flood-opacity"), number(s.color.alphaF()));
+        w.writeEmptyElement(QStringLiteral("feComposite"));
+        w.writeAttribute(QStringLiteral("in2"), QStringLiteral("offset"));
+        w.writeAttribute(QStringLiteral("operator"), QStringLiteral("in"));
+        w.writeStartElement(QStringLiteral("feMerge"));
+        w.writeEmptyElement(QStringLiteral("feMergeNode"));
+        w.writeEmptyElement(QStringLiteral("feMergeNode"));
+        w.writeAttribute(QStringLiteral("in"), QStringLiteral("SourceGraphic"));
+        w.writeEndElement();
+        w.writeEndElement();
+    }
+    if (style.transparency) {
+        // A white gradient whose opacity is how solid the object is.
+        Gradient white = *style.transparency;
+        for (GradientStop &stop : white.stops)
+            stop.color = QColor(255, 255, 255, stop.color.alpha());
+        const QString gradientId = QStringLiteral("maskgradient%1").arg(++count);
+        writeGradient(w, white, gradientId);
+        maskId = QStringLiteral("mask%1").arg(count);
+        w.writeStartElement(QStringLiteral("mask"));
+        w.writeAttribute(QStringLiteral("id"), maskId);
+        w.writeAttribute(QStringLiteral("maskUnits"), QStringLiteral("objectBoundingBox"));
+        w.writeAttribute(QStringLiteral("maskContentUnits"), QStringLiteral("objectBoundingBox"));
+        for (const char *attribute : {"x", "y"})
+            w.writeAttribute(QString::fromLatin1(attribute), QStringLiteral("-0.5"));
+        for (const char *attribute : {"width", "height"})
+            w.writeAttribute(QString::fromLatin1(attribute), QStringLiteral("2"));
+        w.writeEmptyElement(QStringLiteral("rect"));
+        w.writeAttribute(QStringLiteral("x"), QStringLiteral("-0.5"));
+        w.writeAttribute(QStringLiteral("y"), QStringLiteral("-0.5"));
+        w.writeAttribute(QStringLiteral("width"), QStringLiteral("2"));
+        w.writeAttribute(QStringLiteral("height"), QStringLiteral("2"));
+        w.writeAttribute(QStringLiteral("fill"), QStringLiteral("url(#%1)").arg(gradientId));
+        w.writeEndElement();
+    }
+    return {filterId, maskId};
+}
+
+void writeEffects(QXmlStreamWriter &w, const Style &style, const std::pair<QString, QString> &ids)
+{
+    const QString ns = QString::fromLatin1(kNamespace);
+    if (style.shadow) {
+        w.writeAttribute(QStringLiteral("filter"), QStringLiteral("url(#%1)").arg(ids.first));
+        w.writeAttribute(ns, QStringLiteral("shadow"), shadowText(*style.shadow));
+    }
+    if (style.transparency) {
+        w.writeAttribute(QStringLiteral("mask"), QStringLiteral("url(#%1)").arg(ids.second));
+        w.writeAttribute(ns, QStringLiteral("transparency"), transparencyText(*style.transparency));
+    }
+}
+
 // Rotation or skew of a rectangle, ellipse or text. The outline width is kept as it is on
 // the page, as OpenDraw draws it.
 void writeShapeTransform(QXmlStreamWriter &w, const Shape &shape)
@@ -174,6 +303,9 @@ void writeShape(QXmlStreamWriter &w, const Shape &shape, int &gradientCount)
             writeGradient(w, *shape.style().gradient, gradientId);
         }
     }
+    std::pair<QString, QString> effectIds;
+    if (shape.kind() != ShapeKind::Group && shape.kind() != ShapeKind::Image)
+        effectIds = writeEffectDefinitions(w, shape.style(), gradientCount);
 
     switch (shape.kind()) {
     case ShapeKind::Image:
@@ -235,6 +367,7 @@ void writeShape(QXmlStreamWriter &w, const Shape &shape, int &gradientCount)
         w.writeAttribute(ns, QStringLiteral("line-spacing"), number(f.lineSpacing));
         writeShapeTransform(w, shape);
         writeStyle(w, shape.style(), gradientId);
+        writeEffects(w, shape.style(), effectIds);
 
         // Every laid-out line on its own baseline, so any viewer shows the same lines. Paragraph
         // text also records its frame and marks wrapped lines, to rebuild the paragraphs.
@@ -296,6 +429,7 @@ void writeShape(QXmlStreamWriter &w, const Shape &shape, int &gradientCount)
     writeLabel(w, shape.name());
     writeShapeTransform(w, shape);
     writeStyle(w, shape.style(), gradientId);
+    writeEffects(w, shape.style(), effectIds);
     w.writeEndElement();
 }
 
@@ -888,6 +1022,25 @@ void applyFillPaint(Shape &shape, const Properties &props, const QTransform &con
     shape.setStyle(style);
 }
 
+// OpenDraw's shadow and transparency attributes. Filters and masks from other programs are not
+// read (the object shows without them), which the report mentions.
+void applyEffects(Shape &shape, const QXmlStreamAttributes &attributes, ReadReport &report)
+{
+    const QString ns = QString::fromLatin1(kNamespace);
+    Style style = shape.style();
+    const auto shadow = parseShadow(attributes.value(ns, QStringLiteral("shadow")));
+    const auto transparency = parseTransparency(attributes.value(ns, QStringLiteral("transparency")));
+    if (!shadow && attributes.hasAttribute(QStringLiteral("filter")))
+        ++report.skippedElements[QCoreApplication::translate("SvgIO", "filter effect (shown without it)")];
+    if (!transparency && attributes.hasAttribute(QStringLiteral("mask")))
+        ++report.skippedElements[QCoreApplication::translate("SvgIO", "mask (shown without it)")];
+    if (!shadow && !transparency)
+        return;
+    style.shadow = shadow;
+    style.transparency = transparency;
+    shape.setStyle(style);
+}
+
 // Text with the formatting of each character, while a <text> element is being read.
 struct RichString {
     QString text;
@@ -1413,6 +1566,7 @@ bool read(QIODevice *device, Document &document, QString *errorMessage, ReadRepo
             if (auto text = readText(r, props, context, localReport)) {
                 applyFillPaint(*text, props, context.transform, paintServers, localReport);
                 text->setName(attributes.value(QString::fromLatin1(kInkscapeNamespace), QStringLiteral("label")).toString());
+                applyEffects(*text, attributes, localReport);
                 containers.back().push_back(std::move(text));
             }
             continue; // readText consumed the whole element, end tag included
@@ -1492,6 +1646,7 @@ bool read(QIODevice *device, Document &document, QString *errorMessage, ReadRepo
             if (shape) {
                 applyFillPaint(*shape, props, t, paintServers, localReport);
                 shape->setName(attributes.value(QString::fromLatin1(kInkscapeNamespace), QStringLiteral("label")).toString());
+                applyEffects(*shape, attributes, localReport);
                 containers.back().push_back(std::move(shape));
             }
 

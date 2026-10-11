@@ -5,6 +5,7 @@
 #include "core/Commands.h"
 #include "core/Document.h"
 
+#include <QColorDialog>
 #include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QLabel>
@@ -156,6 +157,7 @@ PropertyBar::PropertyBar(Document *document, QUndoStack *undoStack, QWidget *par
     m_eyedropperActions << addWidget(eyedropperHint);
     eyedropperHint->setText(tr("Click inside an object to fill it, on its outline to colour the outline"));
     connect(pickAgain, &QToolButton::clicked, this, &PropertyBar::eyedropperResetRequested);
+    createEffectFields();
 
     for (QSpinBox *box : {m_polygonSides, m_starPoints, m_starSharpness, m_graphColumns, m_graphRows})
         connect(box, &QSpinBox::valueChanged, this, &PropertyBar::emitToolSettings);
@@ -251,6 +253,157 @@ QDoubleSpinBox *PropertyBar::addField(const QString &label, const QString &toolT
     return box;
 }
 
+void PropertyBar::createEffectFields()
+{
+    // Shadow tool
+    m_shadowX = addField(tr("Shadow X"), tr("Horizontal offset of the shadow"), -kMaxDisplay, m_shadowActions);
+    m_shadowY = addField(tr("Y"), tr("Vertical offset of the shadow"), -kMaxDisplay, m_shadowActions);
+    m_shadowBlur = addField(tr("Feather"), tr("How soft the shadow is"), 0.0, m_shadowActions);
+    m_shadowOpacity = addIntField(tr("Opacity"), tr("How dark the shadow is"), 0, 100, m_shadowActions);
+    m_shadowOpacity->setSuffix(QStringLiteral(" %"));
+    m_shadowColor = addButton(QIcon(), tr("Shadow colour"), m_shadowActions);
+    QToolButton *noShadow = addButton(icon(Icon::FillNone), tr("Remove the shadow"), m_shadowActions);
+    for (QDoubleSpinBox *box : {m_shadowX, m_shadowY}) {
+        connect(box, &QDoubleSpinBox::editingFinished, this, [this] {
+            const QPointF offset(units().fromDisplay(m_shadowX->value()), units().fromDisplay(m_shadowY->value()));
+            applyShadow([offset](DropShadow &s) { s.offset = offset; });
+        });
+    }
+    connect(m_shadowBlur, &QDoubleSpinBox::editingFinished, this, [this] {
+        const double blur = units().fromDisplay(m_shadowBlur->value());
+        applyShadow([blur](DropShadow &s) { s.blur = blur; });
+    });
+    connect(m_shadowOpacity, &QSpinBox::editingFinished, this, [this] {
+        const int percent = m_shadowOpacity->value();
+        applyShadow([percent](DropShadow &s) { s.color.setAlphaF(percent / 100.0); });
+    });
+    connect(m_shadowColor, &QToolButton::clicked, this, [this] {
+        const auto current = m_canvas ? m_canvas->currentStyle().shadow : std::nullopt;
+        const QColor color = QColorDialog::getColor(current ? current->color : QColor(Qt::black), this, tr("Shadow colour"));
+        if (color.isValid())
+            applyShadow([color](DropShadow &s) {
+                const double alpha = s.color.alphaF();
+                s.color = color;
+                s.color.setAlphaF(alpha);
+            });
+    });
+    connect(noShadow, &QToolButton::clicked, this, [this] {
+        if (m_canvas)
+            m_canvas->restyle(tr("Remove shadow"), [](Style &s) { s.shadow.reset(); });
+        refreshEffects();
+    });
+
+    // Transparency tool
+    auto *typeLabel = new QLabel(tr("Transparency"), this);
+    typeLabel->setContentsMargins(6, 0, 3, 0);
+    m_transparencyActions << addWidget(typeLabel);
+    m_transparencyType = new QComboBox(this);
+    m_transparencyType->addItems({tr("None"), tr("Uniform"), tr("Linear"), tr("Radial")});
+    m_transparencyType->setToolTip(tr("Kind of transparency"));
+    m_transparencyActions << addWidget(m_transparencyType);
+    m_transparencyStart = addIntField(tr("Start"), tr("Transparency where the gradient starts (or of the whole object)"), 0, 100,
+                                      m_transparencyActions);
+    m_transparencyEnd = addIntField(tr("End"), tr("Transparency where the gradient ends"), 0, 100, m_transparencyActions);
+    m_transparencyStart->setSuffix(QStringLiteral(" %"));
+    m_transparencyEnd->setSuffix(QStringLiteral(" %"));
+    connect(m_transparencyType, &QComboBox::activated, this, &PropertyBar::applyTransparency);
+    connect(m_transparencyStart, &QSpinBox::editingFinished, this, &PropertyBar::applyTransparency);
+    connect(m_transparencyEnd, &QSpinBox::editingFinished, this, &PropertyBar::applyTransparency);
+}
+
+void PropertyBar::setCanvas(CanvasWidget *canvas)
+{
+    m_canvas = canvas;
+    connect(canvas, &CanvasWidget::selectionChanged, this, &PropertyBar::refreshEffects);
+    refreshEffects();
+}
+
+void PropertyBar::applyShadow(const std::function<void(DropShadow &)> &change)
+{
+    if (!m_canvas || m_updatingEffects)
+        return;
+    m_canvas->restyle(tr("Drop shadow"), [&change](Style &style) {
+        DropShadow shadow = style.shadow.value_or(DropShadow{});
+        change(shadow);
+        style.shadow = shadow;
+    });
+    refreshEffects();
+}
+
+void PropertyBar::applyTransparency()
+{
+    if (!m_canvas || m_updatingEffects)
+        return;
+    const int type = m_transparencyType->currentIndex();
+    const int startAlpha = qRound(255 * (1.0 - m_transparencyStart->value() / 100.0));
+    const int endAlpha = qRound(255 * (1.0 - m_transparencyEnd->value() / 100.0));
+    m_canvas->restyle(tr("Transparency"), [=](Style &style) {
+        switch (type) {
+        case 0: // none
+            style.transparency.reset();
+            style.opacity = 1.0;
+            break;
+        case 1: // uniform
+            style.transparency.reset();
+            style.opacity = startAlpha / 255.0;
+            break;
+        default: {
+            const bool radial = type == 3;
+            Gradient g = style.transparency.value_or(Gradient{});
+            if (!style.transparency || (g.type == Gradient::Type::Radial) != radial) {
+                g = radial ? Gradient::radial(Qt::black, Qt::black) : Gradient::linear(Qt::black, Qt::black, 0);
+            }
+            if (g.stops.size() < 2)
+                g.stops = {{0.0, Qt::black}, {1.0, Qt::black}};
+            g.stops.front().color.setAlpha(startAlpha);
+            g.stops.back().color.setAlpha(endAlpha);
+            style.transparency = g;
+            style.opacity = 1.0;
+            break;
+        }
+        }
+    });
+    refreshEffects();
+}
+
+void PropertyBar::refreshEffects()
+{
+    if (!m_canvas)
+        return;
+    m_updatingEffects = true;
+    const Style &style = m_canvas->currentStyle();
+    const DropShadow shadow = style.shadow.value_or(DropShadow{});
+    setValueQuietly(m_shadowX, units().toDisplay(shadow.offset.x()));
+    setValueQuietly(m_shadowY, units().toDisplay(shadow.offset.y()));
+    setValueQuietly(m_shadowBlur, units().toDisplay(shadow.blur));
+    {
+        const QSignalBlocker blocker(m_shadowOpacity);
+        m_shadowOpacity->setValue(qRound(shadow.color.alphaF() * 100));
+    }
+    QPixmap swatch(28, 16);
+    swatch.fill(QColor(shadow.color.red(), shadow.color.green(), shadow.color.blue()));
+    m_shadowColor->setIcon(QIcon(swatch));
+
+    int type = 0;
+    int start = 0, end = 0;
+    if (style.transparency && style.transparency->stops.size() >= 2) {
+        type = style.transparency->type == Gradient::Type::Radial ? 3 : 2;
+        start = qRound(100 - style.transparency->stops.front().color.alphaF() * 100);
+        end = qRound(100 - style.transparency->stops.back().color.alphaF() * 100);
+    } else if (style.opacity < 1.0) {
+        type = 1;
+        start = qRound((1.0 - style.opacity) * 100);
+    } else {
+        end = 100; // what a new gradient starts with
+    }
+    const QSignalBlocker b1(m_transparencyType), b2(m_transparencyStart), b3(m_transparencyEnd);
+    m_transparencyType->setCurrentIndex(type);
+    m_transparencyStart->setValue(start);
+    m_transparencyEnd->setValue(end);
+    m_transparencyEnd->setEnabled(type >= 2);
+    m_updatingEffects = false;
+}
+
 QSpinBox *PropertyBar::addIntField(const QString &label, const QString &toolTip, int minimum, int maximum,
                                    QList<QAction *> &group)
 {
@@ -320,6 +473,10 @@ QList<QAction *> *PropertyBar::toolGroup()
         return &m_graphActions;
     case CanvasWidget::Tool::Eyedropper:
         return &m_eyedropperActions;
+    case CanvasWidget::Tool::DropShadow:
+        return &m_shadowActions;
+    case CanvasWidget::Tool::Transparency:
+        return &m_transparencyActions;
     default:
         return nullptr;
     }
@@ -347,12 +504,13 @@ void PropertyBar::setSelection(Shape *single, bool anySelected)
 void PropertyBar::updateMode()
 {
     QList<QAction *> *tool = toolGroup();
-    const bool eyedropper = tool == &m_eyedropperActions;
-    const bool showTool = tool && (eyedropper || !m_anySelected);
-    const bool showObject = m_anySelected && !eyedropper;
+    // These tools act on the selection, so their options show with it.
+    const bool always = tool == &m_eyedropperActions || tool == &m_shadowActions || tool == &m_transparencyActions;
+    const bool showTool = tool && (always || !m_anySelected);
+    const bool showObject = m_anySelected && !always;
     const bool showPage = !m_anySelected && !showTool;
     for (QList<QAction *> *group : {&m_rectangleToolActions, &m_polygonActions, &m_starActions, &m_spiralActions,
-                                    &m_graphActions, &m_eyedropperActions}) {
+                                    &m_graphActions, &m_eyedropperActions, &m_shadowActions, &m_transparencyActions}) {
         for (QAction *action : std::as_const(*group))
             action->setVisible(showTool && group == tool);
     }
@@ -371,7 +529,7 @@ void PropertyBar::updateUnits()
 {
     const QString suffix = QLatin1Char(' ') + units().suffix();
     for (QDoubleSpinBox *box : {m_pageWidth, m_pageHeight, m_nudge, m_duplicateX, m_duplicateY, m_x, m_y, m_width,
-                                m_height, m_outline, m_cornerRadius, m_newCornerRadius}) {
+                                m_height, m_outline, m_cornerRadius, m_newCornerRadius, m_shadowX, m_shadowY, m_shadowBlur}) {
         box->setSuffix(suffix);
         box->setDecimals(units().decimals());
     }
@@ -407,6 +565,7 @@ void PropertyBar::refreshPage()
 
 void PropertyBar::refresh()
 {
+    refreshEffects();
     if (!m_anySelected) {
         refreshPage();
         return;

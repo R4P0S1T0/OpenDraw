@@ -143,6 +143,7 @@ MainWindow::MainWindow(QWidget *parent)
     addToolBar(Qt::TopToolBarArea, m_nodeBar);
     m_nodeBar->hide();
     createTextBar();
+    m_propertyBar->setCanvas(m_canvas);
     connect(m_propertyBar, &PropertyBar::mirrorRequested, m_canvas, &CanvasWidget::mirrorSelection);
     connect(m_propertyBar, &PropertyBar::rotateRequested, m_canvas, &CanvasWidget::rotateSelection);
     connect(m_canvas, &CanvasWidget::transformModeChanged, this, &MainWindow::updateStyleIndicators);
@@ -657,6 +658,8 @@ void MainWindow::createToolbox(QMenu *toolsMenu)
     m_toolbox->addSeparator();
     m_toolbox->addAction(makeAction({CanvasWidget::Tool::Text, Icon::Text, tr("Text"), QKeySequence(Qt::Key_F8)}));
     m_toolbox->addSeparator();
+    m_toolbox->addAction(makeAction({CanvasWidget::Tool::DropShadow, Icon::Shadow, tr("Drop Shadow"), QKeySequence()}));
+    m_toolbox->addAction(makeAction({CanvasWidget::Tool::Transparency, Icon::Transparency, tr("Transparency"), QKeySequence()}));
     m_toolbox->addAction(
         makeAction({CanvasWidget::Tool::Eyedropper, Icon::Eyedropper, tr("Color Eyedropper"), QKeySequence(Qt::Key_I)}));
 }
@@ -844,6 +847,10 @@ QString MainWindow::toolHint() const
         return tr("Drag to draw a grid of rectangles; Ctrl keeps it square");
     case CanvasWidget::Tool::Text:
         return tr("Click for artistic text, or drag a frame for paragraph text, then type; Esc finishes");
+    case CanvasWidget::Tool::DropShadow:
+        return tr("Drag from an object to give it a shadow; the property bar sets its offset, softness, opacity and colour");
+    case CanvasWidget::Tool::Transparency:
+        return tr("Drag across an object: solid where you start, transparent where you end; drag the squares to adjust");
     case CanvasWidget::Tool::Eyedropper:
         return m_canvas->eyedropperColor()
                    ? tr("Click inside an object to fill it, on its outline to colour the outline; Shift+click or Esc "
