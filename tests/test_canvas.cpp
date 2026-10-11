@@ -78,6 +78,9 @@ private slots:
     void deleteKeyRemovesActiveNode();
     void breakThenJoinWithShiftClick();
     void nodeTypeAndSegmentCommands();
+    void marqueeAndShiftClickSelection();
+    void moveAndResizeSeveralShapes();
+    void groupUngroupAlignAndOrder();
     void screenshot();
 
 private:
@@ -271,6 +274,90 @@ void CanvasTests::nodeTypeAndSegmentCommands()
     QCOMPARE(curve->pathData()[0].nodes[1].type, NodeType::Corner);
 }
 
+void CanvasTests::marqueeAndShiftClickSelection()
+{
+    m_canvas->setTool(CanvasWidget::Tool::Rectangle);
+    dragFromTo(m_canvas, {300, 200}, {350, 250});
+    dragFromTo(m_canvas, {400, 200}, {450, 250});
+    dragFromTo(m_canvas, {600, 500}, {650, 550});
+    QCOMPARE(m_doc->count(), 3);
+
+    m_canvas->setTool(CanvasWidget::Tool::Select);
+    dragFromTo(m_canvas, {280, 180}, {470, 270}); // encloses the first two only
+    QCOMPARE(m_canvas->selection().size(), std::size_t(2));
+
+    // Shift+click adds the third, then removes the first.
+    sendMouse(m_canvas, QEvent::MouseButtonPress, {625, 525}, Qt::LeftButton, Qt::LeftButton, Qt::ShiftModifier);
+    sendMouse(m_canvas, QEvent::MouseButtonRelease, {625, 525}, Qt::LeftButton, Qt::NoButton, Qt::ShiftModifier);
+    QCOMPARE(m_canvas->selection().size(), std::size_t(3));
+    sendMouse(m_canvas, QEvent::MouseButtonPress, {325, 225}, Qt::LeftButton, Qt::LeftButton, Qt::ShiftModifier);
+    sendMouse(m_canvas, QEvent::MouseButtonRelease, {325, 225}, Qt::LeftButton, Qt::NoButton, Qt::ShiftModifier);
+    QCOMPARE(m_canvas->selection().size(), std::size_t(2));
+
+    click(m_canvas, {150, 650}); // empty space clears the selection
+    QVERIFY(m_canvas->selection().empty());
+}
+
+void CanvasTests::moveAndResizeSeveralShapes()
+{
+    m_canvas->setTool(CanvasWidget::Tool::Rectangle);
+    dragFromTo(m_canvas, {300, 200}, {350, 250});
+    dragFromTo(m_canvas, {400, 200}, {450, 250});
+    Shape *a = m_doc->shapes()[0].get();
+    Shape *b = m_doc->shapes()[1].get();
+    const QRectF aBefore = a->bounds();
+    const QRectF bBefore = b->bounds();
+
+    m_canvas->setTool(CanvasWidget::Tool::Select);
+    m_canvas->selectAll();
+    dragFromTo(m_canvas, {325, 225}, {325, 325}); // drag one, both move
+    QCOMPARE(a->bounds().top() - aBefore.top(), b->bounds().top() - bBefore.top());
+    QVERIFY(a->bounds().top() > aBefore.top());
+    m_undo->undo(); // one step undoes the whole move
+    QCOMPARE(a->bounds(), aBefore);
+    QCOMPARE(b->bounds(), bBefore);
+
+    // Drag the right-middle handle of the combined box (widget x 450 + 3) to the right:
+    // the gap between the two grows along with their widths.
+    dragFromTo(m_canvas, {453, 225}, {603, 225});
+    QVERIFY(b->bounds().width() > bBefore.width() * 1.5);
+    QVERIFY(b->bounds().left() - a->bounds().right() > bBefore.left() - aBefore.right());
+    m_undo->undo();
+    QCOMPARE(b->bounds(), bBefore);
+}
+
+void CanvasTests::groupUngroupAlignAndOrder()
+{
+    m_canvas->setTool(CanvasWidget::Tool::Rectangle);
+    dragFromTo(m_canvas, {300, 200}, {350, 250});
+    dragFromTo(m_canvas, {420, 260}, {440, 300});
+    Shape *a = m_doc->shapes()[0].get();
+    Shape *b = m_doc->shapes()[1].get();
+
+    m_canvas->setTool(CanvasWidget::Tool::Select);
+    m_canvas->selectAll();
+    m_canvas->align(arrange::Alignment::Left);
+    QCOMPARE(b->bounds().left(), a->bounds().left());
+    m_canvas->align(arrange::Alignment::Bottom);
+    QCOMPARE(a->bounds().bottom(), b->bounds().bottom());
+
+    m_canvas->groupSelection();
+    QCOMPARE(m_doc->count(), 1);
+    Shape *group = m_doc->shapes()[0].get();
+    QCOMPARE(group->kind(), ShapeKind::Group);
+    QCOMPARE(m_canvas->selectedShape(), group);
+
+    m_canvas->ungroupSelection();
+    QCOMPARE(m_doc->count(), 2);
+    QCOMPARE(m_canvas->selection().size(), std::size_t(2));
+
+    m_canvas->setSelectedShape(a);
+    m_canvas->orderToFront();
+    QCOMPARE(m_doc->shapes().back().get(), a);
+    m_undo->undo();
+    QCOMPARE(m_doc->shapes().back().get(), b);
+}
+
 // Not an assertion: saves a picture of the canvas for manual review when
 // OPENDRAW_SCREENSHOT_DIR is set.
 void CanvasTests::screenshot()
@@ -298,6 +385,10 @@ void CanvasTests::screenshot()
     click(m_canvas, {420, 160}); // right-hand node of the ellipse
 
     QVERIFY(m_canvas->grab().save(dir + QStringLiteral("/canvas-curves.png")));
+
+    m_canvas->setTool(CanvasWidget::Tool::Select);
+    m_canvas->selectAll();
+    QVERIFY(m_canvas->grab().save(dir + QStringLiteral("/canvas-selection.png")));
 }
 
 QTEST_MAIN(CanvasTests)

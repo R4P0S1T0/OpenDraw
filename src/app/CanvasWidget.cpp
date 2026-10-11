@@ -22,6 +22,7 @@ constexpr double kZoomStep = 1.25;
 constexpr double kHitTolerancePx = 4.0;
 constexpr double kNodeHitPx = 6.0;
 constexpr double kMinCreateSizePx = 3.0;
+constexpr double kMinMarqueePx = 3.0;
 constexpr double kPageMarginPx = 24.0;
 constexpr double kHandleSizePx = 7.0;
 constexpr double kNodeSizePx = 7.0;
@@ -50,11 +51,14 @@ CanvasWidget::CanvasWidget(Document *document, QUndoStack *undoStack, QWidget *p
 
     connect(m_document, &Document::changed, this, qOverload<>(&QWidget::update));
     connect(m_document, &Document::shapeRemoved, this, [this](Shape *shape) {
-        if (shape == m_selected)
-            setSelectedShape(nullptr);
+        if (!isSelected(shape))
+            return;
+        std::vector<Shape *> remaining = m_selection;
+        std::erase(remaining, shape);
+        setSelection(std::move(remaining));
     });
     connect(m_document, &Document::cleared, this, [this] {
-        setSelectedShape(nullptr);
+        setSelection({});
         m_bezier = {};
     });
 }
@@ -73,12 +77,30 @@ void CanvasWidget::setTool(Tool tool)
 
 void CanvasWidget::setSelectedShape(Shape *shape)
 {
-    if (shape == m_selected)
+    setSelection(shape ? std::vector<Shape *>{shape} : std::vector<Shape *>{});
+}
+
+void CanvasWidget::setSelection(std::vector<Shape *> shapes)
+{
+    if (shapes == m_selection)
         return;
-    m_selected = shape;
+    m_selection = std::move(shapes);
     setActiveNode({});
     update();
-    emit selectionChanged(shape);
+    emit selectionChanged();
+}
+
+bool CanvasWidget::isSelected(const Shape *shape) const
+{
+    return std::find(m_selection.begin(), m_selection.end(), shape) != m_selection.end();
+}
+
+QRectF CanvasWidget::selectionBounds() const
+{
+    std::vector<QRectF> boxes;
+    for (const Shape *shape : m_selection)
+        boxes.push_back(shape->bounds());
+    return arrange::unite(boxes);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -168,6 +190,11 @@ void CanvasWidget::addNewShape(std::unique_ptr<Shape> shape)
     setSelectedShape(created);
 }
 
+void CanvasWidget::selectAll()
+{
+    setSelection(m_document->order());
+}
+
 void CanvasWidget::deleteSelection()
 {
     if (!m_bezier.nodes.empty()) {
@@ -179,16 +206,22 @@ void CanvasWidget::deleteSelection()
         removeActiveNode();
         return;
     }
-    if (m_selected)
-        m_undoStack->push(new RemoveShapeCommand(m_document, m_selected));
+    if (m_selection.empty())
+        return;
+    const std::vector<Shape *> shapes = m_selection;
+    m_undoStack->beginMacro(tr("Delete"));
+    for (Shape *shape : shapes)
+        m_undoStack->push(new RemoveShapeCommand(m_document, shape));
+    m_undoStack->endMacro();
 }
 
 void CanvasWidget::convertSelectionToCurves()
 {
-    if (!m_selected || m_selected->kind() == ShapeKind::Path)
+    Shape *shape = selectedShape();
+    if (!shape || shape->kind() == ShapeKind::Path || shape->kind() == ShapeKind::Group)
         return;
-    auto curve = std::make_unique<Shape>(pathops::fromPainterPath(m_selected->path()), m_selected->style());
-    auto *command = new ReplaceShapeCommand(m_document, m_selected, std::move(curve), tr("Convert to curves"));
+    auto curve = std::make_unique<Shape>(pathops::fromPainterPath(shape->path()), shape->style());
+    auto *command = new ReplaceShapeCommand(m_document, shape, std::move(curve), tr("Convert to curves"));
     Shape *created = command->newShape();
     m_undoStack->push(command);
     setSelectedShape(created);
@@ -206,11 +239,134 @@ void CanvasWidget::finishCurve()
 }
 
 // ---------------------------------------------------------------------------------------------
+// Arrange
+
+void CanvasWidget::groupSelection()
+{
+    if (m_selection.size() < 2)
+        return;
+    auto *command = new GroupCommand(m_document, m_selection);
+    Shape *group = command->group();
+    m_undoStack->push(command);
+    setSelectedShape(group);
+}
+
+void CanvasWidget::ungroupSelection()
+{
+    std::vector<Shape *> groups;
+    for (Shape *shape : m_selection) {
+        if (shape->kind() == ShapeKind::Group)
+            groups.push_back(shape);
+    }
+    if (groups.empty())
+        return;
+    std::vector<Shape *> released;
+    m_undoStack->beginMacro(tr("Ungroup"));
+    for (Shape *group : groups) {
+        auto *command = new UngroupCommand(m_document, group);
+        released.insert(released.end(), command->children().begin(), command->children().end());
+        m_undoStack->push(command);
+    }
+    m_undoStack->endMacro();
+    setSelection(std::move(released));
+}
+
+void CanvasWidget::reorder(std::vector<Shape *> order, const QString &text)
+{
+    if (order != m_document->order())
+        m_undoStack->push(new ReorderCommand(m_document, std::move(order), text));
+}
+
+void CanvasWidget::orderToFront()
+{
+    std::vector<Shape *> order;
+    std::vector<Shape *> selected;
+    for (Shape *shape : m_document->order())
+        (isSelected(shape) ? selected : order).push_back(shape);
+    order.insert(order.end(), selected.begin(), selected.end());
+    reorder(std::move(order), tr("To front"));
+}
+
+void CanvasWidget::orderToBack()
+{
+    std::vector<Shape *> order;
+    std::vector<Shape *> others;
+    for (Shape *shape : m_document->order())
+        (isSelected(shape) ? order : others).push_back(shape);
+    order.insert(order.end(), others.begin(), others.end());
+    reorder(std::move(order), tr("To back"));
+}
+
+void CanvasWidget::orderForwardOne()
+{
+    std::vector<Shape *> order = m_document->order();
+    // From the top down, so a selected shape never jumps over another selected one.
+    for (int i = int(order.size()) - 2; i >= 0; --i) {
+        if (isSelected(order[i]) && !isSelected(order[i + 1]))
+            std::swap(order[i], order[i + 1]);
+    }
+    reorder(std::move(order), tr("Forward one"));
+}
+
+void CanvasWidget::orderBackOne()
+{
+    std::vector<Shape *> order = m_document->order();
+    for (int i = 1; i < int(order.size()); ++i) {
+        if (isSelected(order[i]) && !isSelected(order[i - 1]))
+            std::swap(order[i], order[i - 1]);
+    }
+    reorder(std::move(order), tr("Back one"));
+}
+
+void CanvasWidget::moveSelection(const std::vector<QPointF> &offsets, const QString &text)
+{
+    if (std::all_of(offsets.begin(), offsets.end(), [](const QPointF &p) { return p.isNull(); }))
+        return;
+    m_undoStack->beginMacro(text);
+    for (std::size_t i = 0; i < m_selection.size(); ++i) {
+        if (!offsets[i].isNull())
+            m_undoStack->push(new MoveShapeCommand(m_document, m_selection[i], offsets[i], false));
+    }
+    m_undoStack->endMacro();
+}
+
+void CanvasWidget::align(arrange::Alignment alignment)
+{
+    if (m_selection.empty())
+        return;
+    std::vector<QRectF> boxes;
+    for (const Shape *shape : m_selection)
+        boxes.push_back(shape->bounds());
+    const QRectF reference = m_selection.size() == 1 ? QRectF(QPointF(0, 0), m_document->pageSize())
+                                                     : arrange::unite(boxes);
+    moveSelection(arrange::alignOffsets(boxes, alignment, reference), tr("Align"));
+}
+
+void CanvasWidget::centerOnPage()
+{
+    if (m_selection.empty())
+        return;
+    // The selection moves as a block, keeping its layout.
+    const QRectF page(QPointF(0, 0), m_document->pageSize());
+    const QPointF offset = page.center() - selectionBounds().center();
+    moveSelection(std::vector<QPointF>(m_selection.size(), offset), tr("Center on page"));
+}
+
+void CanvasWidget::distribute(Qt::Orientation orientation)
+{
+    std::vector<QRectF> boxes;
+    for (const Shape *shape : m_selection)
+        boxes.push_back(shape->bounds());
+    moveSelection(arrange::distributeOffsets(boxes, orientation), tr("Distribute"));
+}
+
+// ---------------------------------------------------------------------------------------------
 // Shape tool (node editing)
 
 Shape *CanvasWidget::selectedPath() const
 {
-    return m_selected && m_selected->kind() == ShapeKind::Path ? m_selected : nullptr;
+    Shape *shape = selectedShape();
+    return shape && shape->kind() == ShapeKind::Path ? shape : nullptr;
 }
 
 bool CanvasWidget::isValidNode(const NodeRef &ref) const
@@ -243,6 +399,58 @@ void CanvasWidget::setActiveNode(const NodeRef &node, const NodeRef &secondary)
     m_secondaryNode = secondary;
     update();
     emit nodeSelectionChanged();
+}
+
+CanvasWidget::NodeRef CanvasWidget::nodeAt(const QPointF &widgetPosition) const
+{
+    const Shape *path = selectedPath();
+    if (!path)
+        return {};
+    NodeRef best;
+    double bestDistance = kNodeHitPx;
+    const PathData &data = path->pathData();
+    for (int s = 0; s < int(data.size()); ++s) {
+        for (int n = 0; n < int(data[s].nodes.size()); ++n) {
+            const double d = distance(toWidget(data[s].nodes[n].point), widgetPosition);
+            if (d <= bestDistance) {
+                bestDistance = d;
+                best = {s, n};
+            }
+        }
+    }
+    return best;
+}
+
+std::optional<CanvasWidget::NodeHandle> CanvasWidget::nodeHandleAt(const QPointF &widgetPosition) const
+{
+    if (!activeNodeIsValid())
+        return std::nullopt;
+    const PathNode &node = selectedPath()->pathData()[m_activeNode.subpath].nodes[m_activeNode.node];
+    if (node.out != node.point && distance(toWidget(node.out), widgetPosition) <= kNodeHitPx)
+        return NodeHandle::Out;
+    if (node.in != node.point && distance(toWidget(node.in), widgetPosition) <= kNodeHitPx)
+        return NodeHandle::In;
+    return std::nullopt;
+}
+
+void CanvasWidget::commitPathEdit(const PathData &before, const QString &text)
+{
+    Shape *path = selectedPath();
+    if (path && path->pathData() != before)
+        m_undoStack->push(new SetPathCommand(m_document, path, before, path->pathData(), text));
+}
+
+void CanvasWidget::removeActiveNode()
+{
+    Shape *path = selectedPath();
+    PathData data = path->pathData();
+    pathops::removeNode(data, m_activeNode.subpath, m_activeNode.node);
+    setActiveNode({});
+    if (data.empty()) {
+        m_undoStack->push(new RemoveShapeCommand(m_document, path));
+        return;
+    }
+    m_undoStack->push(new SetPathCommand(m_document, path, path->pathData(), data, tr("Delete node")));
 }
 
 template<typename Edit>
@@ -308,67 +516,15 @@ void CanvasWidget::joinNodes()
         setActiveNode({});
 }
 
-CanvasWidget::NodeRef CanvasWidget::nodeAt(const QPointF &widgetPosition) const
-{
-    const Shape *path = selectedPath();
-    if (!path)
-        return {};
-    NodeRef best;
-    double bestDistance = kNodeHitPx;
-    const PathData &data = path->pathData();
-    for (int s = 0; s < int(data.size()); ++s) {
-        for (int n = 0; n < int(data[s].nodes.size()); ++n) {
-            const double d = distance(toWidget(data[s].nodes[n].point), widgetPosition);
-            if (d <= bestDistance) {
-                bestDistance = d;
-                best = {s, n};
-            }
-        }
-    }
-    return best;
-}
-
-std::optional<CanvasWidget::NodeHandle> CanvasWidget::nodeHandleAt(const QPointF &widgetPosition) const
-{
-    if (!activeNodeIsValid())
-        return std::nullopt;
-    const PathNode &node = selectedPath()->pathData()[m_activeNode.subpath].nodes[m_activeNode.node];
-    if (node.out != node.point && distance(toWidget(node.out), widgetPosition) <= kNodeHitPx)
-        return NodeHandle::Out;
-    if (node.in != node.point && distance(toWidget(node.in), widgetPosition) <= kNodeHitPx)
-        return NodeHandle::In;
-    return std::nullopt;
-}
-
-void CanvasWidget::commitPathEdit(const PathData &before, const QString &text)
-{
-    Shape *path = selectedPath();
-    if (path && path->pathData() != before)
-        m_undoStack->push(new SetPathCommand(m_document, path, before, path->pathData(), text));
-}
-
-void CanvasWidget::removeActiveNode()
-{
-    Shape *path = selectedPath();
-    PathData data = path->pathData();
-    pathops::removeNode(data, m_activeNode.subpath, m_activeNode.node);
-    setActiveNode({});
-    if (data.empty()) {
-        m_undoStack->push(new RemoveShapeCommand(m_document, path));
-        return;
-    }
-    m_undoStack->push(new SetPathCommand(m_document, path, path->pathData(), data, tr("Delete node")));
-}
-
 // ---------------------------------------------------------------------------------------------
 // Select tool resize handles
 
 std::array<QRectF, 8> CanvasWidget::resizeHandleRects() const
 {
     std::array<QRectF, 8> rects;
-    if (!m_selected)
+    if (m_selection.empty())
         return rects;
-    const QRectF box = viewTransform().mapRect(m_selected->bounds()).adjusted(-3, -3, 3, 3);
+    const QRectF box = viewTransform().mapRect(selectionBounds()).adjusted(-3, -3, 3, 3);
     const QPointF centers[] = {box.topLeft(),     QPointF(box.center().x(), box.top()),
                                box.topRight(),    QPointF(box.right(), box.center().y()),
                                box.bottomRight(), QPointF(box.center().x(), box.bottom()),
@@ -380,7 +536,7 @@ std::array<QRectF, 8> CanvasWidget::resizeHandleRects() const
 
 int CanvasWidget::resizeHandleAt(const QPointF &widgetPosition) const
 {
-    if (!m_selected || m_tool != Tool::Select)
+    if (m_selection.empty() || m_tool != Tool::Select)
         return -1;
     const auto rects = resizeHandleRects();
     for (int i = 0; i < 8; ++i) {
@@ -407,6 +563,19 @@ void CanvasWidget::setHoverCursor(const QPointF &widgetPosition)
 // ---------------------------------------------------------------------------------------------
 // Painting
 
+void CanvasWidget::paintShape(QPainter &painter, const Shape &shape)
+{
+    if (shape.kind() == ShapeKind::Group) {
+        for (const auto &child : shape.children())
+            paintShape(painter, *child);
+        return;
+    }
+    const Style &style = shape.style();
+    painter.setBrush(style.hasFill() ? QBrush(style.fill) : QBrush(Qt::NoBrush));
+    painter.setPen(style.hasStroke() ? QPen(style.stroke, style.strokeWidth) : QPen(Qt::NoPen));
+    painter.drawPath(shape.path());
+}
+
 void CanvasWidget::paintEvent(QPaintEvent *)
 {
     QPainter painter(this);
@@ -423,12 +592,8 @@ void CanvasWidget::paintEvent(QPaintEvent *)
     painter.setBrush(Qt::NoBrush);
     painter.drawRect(page);
 
-    for (const auto &shape : m_document->shapes()) {
-        const Style &style = shape->style();
-        painter.setBrush(style.hasFill() ? QBrush(style.fill) : QBrush(Qt::NoBrush));
-        painter.setPen(style.hasStroke() ? QPen(style.stroke, style.strokeWidth) : QPen(Qt::NoPen));
-        painter.drawPath(shape->path());
-    }
+    for (const auto &shape : m_document->shapes())
+        paintShape(painter, *shape);
 
     QPen preview(palette().color(QPalette::Highlight), 0, Qt::DashLine);
     preview.setCosmetic(true);
@@ -441,35 +606,55 @@ void CanvasWidget::paintEvent(QPaintEvent *)
             painter.drawRect(m_creating);
     }
     if (m_drag == Drag::Freehand && m_freehand.size() > 1) {
-        QPen ink(curveStyle(false).stroke, curveStyle(false).strokeWidth, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
-        painter.setPen(ink);
+        const Style style = curveStyle(false);
+        painter.setPen(QPen(style.stroke, style.strokeWidth, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
         painter.drawPolyline(m_freehand.data(), int(m_freehand.size()));
     }
 
     painter.resetTransform();
     paintSelection(painter);
     paintBezierPreview(painter);
+
+    if (m_drag == Drag::Marquee) {
+        QColor fill = palette().color(QPalette::Highlight);
+        fill.setAlpha(40);
+        painter.setPen(QPen(palette().color(QPalette::Highlight), 1, Qt::DashLine));
+        painter.setBrush(fill);
+        painter.drawRect(viewTransform().mapRect(m_marquee));
+    }
 }
 
 void CanvasWidget::paintSelection(QPainter &painter)
 {
-    if (!m_selected)
+    if (m_selection.empty())
         return;
     const QColor highlight = palette().color(QPalette::Highlight);
-    const QRectF box = viewTransform().mapRect(m_selected->bounds()).adjusted(-3, -3, 3, 3);
 
     if (m_tool == Tool::Node) {
-        if (m_selected->kind() == ShapeKind::Path) {
-            paintNodes(painter, *m_selected);
+        Shape *single = selectedShape();
+        if (single && single->kind() == ShapeKind::Path) {
+            paintNodes(painter, *single);
         } else {
-            // Rectangles and ellipses need "Convert to curves" before their nodes can be edited.
+            // Only a single curve has editable nodes; rectangles and ellipses need "Convert to curves".
             painter.setPen(QPen(highlight, 1, Qt::DotLine));
             painter.setBrush(Qt::NoBrush);
-            painter.drawRect(box);
+            for (const Shape *shape : m_selection)
+                painter.drawRect(viewTransform().mapRect(shape->bounds()).adjusted(-3, -3, 3, 3));
         }
         return;
     }
 
+    // With several objects, show each one's box faintly and the combined box with handles.
+    if (m_selection.size() > 1) {
+        QColor faint = highlight;
+        faint.setAlpha(120);
+        painter.setPen(QPen(faint, 1, Qt::DotLine));
+        painter.setBrush(Qt::NoBrush);
+        for (const Shape *shape : m_selection)
+            painter.drawRect(viewTransform().mapRect(shape->bounds()));
+    }
+
+    const QRectF box = viewTransform().mapRect(selectionBounds()).adjusted(-3, -3, 3, 3);
     painter.setPen(QPen(highlight, 1, Qt::DashLine));
     painter.setBrush(Qt::NoBrush);
     painter.drawRect(box);
@@ -575,6 +760,7 @@ void CanvasWidget::mousePressEvent(QMouseEvent *event)
 {
     const QPointF pos = event->position();
     const QPointF docPos = toDocument(pos);
+    const bool shift = event->modifiers() & Qt::ShiftModifier;
 
     if (event->button() == Qt::MiddleButton || (event->button() == Qt::LeftButton && m_spaceHeld)) {
         m_drag = Drag::Pan;
@@ -589,17 +775,38 @@ void CanvasWidget::mousePressEvent(QMouseEvent *event)
     const double tolerance = kHitTolerancePx / m_zoom;
 
     switch (m_tool) {
-    case Tool::Select:
-        if (const int handle = resizeHandleAt(pos); handle >= 0) {
+    case Tool::Select: {
+        if (const int handle = resizeHandleAt(pos); handle >= 0 && !shift) {
             m_drag = Drag::Resize;
             m_resizeHandle = handle;
-            m_resizeOriginal = m_selected->bounds();
-        } else {
-            Shape *hit = m_document->shapeAt(docPos, tolerance);
-            setSelectedShape(hit);
-            m_drag = hit ? Drag::Move : Drag::None;
+            m_resizeOriginal = selectionBounds();
+            m_resizeOriginals.clear();
+            for (const Shape *shape : m_selection)
+                m_resizeOriginals.push_back(shape->bounds());
+            break;
         }
+        Shape *hit = m_document->shapeAt(docPos, tolerance);
+        if (!hit) {
+            // Empty space: start a rubber band. Shift keeps the current selection.
+            m_drag = Drag::Marquee;
+            m_marquee = QRectF(docPos, docPos);
+            m_marqueeAdds = shift;
+            break;
+        }
+        if (shift) {
+            std::vector<Shape *> selection = m_selection;
+            if (isSelected(hit))
+                std::erase(selection, hit);
+            else
+                selection.push_back(hit);
+            setSelection(std::move(selection));
+            break;
+        }
+        if (!isSelected(hit))
+            setSelectedShape(hit);
+        m_drag = Drag::Move; // moves everything selected
         break;
+    }
 
     case Tool::Node:
         if (const auto handle = nodeHandleAt(pos)) {
@@ -607,7 +814,7 @@ void CanvasWidget::mousePressEvent(QMouseEvent *event)
             m_draggedHandle = *handle;
             m_pathBeforeEdit = selectedPath()->pathData();
         } else if (const NodeRef node = nodeAt(pos); node.isValid()) {
-            if (event->modifiers() & Qt::ShiftModifier) {
+            if (shift) {
                 // Shift+click picks a second node (for joining) and keeps the first one active.
                 if (activeNodeIsValid() && !(node.subpath == m_activeNode.subpath && node.node == m_activeNode.node))
                     setActiveNode(m_activeNode, node);
@@ -620,7 +827,6 @@ void CanvasWidget::mousePressEvent(QMouseEvent *event)
             m_pathBeforeEdit = selectedPath()->pathData();
         } else if (selectedPath() && pathops::nearestSegment(selectedPath()->pathData(), docPos, tolerance)) {
             setActiveNode({}); // clicked the outline: keep the curve selected
-            update();
         } else {
             setSelectedShape(m_document->shapeAt(docPos, tolerance));
         }
@@ -671,11 +877,15 @@ void CanvasWidget::mouseMoveEvent(QMouseEvent *event)
         update();
         break;
 
-    case Drag::Move:
-        m_selected->moveBy(docPos - m_dragLast);
+    case Drag::Move: {
+        const QPointF delta = docPos - m_dragLast;
+        for (Shape *shape : m_selection)
+            shape->moveBy(delta);
         m_dragLast = docPos;
-        m_document->notifyShapeChanged(m_selected);
+        if (!m_selection.empty())
+            m_document->notifyShapeChanged(m_selection.front());
         break;
+    }
 
     case Drag::Resize: {
         // Handles 0-7 go clockwise from top-left; each moves the edges it sits on.
@@ -694,10 +904,26 @@ void CanvasWidget::mouseMoveEvent(QMouseEvent *event)
         const double minimum = 1.0 / m_zoom;
         bounds.setWidth(std::max(bounds.width(), minimum));
         bounds.setHeight(std::max(bounds.height(), minimum));
-        m_selected->setBounds(bounds);
-        m_document->notifyShapeChanged(m_selected);
+
+        // Every selected shape keeps its place inside the combined box.
+        const QRectF &from = m_resizeOriginal;
+        const double sx = from.width() > 0 ? bounds.width() / from.width() : 1.0;
+        const double sy = from.height() > 0 ? bounds.height() / from.height() : 1.0;
+        QTransform t;
+        t.translate(bounds.left(), bounds.top());
+        t.scale(sx, sy);
+        t.translate(-from.left(), -from.top());
+        for (std::size_t i = 0; i < m_selection.size(); ++i)
+            m_selection[i]->setBounds(t.mapRect(m_resizeOriginals[i]));
+        if (!m_selection.empty())
+            m_document->notifyShapeChanged(m_selection.front());
         break;
     }
+
+    case Drag::Marquee:
+        m_marquee = QRectF(m_dragStart, docPos).normalized();
+        update();
+        break;
 
     case Drag::Create: {
         QPointF end = docPos;
@@ -786,17 +1012,46 @@ void CanvasWidget::mouseReleaseEvent(QMouseEvent *event)
 
     case Drag::Move: {
         const QPointF total = m_dragLast - m_dragStart;
-        if (!total.isNull())
-            m_undoStack->push(new MoveShapeCommand(m_document, m_selected, total, true));
+        if (!total.isNull()) {
+            m_undoStack->beginMacro(tr("Move"));
+            for (Shape *shape : m_selection)
+                m_undoStack->push(new MoveShapeCommand(m_document, shape, total, true));
+            m_undoStack->endMacro();
+        }
         break;
     }
 
-    case Drag::Resize:
-        if (m_selected->bounds() != m_resizeOriginal)
-            m_undoStack->push(new SetBoundsCommand(m_document, m_selected, m_resizeOriginal, m_selected->bounds()));
+    case Drag::Resize: {
+        bool changed = false;
+        for (std::size_t i = 0; i < m_selection.size(); ++i)
+            changed = changed || m_selection[i]->bounds() != m_resizeOriginals[i];
+        if (changed) {
+            m_undoStack->beginMacro(tr("Resize"));
+            for (std::size_t i = 0; i < m_selection.size(); ++i)
+                m_undoStack->push(new SetBoundsCommand(m_document, m_selection[i], m_resizeOriginals[i],
+                                                       m_selection[i]->bounds()));
+            m_undoStack->endMacro();
+        }
         m_resizeHandle = -1;
         setHoverCursor(event->position());
         break;
+    }
+
+    case Drag::Marquee: {
+        // Objects lying completely inside the rubber band are selected.
+        std::vector<Shape *> selection = m_marqueeAdds ? m_selection : std::vector<Shape *>{};
+        const QRectF band = m_marquee;
+        m_marquee = QRectF();
+        if (band.width() * m_zoom >= kMinMarqueePx || band.height() * m_zoom >= kMinMarqueePx) {
+            for (Shape *shape : m_document->order()) {
+                if (band.contains(shape->bounds()) && std::find(selection.begin(), selection.end(), shape) == selection.end())
+                    selection.push_back(shape);
+            }
+        }
+        setSelection(std::move(selection));
+        update();
+        break;
+    }
 
     case Drag::Create: {
         const QRectF bounds = m_creating;
@@ -820,7 +1075,8 @@ void CanvasWidget::mouseReleaseEvent(QMouseEvent *event)
     case Drag::Freehand: {
         std::vector<QPointF> points = std::move(m_freehand);
         m_freehand.clear();
-        const bool closed = points.size() > 2 && distance(toWidget(points.front()), toWidget(points.back())) <= kCloseDistancePx;
+        const bool closed = points.size() > 2
+                            && distance(toWidget(points.front()), toWidget(points.back())) <= kCloseDistancePx;
         SubPath curve = pathops::fitFreehand(points, kFreehandTolerancePx / m_zoom, closed);
         if (curve.nodes.size() >= 2) {
             const bool isClosed = curve.closed;

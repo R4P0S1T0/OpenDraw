@@ -36,6 +36,11 @@ public:
     // Removes the shape and hands ownership back to the caller.
     std::unique_ptr<Shape> takeShape(Shape *shape);
 
+    // Current paint order, bottom to top.
+    std::vector<Shape *> order() const;
+    // Rearranges the shapes into `order`, which must hold exactly the document's shapes.
+    void setOrder(const std::vector<Shape *> &order);
+
     // Topmost shape under `point`, or nullptr.
     Shape *shapeAt(const QPointF &point, double tolerance) const;
 

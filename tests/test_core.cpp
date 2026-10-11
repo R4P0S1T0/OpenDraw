@@ -1,3 +1,4 @@
+#include "core/Arrange.h"
 #include "core/Commands.h"
 #include "core/Document.h"
 #include "core/PathOps.h"
@@ -25,6 +26,11 @@ private slots:
     void opensNewerFormatAndReportsSkipped();
     void importsGroupsTransformsAndInheritedStyle();
     void pathsSurviveSaveAndOpen();
+    void groupsSurviveSaveAndOpen();
+    void groupMovesAndScalesChildren();
+    void groupAndUngroupKeepStackingOrder();
+    void reorderUndo();
+    void alignAndDistribute();
 };
 
 void CoreTests::svgRoundTrip()
@@ -82,10 +88,12 @@ void CoreTests::readsCircleUnitsAndStyleAttribute()
     QVERIFY(svg::read(&buffer, doc));
     QCOMPARE(doc.pageSize(), QSizeF(100 * kUnitsPerMm, 50 * kUnitsPerMm));
     QCOMPARE(doc.count(), 1);
-    QCOMPARE(doc.shapes()[0]->kind(), ShapeKind::Ellipse);
-    QCOMPARE(doc.shapes()[0]->bounds(), QRectF(5, 15, 10, 10));
-    QCOMPARE(doc.shapes()[0]->style().fill, QColor(0, 255, 0));
-    QVERIFY(!doc.shapes()[0]->style().hasStroke());
+    QCOMPARE(doc.shapes()[0]->kind(), ShapeKind::Group);
+    const Shape &circle = *doc.shapes()[0]->children()[0];
+    QCOMPARE(circle.kind(), ShapeKind::Ellipse);
+    QCOMPARE(circle.bounds(), QRectF(5, 15, 10, 10));
+    QCOMPARE(circle.style().fill, QColor(0, 255, 0));
+    QVERIFY(!circle.style().hasStroke());
 }
 
 void CoreTests::rejectsNonSvg()
@@ -243,28 +251,141 @@ void CoreTests::importsGroupsTransformsAndInheritedStyle()
 
     Document doc;
     QVERIFY(svg::read(&buffer, doc));
-    QCOMPARE(doc.count(), 6); // the rect inside <defs> is not drawn
+    QCOMPARE(doc.count(), 4); // the <g>, rotated rect, polygon and line; <defs> is not drawn
 
-    const Shape &rect = *doc.shapes()[0];
+    const Shape &group = *doc.shapes()[0];
+    QCOMPARE(group.kind(), ShapeKind::Group);
+    QCOMPARE(group.children().size(), std::size_t(3));
+
+    const Shape &rect = *group.children()[0];
     QCOMPARE(rect.kind(), ShapeKind::Rectangle);
     QCOMPARE(rect.bounds(), QRectF(100, 50, 10, 10));
     QCOMPARE(rect.style().fill, QColor(255, 0, 0));
     QCOMPARE(rect.style().stroke, QColor(0, 0, 255));
 
-    const Shape &triangle = *doc.shapes()[1];
+    const Shape &triangle = *group.children()[1];
     QCOMPARE(triangle.kind(), ShapeKind::Path);
     QCOMPARE(triangle.bounds(), QRectF(100, 50, 10, 10));
     QCOMPARE(triangle.style().fill, QColor(0, 128, 0));
     QVERIFY(triangle.pathData().front().closed);
 
-    const Shape &circle = *doc.shapes()[2];
+    const Shape &nested = *group.children()[2];
+    QCOMPARE(nested.kind(), ShapeKind::Group);
+    const Shape &circle = *nested.children()[0];
     QCOMPARE(circle.kind(), ShapeKind::Ellipse);
     QCOMPARE(circle.bounds(), QRectF(100, 50, 20, 20));
     QCOMPARE(circle.style().strokeWidth, 6.0); // scaled with the group
 
-    QCOMPARE(doc.shapes()[3]->kind(), ShapeKind::Path); // rotated rectangle becomes a path
-    QCOMPARE(doc.shapes()[4]->pathData().front().nodes.size(), std::size_t(3));
-    QVERIFY(!doc.shapes()[5]->style().hasFill());
+    QCOMPARE(doc.shapes()[1]->kind(), ShapeKind::Path); // rotated rectangle becomes a path
+    QCOMPARE(doc.shapes()[2]->pathData().front().nodes.size(), std::size_t(3));
+    QVERIFY(!doc.shapes()[3]->style().hasFill());
+}
+
+void CoreTests::groupsSurviveSaveAndOpen()
+{
+    Document original;
+    std::vector<std::unique_ptr<Shape>> children;
+    children.push_back(std::make_unique<Shape>(ShapeKind::Rectangle, QRectF(0, 0, 10, 10)));
+    children.push_back(std::make_unique<Shape>(ShapeKind::Ellipse, QRectF(20, 0, 10, 10)));
+    original.insertShape(-1, std::make_unique<Shape>(std::move(children)));
+
+    QBuffer buffer;
+    QVERIFY(buffer.open(QIODevice::ReadWrite));
+    QVERIFY(svg::write(original, &buffer));
+    buffer.seek(0);
+
+    Document loaded;
+    QVERIFY(svg::read(&buffer, loaded));
+    QCOMPARE(loaded.count(), 1);
+    QCOMPARE(loaded.shapes()[0]->kind(), ShapeKind::Group);
+    QCOMPARE(loaded.shapes()[0]->children().size(), std::size_t(2));
+    QCOMPARE(loaded.shapes()[0]->bounds(), QRectF(0, 0, 30, 10));
+}
+
+void CoreTests::groupMovesAndScalesChildren()
+{
+    std::vector<std::unique_ptr<Shape>> children;
+    children.push_back(std::make_unique<Shape>(ShapeKind::Rectangle, QRectF(0, 0, 10, 10)));
+    children.push_back(std::make_unique<Shape>(*pathops::fromSvg(u"M 20 0 L 30 10")));
+    Shape group(std::move(children));
+    QCOMPARE(group.bounds(), QRectF(0, 0, 30, 10));
+    QVERIFY(group.contains({5, 5}, 0.5));
+    QVERIFY(!group.contains({15, 5}, 0.5));
+
+    group.setBounds(QRectF(100, 100, 60, 20));
+    QCOMPARE(group.bounds(), QRectF(100, 100, 60, 20));
+    QCOMPARE(group.children()[0]->bounds(), QRectF(100, 100, 20, 20));
+
+    int leaves = 0;
+    group.forEachLeaf([&leaves](Shape &) { ++leaves; });
+    QCOMPARE(leaves, 2);
+}
+
+void CoreTests::groupAndUngroupKeepStackingOrder()
+{
+    Document doc;
+    QUndoStack stack;
+    std::vector<Shape *> s;
+    for (int i = 0; i < 5; ++i)
+        s.push_back(doc.insertShape(-1, std::make_unique<Shape>(ShapeKind::Rectangle, QRectF(i * 20, 0, 10, 10))));
+
+    // Group the 2nd and 4th: the group takes the 4th's place in the stack.
+    auto *group = new GroupCommand(&doc, {s[3], s[1]});
+    Shape *g = group->group();
+    stack.push(group);
+    QCOMPARE(doc.order(), (std::vector<Shape *>{s[0], s[2], g, s[4]}));
+    QCOMPARE(g->children()[0].get(), s[1]);
+    QCOMPARE(g->children()[1].get(), s[3]);
+
+    stack.undo();
+    QCOMPARE(doc.order(), s);
+
+    stack.redo();
+    auto *ungroup = new UngroupCommand(&doc, g);
+    stack.push(ungroup);
+    QCOMPARE(doc.order(), (std::vector<Shape *>{s[0], s[2], s[1], s[3], s[4]}));
+    stack.undo();
+    QCOMPARE(doc.order(), (std::vector<Shape *>{s[0], s[2], g, s[4]}));
+}
+
+void CoreTests::reorderUndo()
+{
+    Document doc;
+    QUndoStack stack;
+    Shape *a = doc.insertShape(-1, std::make_unique<Shape>(ShapeKind::Rectangle, QRectF(0, 0, 1, 1)));
+    Shape *b = doc.insertShape(-1, std::make_unique<Shape>(ShapeKind::Rectangle, QRectF(0, 0, 1, 1)));
+    Shape *c = doc.insertShape(-1, std::make_unique<Shape>(ShapeKind::Rectangle, QRectF(0, 0, 1, 1)));
+
+    stack.push(new ReorderCommand(&doc, {c, a, b}, QStringLiteral("To back")));
+    QCOMPARE(doc.order(), (std::vector<Shape *>{c, a, b}));
+    stack.undo();
+    QCOMPARE(doc.order(), (std::vector<Shape *>{a, b, c}));
+}
+
+void CoreTests::alignAndDistribute()
+{
+    const std::vector<QRectF> boxes{{0, 0, 10, 10}, {30, 20, 20, 10}, {100, 5, 10, 40}};
+    const QRectF all = arrange::unite(boxes);
+    QCOMPARE(all, QRectF(0, 0, 110, 45));
+
+    const auto left = arrange::alignOffsets(boxes, arrange::Alignment::Left, all);
+    QCOMPARE(left[1], QPointF(-30, 0));
+    QCOMPARE(left[2], QPointF(-100, 0));
+
+    const auto bottom = arrange::alignOffsets(boxes, arrange::Alignment::Bottom, all);
+    QCOMPARE(bottom[0], QPointF(0, 35));
+    QCOMPARE(bottom[2], QPointF(0, 0));
+
+    const auto centers = arrange::alignOffsets(boxes, arrange::Alignment::CentersHorizontally, all);
+    QCOMPARE(centers[0], QPointF(50, 0)); // 55 - 5
+
+    // Widths 10 + 20 + 10 over a span of 110: gaps of 35.
+    const auto spread = arrange::distributeOffsets(boxes, Qt::Horizontal);
+    QCOMPARE(spread[0], QPointF(0, 0));
+    QCOMPARE(spread[1], QPointF(15, 0)); // moves to x = 45
+    QCOMPARE(spread[2], QPointF(0, 0));
+
+    QCOMPARE(arrange::distributeOffsets({{0, 0, 1, 1}, {5, 0, 1, 1}}, Qt::Horizontal)[1], QPointF(0, 0));
 }
 
 void CoreTests::pathsSurviveSaveAndOpen()

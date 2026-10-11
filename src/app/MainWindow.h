@@ -1,6 +1,10 @@
 #pragma once
 
+#include "core/Shape.h"
+
 #include <QMainWindow>
+
+#include <functional>
 
 class QAction;
 class QActionGroup;
@@ -41,6 +45,8 @@ private slots:
 
 private:
     void createActions();
+    const Style &displayedStyle() const;
+    void restyleSelection(const QString &text, const std::function<void(Style &)> &change);
     bool maybeSave();
     bool writeFile(const QString &path);
     void setFilePath(const QString &path);

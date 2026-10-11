@@ -4,6 +4,8 @@
 
 #include <QCoreApplication>
 
+#include <algorithm>
+
 namespace opendraw {
 
 AddShapeCommand::AddShapeCommand(Document *document, std::unique_ptr<Shape> shape, QUndoCommand *parent)
@@ -21,6 +23,9 @@ AddShapeCommand::AddShapeCommand(Document *document, std::unique_ptr<Shape> shap
         break;
     case ShapeKind::Path:
         setText(QCoreApplication::translate("Commands", "Add curve"));
+        break;
+    case ShapeKind::Group:
+        setText(QCoreApplication::translate("Commands", "Add group"));
         break;
     }
 }
@@ -147,6 +152,84 @@ void ReplaceShapeCommand::undo()
     std::unique_ptr<Shape> incoming = std::move(m_owned);
     m_owned = m_document->takeShape(m_newShape);
     m_document->insertShape(m_index, std::move(incoming));
+}
+
+GroupCommand::GroupCommand(Document *document, std::vector<Shape *> shapes, QUndoCommand *parent)
+    : QUndoCommand(QCoreApplication::translate("Commands", "Group"), parent)
+    , m_document(document)
+    , m_shapes(std::move(shapes))
+{
+    std::sort(m_shapes.begin(), m_shapes.end(),
+              [document](Shape *a, Shape *b) { return document->indexOf(a) < document->indexOf(b); });
+    for (Shape *shape : m_shapes)
+        m_indices.push_back(document->indexOf(shape));
+    m_ownedGroup = std::make_unique<Shape>(std::vector<std::unique_ptr<Shape>>{});
+    m_group = m_ownedGroup.get();
+}
+
+void GroupCommand::redo()
+{
+    std::vector<std::unique_ptr<Shape>> children;
+    for (Shape *shape : m_shapes)
+        children.push_back(m_document->takeShape(shape));
+    m_ownedGroup->setChildren(std::move(children));
+    // The topmost shape's old index, shifted down by the shapes taken out below it.
+    const int index = m_indices.back() - int(m_indices.size()) + 1;
+    m_document->insertShape(index, std::move(m_ownedGroup));
+}
+
+void GroupCommand::undo()
+{
+    m_ownedGroup = m_document->takeShape(m_group);
+    std::vector<std::unique_ptr<Shape>> children = m_ownedGroup->takeChildren();
+    for (std::size_t i = 0; i < children.size(); ++i)
+        m_document->insertShape(m_indices[i], std::move(children[i]));
+}
+
+UngroupCommand::UngroupCommand(Document *document, Shape *group, QUndoCommand *parent)
+    : QUndoCommand(QCoreApplication::translate("Commands", "Ungroup"), parent)
+    , m_document(document)
+    , m_group(group)
+{
+    for (const auto &child : group->children())
+        m_children.push_back(child.get());
+}
+
+void UngroupCommand::redo()
+{
+    m_index = m_document->indexOf(m_group);
+    m_ownedGroup = m_document->takeShape(m_group);
+    std::vector<std::unique_ptr<Shape>> children = m_ownedGroup->takeChildren();
+    for (std::size_t i = 0; i < children.size(); ++i)
+        m_document->insertShape(m_index + int(i), std::move(children[i]));
+}
+
+void UngroupCommand::undo()
+{
+    std::vector<std::unique_ptr<Shape>> children;
+    for (Shape *child : m_children)
+        children.push_back(m_document->takeShape(child));
+    m_ownedGroup->setChildren(std::move(children));
+    m_document->insertShape(m_index, std::move(m_ownedGroup));
+}
+
+ReorderCommand::ReorderCommand(Document *document, std::vector<Shape *> newOrder, const QString &text,
+                               QUndoCommand *parent)
+    : QUndoCommand(text, parent)
+    , m_document(document)
+    , m_oldOrder(document->order())
+    , m_newOrder(std::move(newOrder))
+{
+}
+
+void ReorderCommand::redo()
+{
+    m_document->setOrder(m_newOrder);
+}
+
+void ReorderCommand::undo()
+{
+    m_document->setOrder(m_oldOrder);
 }
 
 SetStyleCommand::SetStyleCommand(Document *document, Shape *shape, const Style &style, QUndoCommand *parent)

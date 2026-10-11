@@ -93,6 +93,8 @@ void PropertyBar::refresh()
     }
     if (!enabled)
         return;
+    // A group has no outline of its own; colours and widths are set on its members.
+    m_outline->setEnabled(m_shape->kind() != ShapeKind::Group);
 
     const QRectF r = m_shape->bounds();
     const std::pair<QDoubleSpinBox *, double> values[] = {

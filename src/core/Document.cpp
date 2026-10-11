@@ -49,6 +49,29 @@ std::unique_ptr<Shape> Document::takeShape(Shape *shape)
     return taken;
 }
 
+std::vector<Shape *> Document::order() const
+{
+    std::vector<Shape *> result;
+    result.reserve(m_shapes.size());
+    for (const auto &shape : m_shapes)
+        result.push_back(shape.get());
+    return result;
+}
+
+void Document::setOrder(const std::vector<Shape *> &order)
+{
+    Q_ASSERT(order.size() == m_shapes.size());
+    std::vector<std::unique_ptr<Shape>> reordered;
+    reordered.reserve(m_shapes.size());
+    for (Shape *shape : order) {
+        const int index = indexOf(shape);
+        Q_ASSERT(index >= 0);
+        reordered.push_back(std::move(m_shapes[index]));
+    }
+    m_shapes = std::move(reordered);
+    emit changed();
+}
+
 Shape *Document::shapeAt(const QPointF &point, double tolerance) const
 {
     for (auto it = m_shapes.rbegin(); it != m_shapes.rend(); ++it) {

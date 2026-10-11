@@ -164,8 +164,8 @@ MainWindow::MainWindow(QWidget *parent)
                                      .arg(pos.x() / kUnitsPerMm, 0, 'f', 1)
                                      .arg(pos.y() / kUnitsPerMm, 0, 'f', 1));
     });
-    connect(m_canvas, &CanvasWidget::selectionChanged, this, [this](Shape *shape) {
-        m_propertyBar->setShape(shape);
+    connect(m_canvas, &CanvasWidget::selectionChanged, this, [this] {
+        m_propertyBar->setShape(m_canvas->selectedShape());
         updateStyleIndicators();
     });
     connect(m_document, &Document::changed, this, &MainWindow::updateStyleIndicators);
@@ -205,6 +205,7 @@ void MainWindow::createActions()
     editMenu->addSeparator();
     QAction *deleteAction = editMenu->addAction(tr("&Delete"), m_canvas, &CanvasWidget::deleteSelection);
     deleteAction->setShortcuts({QKeySequence::Delete, QKeySequence(Qt::Key_Backspace)});
+    editMenu->addAction(tr("Select &All"), QKeySequence::SelectAll, m_canvas, &CanvasWidget::selectAll);
 
     // View
     QMenu *viewMenu = menuBar()->addMenu(tr("&View"));
@@ -216,6 +217,48 @@ void MainWindow::createActions()
 
     // Object
     QMenu *objectMenu = menuBar()->addMenu(tr("&Object"));
+    objectMenu->addAction(tr("&Group"), QKeySequence(Qt::CTRL | Qt::Key_G), m_canvas, &CanvasWidget::groupSelection);
+    objectMenu->addAction(tr("&Ungroup"), QKeySequence(Qt::CTRL | Qt::Key_U), m_canvas,
+                          &CanvasWidget::ungroupSelection);
+    objectMenu->addSeparator();
+
+    QMenu *orderMenu = objectMenu->addMenu(tr("&Order"));
+    orderMenu->addAction(tr("To &Front"), QKeySequence(Qt::SHIFT | Qt::Key_PageUp), m_canvas,
+                         &CanvasWidget::orderToFront);
+    orderMenu->addAction(tr("To &Back"), QKeySequence(Qt::SHIFT | Qt::Key_PageDown), m_canvas,
+                         &CanvasWidget::orderToBack);
+    orderMenu->addAction(tr("&Forward One"), QKeySequence(Qt::CTRL | Qt::Key_PageUp), m_canvas,
+                         &CanvasWidget::orderForwardOne);
+    orderMenu->addAction(tr("Back &One"), QKeySequence(Qt::CTRL | Qt::Key_PageDown), m_canvas,
+                         &CanvasWidget::orderBackOne);
+
+    // Single-letter shortcuts as in other desktop vector editors. With one object selected,
+    // it is aligned to the page; with several, to the selection's bounds.
+    QMenu *alignMenu = objectMenu->addMenu(tr("&Align and Distribute"));
+    struct AlignCommand {
+        QString text;
+        Qt::Key key;
+        arrange::Alignment alignment;
+    };
+    const AlignCommand alignCommands[] = {
+        {tr("Align &Left"), Qt::Key_L, arrange::Alignment::Left},
+        {tr("Align &Right"), Qt::Key_R, arrange::Alignment::Right},
+        {tr("Align &Top"), Qt::Key_T, arrange::Alignment::Top},
+        {tr("Align &Bottom"), Qt::Key_B, arrange::Alignment::Bottom},
+        {tr("Align Centers &Horizontally"), Qt::Key_E, arrange::Alignment::CentersHorizontally},
+        {tr("Align Centers &Vertically"), Qt::Key_C, arrange::Alignment::CentersVertically},
+    };
+    for (const AlignCommand &command : alignCommands) {
+        alignMenu->addAction(command.text, QKeySequence(command.key), m_canvas,
+                             [this, a = command.alignment] { m_canvas->align(a); });
+    }
+    alignMenu->addAction(tr("Center to &Page"), QKeySequence(Qt::Key_P), m_canvas, &CanvasWidget::centerOnPage);
+    alignMenu->addSeparator();
+    alignMenu->addAction(tr("Distribute Hori&zontally"), m_canvas,
+                         [this] { m_canvas->distribute(Qt::Horizontal); });
+    alignMenu->addAction(tr("Distribute V&ertically"), m_canvas, [this] { m_canvas->distribute(Qt::Vertical); });
+
+    objectMenu->addSeparator();
     objectMenu->addAction(tr("Convert to &Curves"), QKeySequence(Qt::CTRL | Qt::Key_Q), m_canvas,
                           &CanvasWidget::convertSelectionToCurves);
 
@@ -270,7 +313,7 @@ void MainWindow::createActions()
         {CanvasWidget::Tool::Select, tr("Select"), QKeySequence(Qt::Key_V)},
         {CanvasWidget::Tool::Node, tr("Shape (edit nodes)"), QKeySequence(Qt::Key_F10)},
         {CanvasWidget::Tool::Freehand, tr("Freehand"), QKeySequence(Qt::Key_F5)},
-        {CanvasWidget::Tool::Bezier, tr("Bézier"), QKeySequence(Qt::Key_B)},
+        {CanvasWidget::Tool::Bezier, tr("Bézier"), QKeySequence(Qt::SHIFT | Qt::Key_B)},
         {CanvasWidget::Tool::Rectangle, tr("Rectangle"), QKeySequence(Qt::Key_F6)},
         {CanvasWidget::Tool::Ellipse, tr("Ellipse"), QKeySequence(Qt::Key_F7)},
     };
@@ -411,31 +454,56 @@ void MainWindow::closeEvent(QCloseEvent *event)
         event->ignore();
 }
 
+// The style shown for the selection: its first plain shape (groups have no style of their own).
+const Style &MainWindow::displayedStyle() const
+{
+    for (Shape *shape : m_canvas->selection()) {
+        const Style *found = nullptr;
+        shape->forEachLeaf([&found](Shape &leaf) {
+            if (!found)
+                found = &leaf.style();
+        });
+        if (found)
+            return *found;
+    }
+    return m_canvas->defaultStyle();
+}
+
 void MainWindow::chooseFillColor()
 {
-    Shape *selected = m_canvas->selectedShape();
-    const QColor initial = selected ? selected->style().fill : m_canvas->defaultStyle().fill;
-    const QColor color = QColorDialog::getColor(initial, this, tr("Fill Color"), QColorDialog::ShowAlphaChannel);
+    const QColor color =
+        QColorDialog::getColor(displayedStyle().fill, this, tr("Fill Color"), QColorDialog::ShowAlphaChannel);
     if (color.isValid())
         applyFill(color);
 }
 
 void MainWindow::chooseOutlineColor()
 {
-    Shape *selected = m_canvas->selectedShape();
-    const QColor initial = selected ? selected->style().stroke : m_canvas->defaultStyle().stroke;
-    const QColor color = QColorDialog::getColor(initial, this, tr("Outline Color"), QColorDialog::ShowAlphaChannel);
+    const QColor color =
+        QColorDialog::getColor(displayedStyle().stroke, this, tr("Outline Color"), QColorDialog::ShowAlphaChannel);
     if (color.isValid())
         applyOutline(color);
 }
 
-// With a selection, colours apply to it; without one, they become the default for new shapes.
+void MainWindow::restyleSelection(const QString &text, const std::function<void(Style &)> &change)
+{
+    m_undoStack->beginMacro(text);
+    for (Shape *shape : m_canvas->selection()) {
+        shape->forEachLeaf([&](Shape &leaf) {
+            Style style = leaf.style();
+            change(style);
+            m_undoStack->push(new SetStyleCommand(m_document, &leaf, style));
+        });
+    }
+    m_undoStack->endMacro();
+}
+
+// With a selection, colours apply to every object in it (including inside groups);
+// without one, they become the default for new shapes.
 void MainWindow::applyFill(const QColor &color)
 {
-    if (Shape *selected = m_canvas->selectedShape()) {
-        Style style = selected->style();
-        style.fill = color;
-        m_undoStack->push(new SetStyleCommand(m_document, selected, style));
+    if (!m_canvas->selection().empty()) {
+        restyleSelection(tr("Fill"), [&color](Style &style) { style.fill = color; });
     } else {
         Style defaults = m_canvas->defaultStyle();
         defaults.fill = color;
@@ -447,12 +515,12 @@ void MainWindow::applyFill(const QColor &color)
 
 void MainWindow::applyOutline(const QColor &color)
 {
-    if (Shape *selected = m_canvas->selectedShape()) {
-        Style style = selected->style();
-        style.stroke = color;
-        if (color.alpha() > 0 && style.strokeWidth <= 0.0)
-            style.strokeWidth = 1.0;
-        m_undoStack->push(new SetStyleCommand(m_document, selected, style));
+    if (!m_canvas->selection().empty()) {
+        restyleSelection(tr("Outline"), [&color](Style &style) {
+            style.stroke = color;
+            if (color.alpha() > 0 && style.strokeWidth <= 0.0)
+                style.strokeWidth = 1.0;
+        });
     } else {
         Style defaults = m_canvas->defaultStyle();
         defaults.stroke = color;
@@ -473,7 +541,7 @@ void MainWindow::updateNodeActions()
 void MainWindow::updateStyleIndicators()
 {
     Shape *selected = m_canvas->selectedShape();
-    const Style &style = selected ? selected->style() : m_canvas->defaultStyle();
+    const Style &style = displayedStyle();
     m_fillAction->setIcon(swatchIcon(style.fill, false));
     m_outlineAction->setIcon(swatchIcon(style.hasStroke() ? style.stroke : QColor(Qt::transparent), true));
 
@@ -482,6 +550,8 @@ void MainWindow::updateStyleIndicators()
                                       .arg(style.strokeWidth / kUnitsPerMm, 0, 'f', 2)
                                 : tr("none");
     QString prefix = tr("New shapes");
+    if (m_canvas->selection().size() > 1)
+        prefix = tr("%n objects selected", nullptr, int(m_canvas->selection().size()));
     if (selected) {
         switch (selected->kind()) {
         case ShapeKind::Rectangle:
@@ -497,6 +567,9 @@ void MainWindow::updateStyleIndicators()
             prefix = tr("Curve, %n node(s)", nullptr, nodes);
             break;
         }
+        case ShapeKind::Group:
+            prefix = tr("Group of %n object(s)", nullptr, int(selected->children().size()));
+            break;
         }
     }
     m_styleLabel->setText(tr("%1 — Fill: %2   Outline: %3").arg(prefix, describeColor(style.fill), outline));

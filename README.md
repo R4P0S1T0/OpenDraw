@@ -12,7 +12,7 @@
 
 OpenDraw is a free, open-source, cross-platform vector graphics editor for Linux and Windows. It aims to offer professional tools for illustration and graphic design, with a workflow that feels familiar to people coming from other desktop vector editors, and without the lock-in that comes with closed file formats.
 
-> **Status: early development (0.3).** You can draw rectangles, ellipses, Bézier and freehand curves, edit curve nodes, move, resize and recolour objects, undo and redo, and open SVG files from other programs. Text, layers and groups are still missing, so it is not ready for real work yet.
+> **Status: early development (0.3).** You can draw rectangles, ellipses, Bézier and freehand curves, edit curve nodes, select several objects, group, order, align and distribute them, recolour them, undo and redo, and open SVG files from other programs. Text and layers are still missing, so it is not ready for real work yet.
 
 ## Goals
 
@@ -34,11 +34,15 @@ See [docs/ROADMAP.md](docs/ROADMAP.md) for what is planned next.
 | Action | How |
 |---|---|
 | Select / move | Select tool (`V`), click and drag a shape |
-| Resize | Drag one of the eight handles around the selection |
+| Select several | `Shift`+click to add or remove, drag on empty space for a rubber band (selects objects fully inside), `Ctrl` `A` for all |
+| Resize | Drag one of the eight handles around the selection (several objects scale together) |
+| Group / ungroup | `Ctrl` `G` / `Ctrl` `U` |
+| Order | `Shift` `PgUp` to front, `Shift` `PgDn` to back, `Ctrl` `PgUp` / `Ctrl` `PgDn` one step |
+| Align | `L` `R` `T` `B` (left, right, top, bottom), `E` / `C` (centres horizontally / vertically), `P` (centre on page). One object aligns to the page, several to their combined box. Distribute is in Object › Align and Distribute |
 | Exact position and size | Type values in the property bar at the top (millimetres) |
 | Rectangle | `F6`, drag on the page. Hold `Shift` for a square |
 | Ellipse | `F7`, drag on the page. Hold `Shift` for a circle |
-| Bézier curve | `B`. Click for a corner node, click and drag for a smooth node. Click the first node to close the shape; `Enter`, `Esc` or double-click to finish. `Backspace` removes the last node while drawing |
+| Bézier curve | `Shift` `B`. Click for a corner node, click and drag for a smooth node. Click the first node to close the shape; `Enter`, `Esc` or double-click to finish. `Backspace` removes the last node while drawing |
 | Freehand | `F5`, drag to draw. The stroke is smoothed into a few curve segments; end near the start to close it |
 | Edit nodes | Shape tool (`F10`): drag nodes and handles, double-click a segment to add a node, double-click a node or press `Delete` to remove it. Hold `Alt` while dragging a handle to make a corner |
 | Convert to curves | `Ctrl` `Q` turns a rectangle or ellipse into an editable curve |

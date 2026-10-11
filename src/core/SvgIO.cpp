@@ -51,6 +51,42 @@ void writeStyle(QXmlStreamWriter &w, const Style &style)
         w.writeAttribute(QStringLiteral("stroke-width"), number(style.strokeWidth));
 }
 
+void writeShape(QXmlStreamWriter &w, const Shape &shape)
+{
+    switch (shape.kind()) {
+    case ShapeKind::Rectangle: {
+        const QRectF r = shape.bounds();
+        w.writeStartElement(QStringLiteral("rect"));
+        w.writeAttribute(QStringLiteral("x"), number(r.x()));
+        w.writeAttribute(QStringLiteral("y"), number(r.y()));
+        w.writeAttribute(QStringLiteral("width"), number(r.width()));
+        w.writeAttribute(QStringLiteral("height"), number(r.height()));
+        break;
+    }
+    case ShapeKind::Ellipse: {
+        const QRectF r = shape.bounds();
+        w.writeStartElement(QStringLiteral("ellipse"));
+        w.writeAttribute(QStringLiteral("cx"), number(r.center().x()));
+        w.writeAttribute(QStringLiteral("cy"), number(r.center().y()));
+        w.writeAttribute(QStringLiteral("rx"), number(r.width() / 2.0));
+        w.writeAttribute(QStringLiteral("ry"), number(r.height() / 2.0));
+        break;
+    }
+    case ShapeKind::Path:
+        w.writeStartElement(QStringLiteral("path"));
+        w.writeAttribute(QStringLiteral("d"), pathops::toSvg(shape.pathData()));
+        break;
+    case ShapeKind::Group:
+        w.writeStartElement(QStringLiteral("g"));
+        for (const auto &child : shape.children())
+            writeShape(w, *child);
+        w.writeEndElement();
+        return;
+    }
+    writeStyle(w, shape.style());
+    w.writeEndElement();
+}
+
 // ---------------------------------------------------------------------------------------------
 // Reading helpers
 
@@ -185,6 +221,7 @@ struct Context {
     QTransform transform;
     QHash<QString, QString> inherited;
     bool rendering = true;
+    bool isGroup = false; // a <g> collecting its children into a group
 };
 
 // The presentation properties of one element: style attribute, then attributes, then inherited values.
@@ -331,34 +368,8 @@ bool write(const Document &document, QIODevice *device)
     w.writeAttribute(QStringLiteral("viewBox"),
                      QStringLiteral("0 0 %1 %2").arg(number(page.width()), number(page.height())));
 
-    for (const auto &shape : document.shapes()) {
-        switch (shape->kind()) {
-        case ShapeKind::Rectangle: {
-            const QRectF r = shape->bounds();
-            w.writeStartElement(QStringLiteral("rect"));
-            w.writeAttribute(QStringLiteral("x"), number(r.x()));
-            w.writeAttribute(QStringLiteral("y"), number(r.y()));
-            w.writeAttribute(QStringLiteral("width"), number(r.width()));
-            w.writeAttribute(QStringLiteral("height"), number(r.height()));
-            break;
-        }
-        case ShapeKind::Ellipse: {
-            const QRectF r = shape->bounds();
-            w.writeStartElement(QStringLiteral("ellipse"));
-            w.writeAttribute(QStringLiteral("cx"), number(r.center().x()));
-            w.writeAttribute(QStringLiteral("cy"), number(r.center().y()));
-            w.writeAttribute(QStringLiteral("rx"), number(r.width() / 2.0));
-            w.writeAttribute(QStringLiteral("ry"), number(r.height() / 2.0));
-            break;
-        }
-        case ShapeKind::Path:
-            w.writeStartElement(QStringLiteral("path"));
-            w.writeAttribute(QStringLiteral("d"), pathops::toSvg(shape->pathData()));
-            break;
-        }
-        writeStyle(w, shape->style());
-        w.writeEndElement();
-    }
+    for (const auto &shape : document.shapes())
+        writeShape(w, *shape);
 
     w.writeEndElement();
     w.writeEndDocument();
@@ -368,19 +379,27 @@ bool write(const Document &document, QIODevice *device)
 bool read(QIODevice *device, Document &document, QString *errorMessage, ReadReport *report)
 {
     QXmlStreamReader r(device);
-    std::vector<std::unique_ptr<Shape>> shapes;
     QSizeF pageSize = Document::defaultPageSize();
     bool foundSvg = false;
     ReadReport localReport;
 
     // One entry per open element: every start element pushes, every end element pops.
     std::vector<Context> stack{Context{}};
+    // Shapes being collected: the document's top level, then one list per open <g>.
+    std::vector<std::vector<std::unique_ptr<Shape>>> containers(1);
 
     while (!r.atEnd()) {
         r.readNext();
         if (r.isEndElement()) {
-            if (stack.size() > 1)
+            if (stack.size() > 1) {
+                if (stack.back().isGroup) {
+                    std::vector<std::unique_ptr<Shape>> children = std::move(containers.back());
+                    containers.pop_back();
+                    if (!children.empty())
+                        containers.back().push_back(std::make_unique<Shape>(std::move(children)));
+                }
                 stack.pop_back();
+            }
             continue;
         }
         if (!r.isStartElement())
@@ -392,6 +411,7 @@ bool read(QIODevice *device, Document &document, QString *errorMessage, ReadRepo
         const Properties props(attributes, parent.inherited);
 
         Context context = parent;
+        context.isGroup = false; // inherited state only; set below if this element is a <g>
         const QStringView transformText = attributes.value(QStringLiteral("transform"));
         if (!transformText.isEmpty())
             context.transform = parseTransform(transformText) * parent.transform;
@@ -466,7 +486,12 @@ bool read(QIODevice *device, Document &document, QString *errorMessage, ReadRepo
             }
 
             if (shape)
-                shapes.push_back(std::move(shape));
+                containers.back().push_back(std::move(shape));
+
+            if (name == u"g") {
+                context.isGroup = true;
+                containers.emplace_back();
+            }
         }
 
         stack.push_back(std::move(context));
@@ -485,7 +510,7 @@ bool read(QIODevice *device, Document &document, QString *errorMessage, ReadRepo
 
     document.clear();
     document.setPageSize(pageSize);
-    for (auto &shape : shapes)
+    for (auto &shape : containers.front())
         document.insertShape(-1, std::move(shape));
     if (report)
         *report = localReport;

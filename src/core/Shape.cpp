@@ -3,7 +3,6 @@
 #include "core/PathOps.h"
 
 #include <QPainterPathStroker>
-#include <QTransform>
 
 #include <algorithm>
 #include <atomic>
@@ -30,15 +29,37 @@ Shape::Shape(PathData path, const Style &style)
 {
 }
 
+Shape::Shape(std::vector<std::unique_ptr<Shape>> children)
+    : m_id(nextShapeId++)
+    , m_kind(ShapeKind::Group)
+    , m_children(std::move(children))
+{
+}
+
+Shape::~Shape() = default;
+
 QRectF Shape::bounds() const
 {
-    return m_kind == ShapeKind::Path ? path().boundingRect() : m_bounds;
+    switch (m_kind) {
+    case ShapeKind::Rectangle:
+    case ShapeKind::Ellipse:
+        return m_bounds;
+    case ShapeKind::Path:
+        return path().boundingRect();
+    case ShapeKind::Group: {
+        QRectF united;
+        for (const auto &child : m_children)
+            united = united.isNull() ? child->bounds() : united.united(child->bounds());
+        return united;
+    }
+    }
+    return {};
 }
 
 void Shape::setBounds(const QRectF &bounds)
 {
     const QRectF target = bounds.normalized();
-    if (m_kind != ShapeKind::Path) {
+    if (m_kind == ShapeKind::Rectangle || m_kind == ShapeKind::Ellipse) {
         m_bounds = target;
         return;
     }
@@ -50,15 +71,29 @@ void Shape::setBounds(const QRectF &bounds)
     t.translate(target.left(), target.top());
     t.scale(sx, sy);
     t.translate(-current.left(), -current.top());
-    pathops::transform(m_path, t);
+    transform(t);
 }
 
 void Shape::moveBy(const QPointF &delta)
 {
-    if (m_kind == ShapeKind::Path)
-        pathops::transform(m_path, QTransform::fromTranslate(delta.x(), delta.y()));
-    else
-        m_bounds.translate(delta);
+    transform(QTransform::fromTranslate(delta.x(), delta.y()));
+}
+
+void Shape::transform(const QTransform &t)
+{
+    switch (m_kind) {
+    case ShapeKind::Rectangle:
+    case ShapeKind::Ellipse:
+        m_bounds = t.mapRect(m_bounds);
+        break;
+    case ShapeKind::Path:
+        pathops::transform(m_path, t);
+        break;
+    case ShapeKind::Group:
+        for (auto &child : m_children)
+            child->transform(t);
+        break;
+    }
 }
 
 QPainterPath Shape::path() const
@@ -74,12 +109,21 @@ QPainterPath Shape::path() const
     case ShapeKind::Path:
         path = pathops::toPainterPath(m_path);
         break;
+    case ShapeKind::Group:
+        for (const auto &child : m_children)
+            path.addPath(child->path());
+        break;
     }
     return path;
 }
 
 bool Shape::contains(const QPointF &point, double tolerance) const
 {
+    if (m_kind == ShapeKind::Group) {
+        return std::any_of(m_children.begin(), m_children.end(),
+                           [&](const auto &child) { return child->contains(point, tolerance); });
+    }
+
     const QPainterPath outline = path();
     if (m_style.hasFill() && outline.contains(point))
         return true;

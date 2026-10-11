@@ -4,7 +4,9 @@
 #include <QPainterPath>
 #include <QPointF>
 #include <QRectF>
+#include <QTransform>
 
+#include <memory>
 #include <vector>
 
 namespace opendraw {
@@ -49,7 +51,7 @@ struct SubPath {
 
 using PathData = std::vector<SubPath>;
 
-enum class ShapeKind { Rectangle, Ellipse, Path };
+enum class ShapeKind { Rectangle, Ellipse, Path, Group };
 
 // A drawable object. Geometry is stored in document units (SVG user units, 96 per inch).
 class Shape {
@@ -58,15 +60,24 @@ public:
     Shape(ShapeKind kind, const QRectF &bounds, const Style &style = {});
     // Free-form path.
     explicit Shape(PathData path, const Style &style = {});
+    // Group of shapes, in paint order.
+    explicit Shape(std::vector<std::unique_ptr<Shape>> children);
+
+    Shape(const Shape &) = delete;
+    Shape &operator=(const Shape &) = delete;
+    ~Shape();
 
     quint64 id() const { return m_id; }
     ShapeKind kind() const { return m_kind; }
 
     QRectF bounds() const;
-    // Rectangles and ellipses take the new bounds; paths are scaled to fit them.
+    // Rectangles and ellipses take the new bounds; paths and groups are scaled to fit them.
     void setBounds(const QRectF &bounds);
     void moveBy(const QPointF &delta);
+    // Moves and scales the geometry. Only translation and scaling are supported for now.
+    void transform(const QTransform &t);
 
+    // A group has no style of its own; see forEachLeaf.
     const Style &style() const { return m_style; }
     void setStyle(const Style &style) { m_style = style; }
 
@@ -74,16 +85,35 @@ public:
     const PathData &pathData() const { return m_path; }
     void setPathData(PathData path) { m_path = std::move(path); }
 
+    // Only meaningful for ShapeKind::Group.
+    const std::vector<std::unique_ptr<Shape>> &children() const { return m_children; }
+    std::vector<std::unique_ptr<Shape>> takeChildren() { return std::move(m_children); }
+    void setChildren(std::vector<std::unique_ptr<Shape>> children) { m_children = std::move(children); }
+
+    // Outline of a single shape; for a group, the union of its children's outlines.
     QPainterPath path() const;
 
-    // Hit test: inside the fill, or within `tolerance` of the outline.
+    // Hit test: inside the fill, or within `tolerance` of the outline (any child for a group).
     bool contains(const QPointF &point, double tolerance) const;
+
+    // Calls `f` for this shape, or for every non-group shape inside it.
+    template<typename F>
+    void forEachLeaf(F &&f)
+    {
+        if (m_kind != ShapeKind::Group) {
+            f(*this);
+            return;
+        }
+        for (auto &child : m_children)
+            child->forEachLeaf(f);
+    }
 
 private:
     quint64 m_id;
     ShapeKind m_kind;
-    QRectF m_bounds; // rectangles and ellipses
-    PathData m_path; // paths
+    QRectF m_bounds;                              // rectangles and ellipses
+    PathData m_path;                              // paths
+    std::vector<std::unique_ptr<Shape>> m_children; // groups
     Style m_style;
 };
 

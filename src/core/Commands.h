@@ -110,6 +110,57 @@ private:
     int m_index;
 };
 
+// Puts shapes into a new group, which takes the stacking position of the topmost of them.
+class GroupCommand : public QUndoCommand {
+public:
+    GroupCommand(Document *document, std::vector<Shape *> shapes, QUndoCommand *parent = nullptr);
+
+    Shape *group() const { return m_group; }
+
+    void redo() override;
+    void undo() override;
+
+private:
+    Document *m_document;
+    std::vector<Shape *> m_shapes; // in paint order
+    std::vector<int> m_indices;    // their positions before grouping
+    Shape *m_group;
+    std::unique_ptr<Shape> m_ownedGroup; // while the group is not in the document
+};
+
+// Replaces a group with its children, at the group's stacking position.
+class UngroupCommand : public QUndoCommand {
+public:
+    UngroupCommand(Document *document, Shape *group, QUndoCommand *parent = nullptr);
+
+    const std::vector<Shape *> &children() const { return m_children; }
+
+    void redo() override;
+    void undo() override;
+
+private:
+    Document *m_document;
+    Shape *m_group;
+    std::vector<Shape *> m_children;
+    std::unique_ptr<Shape> m_ownedGroup;
+    int m_index = -1;
+};
+
+// Changes the stacking order of the document's shapes.
+class ReorderCommand : public QUndoCommand {
+public:
+    ReorderCommand(Document *document, std::vector<Shape *> newOrder, const QString &text,
+                   QUndoCommand *parent = nullptr);
+
+    void redo() override;
+    void undo() override;
+
+private:
+    Document *m_document;
+    std::vector<Shape *> m_oldOrder;
+    std::vector<Shape *> m_newOrder;
+};
+
 class SetStyleCommand : public QUndoCommand {
 public:
     SetStyleCommand(Document *document, Shape *shape, const Style &style, QUndoCommand *parent = nullptr);

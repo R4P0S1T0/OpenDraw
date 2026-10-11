@@ -18,7 +18,6 @@ Rough order of work. Items move as contributors pick them up.
 - [x] Status bar showing the selection's fill and outline
 - [x] Resize handles
 - [x] Format version in every file; newer files open with a report instead of being refused
-- [ ] Multiple selection, rubber-band selection
 - [ ] Rulers and guidelines
 - [ ] Keep unsupported SVG elements when saving, so round-tripping a newer file loses nothing
 
@@ -29,7 +28,8 @@ Rough order of work. Items move as contributors pick them up.
 - [x] Full SVG path support on import and export, plus transforms, groups and inherited styles
 - [x] Node commands: smooth, corner, to line, to curve, break, join
 - [x] Packaged builds: Windows .zip and Linux AppImage from CI, GitHub release on version tags
-- [ ] Groups, ordering (to front / to back), alignment and distribution
+- [x] Multiple selection (Shift+click, rubber band, select all), moving and resizing several objects
+- [x] Groups (also imported from and saved as SVG `<g>`), ordering, alignment and distribution
 - [ ] Text objects
 - [ ] Layers and multiple pages
 

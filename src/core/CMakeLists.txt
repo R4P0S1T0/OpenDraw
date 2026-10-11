@@ -1,4 +1,6 @@
 add_library(opendraw_core STATIC
+    Arrange.cpp
+    Arrange.h
     Commands.cpp
     Commands.h
     Document.cpp
