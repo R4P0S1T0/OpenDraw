@@ -1,8 +1,12 @@
 #include "CanvasWidget.h"
+#include "LayersPanel.h"
+#include "core/Commands.h"
 #include "core/Document.h"
 #include "core/Export.h"
 
 #include <QMouseEvent>
+#include <QToolButton>
+#include <QTreeWidget>
 #include <QUndoStack>
 #include <QtTest>
 
@@ -87,6 +91,8 @@ private slots:
     void shortcutsWaitWhileTyping();
     void doubleClickEditsTextAndUndo();
     void textConvertsToCurves();
+    void hiddenLayersAndPagesLimitSelection();
+    void layersPanelEditsLayers();
     void screenshot();
 
 private:
@@ -458,6 +464,80 @@ void CanvasTests::textConvertsToCurves()
     QCOMPARE(m_doc->count(), 1);
     QCOMPARE(m_doc->shapes()[0]->kind(), ShapeKind::Path);
     QVERIFY(m_doc->shapes()[0]->pathData().size() >= 2); // the outlines of O (two) and K
+}
+
+void CanvasTests::hiddenLayersAndPagesLimitSelection()
+{
+    m_canvas->setTool(CanvasWidget::Tool::Rectangle);
+    dragFromTo(m_canvas, {300, 200}, {350, 250});
+    Layer *first = m_doc->activeLayer();
+
+    m_canvas->setTool(CanvasWidget::Tool::Select);
+    m_canvas->selectAll();
+    QCOMPARE(m_canvas->selection().size(), std::size_t(1));
+
+    // Hiding the layer drops its shapes from the selection and from clicks.
+    m_undo->push(new LayerPropertiesCommand(m_doc, first, first->name, false, false, QStringLiteral("Hide")));
+    QVERIFY(m_canvas->selection().empty());
+    click(m_canvas, {325, 225});
+    QVERIFY(m_canvas->selection().empty());
+    m_undo->undo();
+    click(m_canvas, {325, 225});
+    QCOMPARE(m_canvas->selection().size(), std::size_t(1));
+
+    // A new page starts empty; drawing there does not touch page 1.
+    m_undo->push(new AddPageCommand(m_doc, 1));
+    QVERIFY(m_canvas->selection().empty());
+    m_canvas->setTool(CanvasWidget::Tool::Ellipse);
+    dragFromTo(m_canvas, {300, 200}, {350, 250});
+    QCOMPARE(m_doc->pages()[1]->layers[0]->shapes.size(), std::size_t(1));
+    QCOMPARE(first->shapes.size(), std::size_t(1));
+
+    m_doc->setCurrentPage(0);
+    m_canvas->selectAll();
+    QCOMPARE(m_canvas->selection().size(), std::size_t(1));
+    QCOMPARE(m_canvas->selection().front()->kind(), ShapeKind::Rectangle);
+}
+
+void CanvasTests::layersPanelEditsLayers()
+{
+    LayersPanel panel(m_doc, m_undo, m_canvas);
+    auto button = [&panel](const QString &tip) {
+        for (QToolButton *b : panel.findChildren<QToolButton *>()) {
+            if (b->toolTip() == tip)
+                return b;
+        }
+        return static_cast<QToolButton *>(nullptr);
+    };
+    auto *tree = panel.findChild<QTreeWidget *>();
+    QVERIFY(tree);
+    QCOMPARE(tree->topLevelItemCount(), 1);
+
+    button(QStringLiteral("New layer"))->click();
+    QCoreApplication::processEvents(); // the panel refreshes on the next event loop pass
+    QCOMPARE(m_doc->currentPage()->layers.size(), std::size_t(2));
+    QCOMPARE(tree->topLevelItemCount(), 2);
+    QCOMPARE(tree->topLevelItem(0)->text(0), QStringLiteral("Layer 2")); // topmost first
+
+    // Unchecking the box hides the layer, as one undoable step.
+    tree->topLevelItem(0)->setCheckState(0, Qt::Unchecked);
+    QVERIFY(!m_doc->activeLayer()->visible);
+    m_undo->undo();
+    QVERIFY(m_doc->activeLayer()->visible);
+
+    // Draw on the new layer, then move the object down to the first layer.
+    m_canvas->setTool(CanvasWidget::Tool::Rectangle);
+    dragFromTo(m_canvas, {300, 200}, {350, 250});
+    Layer *first = m_doc->currentPage()->layers[0].get();
+    m_doc->setActiveLayer(first);
+    QCoreApplication::processEvents();
+    button(QStringLiteral("Move the selected objects to this layer"))->click();
+    QCOMPARE(first->shapes.size(), std::size_t(1));
+
+    button(QStringLiteral("Delete layer"))->click(); // deletes the active (first) layer
+    QCOMPARE(m_doc->currentPage()->layers.size(), std::size_t(1));
+    m_undo->undo();
+    QCOMPARE(m_doc->currentPage()->layers.size(), std::size_t(2));
 }
 
 // Not an assertion: saves a picture of the canvas for manual review when

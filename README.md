@@ -12,7 +12,7 @@
 
 OpenDraw is a free, open-source, cross-platform vector graphics editor for Linux and Windows. It aims to offer professional tools for illustration and graphic design, with a workflow that feels familiar to people coming from other desktop vector editors, and without the lock-in that comes with closed file formats.
 
-> **Status: early development (0.3).** You can draw rectangles, ellipses, Bézier and freehand curves, edit curve nodes, write text, select several objects, group, order, align and distribute them, recolour them, undo and redo, open SVG files from other programs, and export PDF and PNG. Layers, multiple pages, gradients and CorelDRAW import are still missing.
+> **Status: early development (0.3).** You can draw rectangles, ellipses, Bézier and freehand curves, edit curve nodes, write text, select several objects, group, order, align and distribute them, recolour them, undo and redo, organise work in layers and multiple pages, open SVG files from other programs (Inkscape layers included), and export PDF and PNG. Gradients, transparency and CorelDRAW import are still missing.
 
 ## Goals
 
@@ -52,8 +52,10 @@ See [docs/ROADMAP.md](docs/ROADMAP.md) for what is planned next.
 | Zoom | Mouse wheel (around the cursor), `Ctrl` `+` / `Ctrl` `-`, `Shift` `F4` fits the page |
 | Pan | Middle mouse button, or hold `Space` and drag |
 | Delete | `Delete` |
+| Layers | Layers panel on the right: checkbox shows/hides, Locked column locks, double-click renames, the bold layer receives new objects. `+` / `−` / `↑` / `↓` add, delete and reorder; *Move here* moves the selection to the highlighted layer |
+| Pages | Tabs under the drawing; `+` inserts a page, right-click or double-click a tab to rename or delete. `PgUp` / `PgDn` switch pages (Layout menu) |
 | Undo / redo | `Ctrl` `Z` / `Ctrl` `Y` |
-| Export | `Ctrl` `E`: PDF (vector, exact page size) or PNG (choose the dpi, transparent background, or only the selected objects) |
+| Export | `Ctrl` `E`: PDF (vector, exact page size, one PDF page per page) or PNG of the current page (choose the dpi, transparent background, or only the selected objects) |
 
 ## Building
 
