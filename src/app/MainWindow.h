@@ -5,6 +5,7 @@
 class QAction;
 class QActionGroup;
 class QLabel;
+class QToolBar;
 class QUndoStack;
 
 namespace opendraw {
@@ -36,6 +37,7 @@ private slots:
     void about();
     void updateTitle();
     void updateStyleIndicators();
+    void updateNodeActions();
 
 private:
     void createActions();
@@ -51,6 +53,9 @@ private:
 
     QAction *m_fillAction = nullptr;
     QAction *m_outlineAction = nullptr;
+    QToolBar *m_nodeBar = nullptr;
+    QList<QAction *> m_nodeActions; // need an active node
+    QAction *m_joinAction = nullptr; // needs two end nodes
     QLabel *m_styleLabel = nullptr;
     QLabel *m_zoomLabel = nullptr;
     QLabel *m_positionLabel = nullptr;

@@ -42,6 +42,25 @@ void removeNode(PathData &path, int subpath, int node);
 // Smooth or corner, judged from whether the handles line up.
 NodeType inferNodeType(const PathNode &node);
 
+// Node commands. Each returns false and leaves the path untouched when it does not apply.
+
+// Smooth lines the handles up (creating them from the neighbouring nodes if missing);
+// corner just frees them.
+bool setNodeType(PathData &path, int subpath, int node, NodeType type);
+
+// The segment that starts at `node`, or ends at it when `node` is the last node of an open subpath.
+std::optional<int> segmentAtNode(const PathData &path, int subpath, int node);
+bool segmentToLine(PathData &path, int subpath, int segment);
+// Gives a straight segment handles at a third of its length, so it can be bent.
+bool segmentToCurve(PathData &path, int subpath, int segment);
+
+// Opens a closed subpath at the node, or splits an open one in two there.
+bool breakAtNode(PathData &path, int subpath, int node);
+
+// Joins two end nodes of open subpaths: closes the subpath when both belong to it, otherwise
+// connects the two subpaths into one. Nodes at the same position are merged into one node.
+bool joinNodes(PathData &path, int subpathA, int nodeA, int subpathB, int nodeB);
+
 // Turns a freehand stroke into a few smooth Bézier segments.
 // `tolerance` is the largest distance, in document units, the result may drift from the stroke.
 SubPath fitFreehand(const std::vector<QPointF> &points, double tolerance, bool closed);

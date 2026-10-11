@@ -76,6 +76,8 @@ private slots:
     void convertToCurvesAndEditNode();
     void doubleClickAddsAndRemovesNodes();
     void deleteKeyRemovesActiveNode();
+    void breakThenJoinWithShiftClick();
+    void nodeTypeAndSegmentCommands();
     void screenshot();
 
 private:
@@ -215,6 +217,58 @@ void CanvasTests::deleteKeyRemovesActiveNode()
     m_canvas->deleteSelection();
     QCOMPARE(m_doc->count(), 1);
     QCOMPARE(nodeCount(*curve), 2);
+}
+
+void CanvasTests::breakThenJoinWithShiftClick()
+{
+    m_canvas->setTool(CanvasWidget::Tool::Bezier);
+    click(m_canvas, {300, 300});
+    click(m_canvas, {400, 300});
+    doubleClick(m_canvas, {500, 300});
+    Shape *curve = m_doc->shapes()[0].get();
+
+    m_canvas->setTool(CanvasWidget::Tool::Node);
+    click(m_canvas, {400, 300});
+    QVERIFY(m_canvas->hasActiveNode());
+    m_canvas->breakNode();
+    QCOMPARE(curve->pathData().size(), std::size_t(2));
+
+    // The two new end nodes sit on top of each other; pull one away.
+    dragFromTo(m_canvas, {400, 300}, {420, 340});
+
+    click(m_canvas, {400, 300});
+    QVERIFY(!m_canvas->hasNodePairToJoin());
+    sendMouse(m_canvas, QEvent::MouseButtonPress, {420, 340}, Qt::LeftButton, Qt::LeftButton, Qt::ShiftModifier);
+    sendMouse(m_canvas, QEvent::MouseButtonRelease, {420, 340}, Qt::LeftButton, Qt::NoButton, Qt::ShiftModifier);
+    QVERIFY(m_canvas->hasNodePairToJoin());
+
+    m_canvas->joinNodes();
+    QCOMPARE(curve->pathData().size(), std::size_t(1));
+    QCOMPARE(nodeCount(*curve), 4);
+
+    m_undo->undo();
+    QCOMPARE(curve->pathData().size(), std::size_t(2));
+}
+
+void CanvasTests::nodeTypeAndSegmentCommands()
+{
+    m_canvas->setTool(CanvasWidget::Tool::Bezier);
+    click(m_canvas, {300, 300});
+    click(m_canvas, {400, 300});
+    doubleClick(m_canvas, {450, 400});
+    Shape *curve = m_doc->shapes()[0].get();
+
+    m_canvas->setTool(CanvasWidget::Tool::Node);
+    click(m_canvas, {400, 300});
+    m_canvas->makeNodeSmooth();
+    QCOMPARE(curve->pathData()[0].nodes[1].type, NodeType::Smooth);
+
+    m_canvas->segmentToLine(); // the segment after the node becomes straight again
+    const PathNode &after = curve->pathData()[0].nodes[1];
+    QCOMPARE(after.out, after.point);
+
+    m_canvas->makeNodeCorner();
+    QCOMPARE(curve->pathData()[0].nodes[1].type, NodeType::Corner);
 }
 
 // Not an assertion: saves a picture of the canvas for manual review when

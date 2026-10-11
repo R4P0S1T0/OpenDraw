@@ -66,7 +66,7 @@ void CanvasWidget::setTool(Tool tool)
     if (m_tool == Tool::Bezier)
         finishCurve();
     m_tool = tool;
-    m_activeNode = {};
+    setActiveNode({});
     updateCursor();
     update();
 }
@@ -76,7 +76,7 @@ void CanvasWidget::setSelectedShape(Shape *shape)
     if (shape == m_selected)
         return;
     m_selected = shape;
-    m_activeNode = {};
+    setActiveNode({});
     update();
     emit selectionChanged(shape);
 }
@@ -213,14 +213,99 @@ Shape *CanvasWidget::selectedPath() const
     return m_selected && m_selected->kind() == ShapeKind::Path ? m_selected : nullptr;
 }
 
-bool CanvasWidget::activeNodeIsValid() const
+bool CanvasWidget::isValidNode(const NodeRef &ref) const
 {
     const Shape *path = selectedPath();
-    if (!path || !m_activeNode.isValid())
+    if (!path || !ref.isValid())
         return false;
     const PathData &data = path->pathData();
-    return m_activeNode.subpath < int(data.size())
-           && m_activeNode.node < int(data[m_activeNode.subpath].nodes.size());
+    return ref.subpath < int(data.size()) && ref.node < int(data[ref.subpath].nodes.size());
+}
+
+bool CanvasWidget::activeNodeIsValid() const
+{
+    return isValidNode(m_activeNode);
+}
+
+bool CanvasWidget::hasNodePairToJoin() const
+{
+    return activeNodeIsValid() && isValidNode(m_secondaryNode);
+}
+
+void CanvasWidget::setActiveNode(const NodeRef &node)
+{
+    setActiveNode(node, NodeRef());
+}
+
+void CanvasWidget::setActiveNode(const NodeRef &node, const NodeRef &secondary)
+{
+    m_activeNode = node;
+    m_secondaryNode = secondary;
+    update();
+    emit nodeSelectionChanged();
+}
+
+template<typename Edit>
+bool CanvasWidget::editPath(const QString &text, Edit edit)
+{
+    Shape *path = selectedPath();
+    if (!path || !activeNodeIsValid())
+        return false;
+    PathData data = path->pathData();
+    if (!edit(data))
+        return false;
+    m_undoStack->push(new SetPathCommand(m_document, path, path->pathData(), std::move(data), text));
+    return true;
+}
+
+void CanvasWidget::makeNodeSmooth()
+{
+    const NodeRef n = m_activeNode;
+    editPath(tr("Make node smooth"),
+             [n](PathData &d) { return pathops::setNodeType(d, n.subpath, n.node, NodeType::Smooth); });
+}
+
+void CanvasWidget::makeNodeCorner()
+{
+    const NodeRef n = m_activeNode;
+    editPath(tr("Make node corner"),
+             [n](PathData &d) { return pathops::setNodeType(d, n.subpath, n.node, NodeType::Corner); });
+}
+
+void CanvasWidget::segmentToLine()
+{
+    const NodeRef n = m_activeNode;
+    editPath(tr("To line"), [n](PathData &d) {
+        const auto segment = pathops::segmentAtNode(d, n.subpath, n.node);
+        return segment && pathops::segmentToLine(d, n.subpath, *segment);
+    });
+}
+
+void CanvasWidget::segmentToCurve()
+{
+    const NodeRef n = m_activeNode;
+    editPath(tr("To curve"), [n](PathData &d) {
+        const auto segment = pathops::segmentAtNode(d, n.subpath, n.node);
+        return segment && pathops::segmentToCurve(d, n.subpath, *segment);
+    });
+}
+
+void CanvasWidget::breakNode()
+{
+    const NodeRef n = m_activeNode;
+    if (editPath(tr("Break node"), [n](PathData &d) { return pathops::breakAtNode(d, n.subpath, n.node); }))
+        setActiveNode({});
+}
+
+void CanvasWidget::joinNodes()
+{
+    if (!hasNodePairToJoin())
+        return;
+    const NodeRef a = m_activeNode;
+    const NodeRef b = m_secondaryNode;
+    if (editPath(tr("Join nodes"),
+                 [a, b](PathData &d) { return pathops::joinNodes(d, a.subpath, a.node, b.subpath, b.node); }))
+        setActiveNode({});
 }
 
 CanvasWidget::NodeRef CanvasWidget::nodeAt(const QPointF &widgetPosition) const
@@ -267,7 +352,7 @@ void CanvasWidget::removeActiveNode()
     Shape *path = selectedPath();
     PathData data = path->pathData();
     pathops::removeNode(data, m_activeNode.subpath, m_activeNode.node);
-    m_activeNode = {};
+    setActiveNode({});
     if (data.empty()) {
         m_undoStack->push(new RemoveShapeCommand(m_document, path));
         return;
@@ -424,9 +509,15 @@ void CanvasWidget::paintNodes(QPainter &painter, const Shape &shape)
     for (int s = 0; s < int(data.size()); ++s) {
         for (int n = 0; n < int(data[s].nodes.size()); ++n) {
             const bool active = m_activeNode.subpath == s && m_activeNode.node == n;
+            const bool secondary = m_secondaryNode.subpath == s && m_secondaryNode.node == n;
             const PathNode &node = data[s].nodes[n];
             painter.setPen(QPen(highlight, 1));
-            painter.setBrush(active ? QBrush(highlight) : QBrush(Qt::white));
+            QColor fill = Qt::white;
+            if (active)
+                fill = highlight;
+            else if (secondary)
+                fill = highlight.lighter(160);
+            painter.setBrush(fill);
             const QRectF r = squareAround(toWidget(node.point), kNodeSizePx);
             if (node.type == NodeType::Smooth)
                 painter.drawEllipse(r);
@@ -516,12 +607,19 @@ void CanvasWidget::mousePressEvent(QMouseEvent *event)
             m_draggedHandle = *handle;
             m_pathBeforeEdit = selectedPath()->pathData();
         } else if (const NodeRef node = nodeAt(pos); node.isValid()) {
-            m_activeNode = node;
+            if (event->modifiers() & Qt::ShiftModifier) {
+                // Shift+click picks a second node (for joining) and keeps the first one active.
+                if (activeNodeIsValid() && !(node.subpath == m_activeNode.subpath && node.node == m_activeNode.node))
+                    setActiveNode(m_activeNode, node);
+                else
+                    setActiveNode(node);
+                break;
+            }
+            setActiveNode(node);
             m_drag = Drag::NodeMove;
             m_pathBeforeEdit = selectedPath()->pathData();
-            update();
         } else if (selectedPath() && pathops::nearestSegment(selectedPath()->pathData(), docPos, tolerance)) {
-            m_activeNode = {}; // clicked the outline: keep the curve selected
+            setActiveNode({}); // clicked the outline: keep the curve selected
             update();
         } else {
             setSelectedShape(m_document->shapeAt(docPos, tolerance));
@@ -748,7 +846,7 @@ void CanvasWidget::mouseDoubleClickEvent(QMouseEvent *event)
     if (m_tool == Tool::Node && selectedPath()) {
         // Double-click a node to delete it, or a segment to add a node there.
         if (const NodeRef node = nodeAt(event->position()); node.isValid()) {
-            m_activeNode = node;
+            setActiveNode(node);
             removeActiveNode();
             return;
         }
@@ -759,8 +857,7 @@ void CanvasWidget::mouseDoubleClickEvent(QMouseEvent *event)
             PathData data = path->pathData();
             const int index = pathops::insertNode(data, hit->subpath, hit->segment, hit->t);
             m_undoStack->push(new SetPathCommand(m_document, path, path->pathData(), data, tr("Add node")));
-            m_activeNode = {hit->subpath, index};
-            update();
+            setActiveNode({hit->subpath, index});
         }
         return;
     }

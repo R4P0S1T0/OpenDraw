@@ -44,7 +44,82 @@ private slots:
     void fromPainterPathRectangleAndEllipse();
     void freehandIsSimplified();
     void shapeScalesPathToNewBounds();
+    void makeSmoothAlignsOrCreatesHandles();
+    void segmentToLineAndBack();
+    void breakClosedAndOpenSubpaths();
+    void joinClosesOrConnects();
 };
+
+void PathTests::makeSmoothAlignsOrCreatesHandles()
+{
+    // Corner of a triangle: no handles yet, so they are created along the neighbours' direction.
+    PathData path = parse(u"M 0 0 L 30 0 L 60 30");
+    QVERIFY(pathops::setNodeType(path, 0, 1, NodeType::Smooth));
+    const PathNode &n = path[0].nodes[1];
+    QCOMPARE(n.type, NodeType::Smooth);
+    QCOMPARE(pathops::inferNodeType(n), NodeType::Smooth);
+    QVERIFY(near(n.in, n.point - (QPointF(60, 30) - QPointF(0, 0)) / std::hypot(60.0, 30.0) * 10.0, 1e-6));
+
+    QVERIFY(pathops::setNodeType(path, 0, 1, NodeType::Corner));
+    QCOMPARE(path[0].nodes[1].type, NodeType::Corner);
+}
+
+void PathTests::segmentToLineAndBack()
+{
+    PathData path = parse(u"M 0 0 L 30 0");
+    QCOMPARE(pathops::segmentAtNode(path, 0, 1), std::optional<int>(0)); // last node: the segment before it
+    QVERIFY(!pathops::segmentToLine(path, 0, 0));                          // already straight
+    QVERIFY(pathops::segmentToCurve(path, 0, 0));
+    QCOMPARE(path[0].nodes[0].out, QPointF(10, 0));
+    QCOMPARE(path[0].nodes[1].in, QPointF(20, 0));
+    QVERIFY(pathops::segmentToLine(path, 0, 0));
+    QCOMPARE(path[0].nodes[0], PathNode::corner({0, 0}));
+}
+
+void PathTests::breakClosedAndOpenSubpaths()
+{
+    PathData square = parse(u"M 0 0 L 10 0 L 10 10 L 0 10 Z");
+    QVERIFY(pathops::breakAtNode(square, 0, 2));
+    QVERIFY(!square[0].closed);
+    QCOMPARE(square[0].nodes.size(), std::size_t(5));
+    QCOMPARE(square[0].nodes.front().point, QPointF(10, 10));
+    QCOMPARE(square[0].nodes.back().point, QPointF(10, 10));
+
+    PathData line = parse(u"M 0 0 L 10 0 L 20 0 L 30 0");
+    QVERIFY(!pathops::breakAtNode(line, 0, 0)); // end nodes cannot be broken
+    QVERIFY(pathops::breakAtNode(line, 0, 2));
+    QCOMPARE(line.size(), std::size_t(2));
+    QCOMPARE(line[0].nodes.back().point, QPointF(20, 0));
+    QCOMPARE(line[1].nodes.front().point, QPointF(20, 0));
+    QCOMPARE(line[1].nodes.size(), std::size_t(2));
+}
+
+void PathTests::joinClosesOrConnects()
+{
+    // Same subpath: closes it.
+    PathData open = parse(u"M 0 0 L 10 0 L 10 10");
+    QVERIFY(pathops::joinNodes(open, 0, 0, 0, 2));
+    QVERIFY(open[0].closed);
+    QCOMPARE(open[0].nodes.size(), std::size_t(3));
+
+    // Two subpaths whose ends touch: merged into one, with the shared node kept once.
+    PathData two = parse(u"M 0 0 L 10 0 M 20 0 L 10 0");
+    QVERIFY(pathops::joinNodes(two, 0, 1, 1, 1));
+    QCOMPARE(two.size(), std::size_t(1));
+    QCOMPARE(two[0].nodes.size(), std::size_t(3));
+    QCOMPARE(two[0].nodes[0].point, QPointF(0, 0));
+    QCOMPARE(two[0].nodes[1].point, QPointF(10, 0));
+    QCOMPARE(two[0].nodes[2].point, QPointF(20, 0));
+
+    // Apart: connected with a straight segment.
+    PathData apart = parse(u"M 0 0 L 10 0 M 30 0 L 40 0");
+    QVERIFY(pathops::joinNodes(apart, 0, 1, 1, 0));
+    QCOMPARE(apart[0].nodes.size(), std::size_t(4));
+
+    // Middle nodes cannot be joined.
+    PathData middle = parse(u"M 0 0 L 10 0 L 20 0 M 30 0 L 40 0");
+    QVERIFY(!pathops::joinNodes(middle, 0, 1, 1, 0));
+}
 
 void PathTests::svgRoundTrip()
 {

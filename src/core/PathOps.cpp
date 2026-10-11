@@ -46,7 +46,7 @@ double distanceToSegment(const QPointF &p, const QPointF &a, const QPointF &b)
     return length(p - (a + ab * t));
 }
 
-// Ramer–Douglas–Peucker: keeps only the points needed to stay within `epsilon` of the stroke.
+// Ramerâ€“Douglasâ€“Peucker: keeps only the points needed to stay within `epsilon` of the stroke.
 std::vector<QPointF> simplify(const std::vector<QPointF> &points, double epsilon)
 {
     const int n = static_cast<int>(points.size());
@@ -635,6 +635,160 @@ NodeType inferNodeType(const PathNode &node)
     return std::abs(cross) < 0.01 && dot > 0.0 ? NodeType::Smooth : NodeType::Corner;
 }
 
+bool setNodeType(PathData &path, int subpath, int node, NodeType type)
+{
+    SubPath &sp = path[subpath];
+    PathNode &n = sp.nodes[node];
+    if (type == NodeType::Corner) {
+        n.type = NodeType::Corner;
+        return true;
+    }
+
+    const int count = static_cast<int>(sp.nodes.size());
+    const bool hasPrevious = sp.closed || node > 0;
+    const bool hasNext = sp.closed || node < count - 1;
+    const QPointF previous = hasPrevious ? sp.nodes[(node - 1 + count) % count].point : n.point;
+    const QPointF next = hasNext ? sp.nodes[(node + 1) % count].point : n.point;
+
+    // Direction of the tangent: from the existing handles if any, otherwise from the neighbours.
+    QPointF direction = (n.out - n.point) - (n.in - n.point);
+    if (length(direction) < 1e-9)
+        direction = next - previous;
+    const double directionLength = length(direction);
+    if (directionLength < 1e-9)
+        return false;
+    direction /= directionLength;
+
+    double inLength = length(n.in - n.point);
+    double outLength = length(n.out - n.point);
+    if (inLength < 1e-9 && hasPrevious)
+        inLength = length(n.point - previous) / 3.0;
+    if (outLength < 1e-9 && hasNext)
+        outLength = length(next - n.point) / 3.0;
+    n.in = n.point - direction * inLength;
+    n.out = n.point + direction * outLength;
+    n.type = NodeType::Smooth;
+    return true;
+}
+
+std::optional<int> segmentAtNode(const PathData &path, int subpath, int node)
+{
+    const SubPath &sp = path[subpath];
+    if (sp.segmentCount() == 0)
+        return std::nullopt;
+    if (!sp.closed && node == static_cast<int>(sp.nodes.size()) - 1)
+        return node - 1;
+    return node;
+}
+
+bool segmentToLine(PathData &path, int subpath, int segment)
+{
+    SubPath &sp = path[subpath];
+    PathNode &a = sp.nodes[segment];
+    PathNode &b = sp.nodes[(segment + 1) % sp.nodes.size()];
+    if (isStraight(a, b))
+        return false;
+    a.out = a.point;
+    b.in = b.point;
+    a.type = inferNodeType(a);
+    b.type = inferNodeType(b);
+    return true;
+}
+
+bool segmentToCurve(PathData &path, int subpath, int segment)
+{
+    SubPath &sp = path[subpath];
+    PathNode &a = sp.nodes[segment];
+    PathNode &b = sp.nodes[(segment + 1) % sp.nodes.size()];
+    if (!isStraight(a, b))
+        return false;
+    a.out = lerp(a.point, b.point, 1.0 / 3.0);
+    b.in = lerp(a.point, b.point, 2.0 / 3.0);
+    return true;
+}
+
+bool breakAtNode(PathData &path, int subpath, int node)
+{
+    SubPath &sp = path[subpath];
+    const int count = static_cast<int>(sp.nodes.size());
+    if (sp.closed) {
+        // Start the open subpath at the node and end it at a copy of the node.
+        std::rotate(sp.nodes.begin(), sp.nodes.begin() + node, sp.nodes.end());
+        PathNode end = sp.nodes.front();
+        end.out = end.point;
+        end.type = NodeType::Corner;
+        sp.nodes.front().in = sp.nodes.front().point;
+        sp.nodes.front().type = NodeType::Corner;
+        sp.nodes.push_back(end);
+        sp.closed = false;
+        return true;
+    }
+    if (node <= 0 || node >= count - 1)
+        return false; // already an end node
+
+    SubPath second;
+    second.nodes.assign(sp.nodes.begin() + node, sp.nodes.end());
+    sp.nodes.erase(sp.nodes.begin() + node + 1, sp.nodes.end());
+    sp.nodes.back().out = sp.nodes.back().point;
+    sp.nodes.back().type = NodeType::Corner;
+    second.nodes.front().in = second.nodes.front().point;
+    second.nodes.front().type = NodeType::Corner;
+    path.insert(path.begin() + subpath + 1, std::move(second));
+    return true;
+}
+
+namespace {
+void reverseSubpath(SubPath &sp)
+{
+    std::reverse(sp.nodes.begin(), sp.nodes.end());
+    for (PathNode &n : sp.nodes)
+        std::swap(n.in, n.out);
+}
+
+bool isEndNode(const SubPath &sp, int node)
+{
+    return !sp.closed && (node == 0 || node == static_cast<int>(sp.nodes.size()) - 1);
+}
+} // namespace
+
+bool joinNodes(PathData &path, int subpathA, int nodeA, int subpathB, int nodeB)
+{
+    if (!isEndNode(path[subpathA], nodeA) || !isEndNode(path[subpathB], nodeB))
+        return false;
+
+    if (subpathA == subpathB) {
+        SubPath &sp = path[subpathA];
+        if (nodeA == nodeB)
+            return false;
+        if (samePoint(sp.nodes.front().point, sp.nodes.back().point, 1e-6) && sp.nodes.size() > 2) {
+            sp.nodes.front().in = sp.nodes.back().in;
+            sp.nodes.pop_back();
+        }
+        sp.closed = true;
+        return true;
+    }
+
+    // Orient A so it ends at nodeA, and B so it starts at nodeB.
+    SubPath a = path[subpathA];
+    SubPath b = path[subpathB];
+    if (nodeA == 0 && a.nodes.size() > 1)
+        reverseSubpath(a);
+    if (nodeB != 0)
+        reverseSubpath(b);
+
+    if (samePoint(a.nodes.back().point, b.nodes.front().point, 1e-6)) {
+        a.nodes.back().out = b.nodes.front().out;
+        a.nodes.back().type = inferNodeType(a.nodes.back());
+        a.nodes.insert(a.nodes.end(), b.nodes.begin() + 1, b.nodes.end());
+    } else {
+        a.nodes.insert(a.nodes.end(), b.nodes.begin(), b.nodes.end());
+    }
+
+    path[subpathA] = std::move(a);
+    path.erase(path.begin() + subpathB);
+    return true;
+}
+
 SubPath fitFreehand(const std::vector<QPointF> &points, double tolerance, bool closed)
 {
     std::vector<QPointF> unique;
@@ -656,7 +810,7 @@ SubPath fitFreehand(const std::vector<QPointF> &points, double tolerance, bool c
         sp.nodes = {PathNode::corner(kept[0]), PathNode::corner(kept[1])};
         return sp;
     }
-    // Catmull–Rom tangents give smooth curves through the kept points.
+    // Catmullâ€“Rom tangents give smooth curves through the kept points.
     for (int i = 0; i < n; ++i) {
         const QPointF prev = sp.closed ? kept[(i - 1 + n) % n] : kept[std::max(i - 1, 0)];
         const QPointF next = sp.closed ? kept[(i + 1) % n] : kept[std::min(i + 1, n - 1)];

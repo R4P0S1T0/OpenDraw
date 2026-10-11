@@ -134,6 +134,11 @@ MainWindow::MainWindow(QWidget *parent)
 
     m_propertyBar = new PropertyBar(m_document, m_undoStack, this);
     addToolBar(Qt::TopToolBarArea, m_propertyBar);
+    addToolBar(Qt::TopToolBarArea, m_nodeBar);
+    m_nodeBar->hide();
+    connect(m_canvas, &CanvasWidget::nodeSelectionChanged, this, &MainWindow::updateNodeActions);
+    connect(m_document, &Document::changed, this, &MainWindow::updateNodeActions);
+    updateNodeActions();
 
     auto *palette = new ColorPalette(this);
     QToolBar *paletteBar = new QToolBar(tr("Color Palette"), this);
@@ -214,6 +219,40 @@ void MainWindow::createActions()
     objectMenu->addAction(tr("Convert to &Curves"), QKeySequence(Qt::CTRL | Qt::Key_Q), m_canvas,
                           &CanvasWidget::convertSelectionToCurves);
 
+    // Node commands: in Object > Nodes and on a bar shown while the shape tool is active.
+    QMenu *nodesMenu = objectMenu->addMenu(tr("&Nodes"));
+    m_nodeBar = new QToolBar(tr("Nodes"), this);
+    m_nodeBar->setObjectName(QStringLiteral("nodes"));
+    m_nodeBar->setMovable(false);
+    m_nodeBar->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    struct NodeCommand {
+        QString text;
+        QString tip;
+        void (CanvasWidget::*slot)();
+        bool join;
+    };
+    const NodeCommand nodeCommands[] = {
+        {tr("Smooth"), tr("Make the node smooth: its handles stay in line"), &CanvasWidget::makeNodeSmooth, false},
+        {tr("Corner"), tr("Make the node a corner: its handles move freely"), &CanvasWidget::makeNodeCorner, false},
+        {tr("To Line"), tr("Straighten the segment after the node"), &CanvasWidget::segmentToLine, false},
+        {tr("To Curve"), tr("Give the segment after the node handles so it can bend"), &CanvasWidget::segmentToCurve,
+         false},
+        {tr("Break"), tr("Break the curve at the node"), &CanvasWidget::breakNode, false},
+        {tr("Join"), tr("Join two end nodes (Shift+click the second node)"), &CanvasWidget::joinNodes, true},
+    };
+    for (const NodeCommand &command : nodeCommands) {
+        QAction *action = new QAction(command.text, this);
+        action->setToolTip(command.tip);
+        action->setStatusTip(command.tip);
+        connect(action, &QAction::triggered, m_canvas, command.slot);
+        m_nodeBar->addAction(action);
+        nodesMenu->addAction(action);
+        if (command.join)
+            m_joinAction = action;
+        else
+            m_nodeActions << action;
+    }
+
     // Tools
     QMenu *toolsMenu = menuBar()->addMenu(tr("&Tools"));
     QToolBar *toolBar = addToolBar(tr("Tools"));
@@ -241,7 +280,11 @@ void MainWindow::createActions()
         action->setShortcut(def.shortcut);
         action->setToolTip(QStringLiteral("%1 (%2)").arg(def.name, def.shortcut.toString(QKeySequence::NativeText)));
         action->setChecked(def.tool == CanvasWidget::Tool::Select);
-        connect(action, &QAction::triggered, m_canvas, [this, tool = def.tool] { m_canvas->setTool(tool); });
+        connect(action, &QAction::triggered, m_canvas, [this, tool = def.tool] {
+            m_canvas->setTool(tool);
+            m_nodeBar->setVisible(tool == CanvasWidget::Tool::Node);
+            updateNodeActions();
+        });
         toolBar->addAction(action);
         toolsMenu->addAction(action);
     }
@@ -417,6 +460,14 @@ void MainWindow::applyOutline(const QColor &color)
         statusBar()->showMessage(tr("Default outline for new shapes: %1").arg(describeColor(color)), 3000);
     }
     updateStyleIndicators();
+}
+
+void MainWindow::updateNodeActions()
+{
+    const bool hasNode = m_canvas->hasActiveNode();
+    for (QAction *action : std::as_const(m_nodeActions))
+        action->setEnabled(hasNode);
+    m_joinAction->setEnabled(m_canvas->hasNodePairToJoin());
 }
 
 void MainWindow::updateStyleIndicators()

@@ -49,10 +49,24 @@ public slots:
     // Completes the curve being drawn with the Bézier tool.
     void finishCurve();
 
+    // Node commands for the shape tool. They act on the active node; joining also needs a
+    // second end node, picked with Shift+click.
+    void makeNodeSmooth();
+    void makeNodeCorner();
+    void segmentToLine();
+    void segmentToCurve();
+    void breakNode();
+    void joinNodes();
+
+public:
+    bool hasActiveNode() const { return activeNodeIsValid(); }
+    bool hasNodePairToJoin() const;
+
 signals:
     void zoomChanged(double zoom);
     void cursorMoved(const QPointF &documentPosition);
     void selectionChanged(opendraw::Shape *shape);
+    void nodeSelectionChanged();
 
 protected:
     void paintEvent(QPaintEvent *event) override;
@@ -91,8 +105,14 @@ private:
     NodeRef nodeAt(const QPointF &widgetPosition) const;
     std::optional<NodeHandle> nodeHandleAt(const QPointF &widgetPosition) const;
     bool activeNodeIsValid() const;
+    bool isValidNode(const NodeRef &ref) const;
+    void setActiveNode(const NodeRef &node);
+    void setActiveNode(const NodeRef &node, const NodeRef &secondary);
     void commitPathEdit(const PathData &before, const QString &text);
     void removeActiveNode();
+    // Applies `edit` to a copy of the selected path and pushes it as one undoable step.
+    template<typename Edit>
+    bool editPath(const QString &text, Edit edit);
 
     // Style given to new curves: open curves are never filled.
     Style curveStyle(bool closed) const;
@@ -123,6 +143,7 @@ private:
     QRectF m_resizeOriginal;
 
     NodeRef m_activeNode;
+    NodeRef m_secondaryNode; // Shift+clicked node, for joining
     NodeHandle m_draggedHandle = NodeHandle::Out;
     PathData m_pathBeforeEdit;
 
