@@ -8,34 +8,44 @@
 
 namespace opendraw {
 
+namespace {
+QString tr(const char *text)
+{
+    return QCoreApplication::translate("Commands", text);
+}
+} // namespace
+
+// --- Shapes
+
 AddShapeCommand::AddShapeCommand(Document *document, std::unique_ptr<Shape> shape, QUndoCommand *parent)
     : QUndoCommand(parent)
     , m_document(document)
+    , m_layer(document->activeLayer())
     , m_shape(shape.get())
     , m_owned(std::move(shape))
 {
     switch (m_shape->kind()) {
     case ShapeKind::Rectangle:
-        setText(QCoreApplication::translate("Commands", "Add rectangle"));
+        setText(tr("Add rectangle"));
         break;
     case ShapeKind::Ellipse:
-        setText(QCoreApplication::translate("Commands", "Add ellipse"));
+        setText(tr("Add ellipse"));
         break;
     case ShapeKind::Path:
-        setText(QCoreApplication::translate("Commands", "Add curve"));
+        setText(tr("Add curve"));
         break;
     case ShapeKind::Group:
-        setText(QCoreApplication::translate("Commands", "Add group"));
+        setText(tr("Add group"));
         break;
     case ShapeKind::Text:
-        setText(QCoreApplication::translate("Commands", "Add text"));
+        setText(tr("Add text"));
         break;
     }
 }
 
 void AddShapeCommand::redo()
 {
-    m_document->insertShape(m_index, std::move(m_owned));
+    m_document->insertShape(m_layer, m_index, std::move(m_owned));
     m_index = m_document->indexOf(m_shape);
 }
 
@@ -45,8 +55,9 @@ void AddShapeCommand::undo()
 }
 
 RemoveShapeCommand::RemoveShapeCommand(Document *document, Shape *shape, QUndoCommand *parent)
-    : QUndoCommand(QCoreApplication::translate("Commands", "Delete"), parent)
+    : QUndoCommand(tr("Delete"), parent)
     , m_document(document)
+    , m_layer(document->layerOf(shape))
     , m_shape(shape)
     , m_index(document->indexOf(shape))
 {
@@ -59,12 +70,12 @@ void RemoveShapeCommand::redo()
 
 void RemoveShapeCommand::undo()
 {
-    m_document->insertShape(m_index, std::move(m_owned));
+    m_document->insertShape(m_layer, m_index, std::move(m_owned));
 }
 
-MoveShapeCommand::MoveShapeCommand(Document *document, Shape *shape, const QPointF &delta,
-                                   bool alreadyApplied, QUndoCommand *parent)
-    : QUndoCommand(QCoreApplication::translate("Commands", "Move"), parent)
+MoveShapeCommand::MoveShapeCommand(Document *document, Shape *shape, const QPointF &delta, bool alreadyApplied,
+                                   QUndoCommand *parent)
+    : QUndoCommand(tr("Move"), parent)
     , m_document(document)
     , m_shape(shape)
     , m_delta(delta)
@@ -90,7 +101,7 @@ void MoveShapeCommand::undo()
 
 SetBoundsCommand::SetBoundsCommand(Document *document, Shape *shape, const QRectF &oldBounds,
                                    const QRectF &newBounds, QUndoCommand *parent)
-    : QUndoCommand(QCoreApplication::translate("Commands", "Resize"), parent)
+    : QUndoCommand(tr("Resize"), parent)
     , m_document(document)
     , m_shape(shape)
     , m_oldBounds(oldBounds)
@@ -136,6 +147,7 @@ ReplaceShapeCommand::ReplaceShapeCommand(Document *document, Shape *oldShape, st
                                          const QString &text, QUndoCommand *parent)
     : QUndoCommand(text, parent)
     , m_document(document)
+    , m_layer(document->layerOf(oldShape))
     , m_oldShape(oldShape)
     , m_newShape(newShape.get())
     , m_owned(std::move(newShape))
@@ -147,50 +159,57 @@ void ReplaceShapeCommand::redo()
 {
     std::unique_ptr<Shape> incoming = std::move(m_owned);
     m_owned = m_document->takeShape(m_oldShape);
-    m_document->insertShape(m_index, std::move(incoming));
+    m_document->insertShape(m_layer, m_index, std::move(incoming));
 }
 
 void ReplaceShapeCommand::undo()
 {
     std::unique_ptr<Shape> incoming = std::move(m_owned);
     m_owned = m_document->takeShape(m_newShape);
-    m_document->insertShape(m_index, std::move(incoming));
+    m_document->insertShape(m_layer, m_index, std::move(incoming));
 }
 
+// --- Grouping and order
+
 GroupCommand::GroupCommand(Document *document, std::vector<Shape *> shapes, QUndoCommand *parent)
-    : QUndoCommand(QCoreApplication::translate("Commands", "Group"), parent)
+    : QUndoCommand(tr("Group"), parent)
     , m_document(document)
-    , m_shapes(std::move(shapes))
 {
-    std::sort(m_shapes.begin(), m_shapes.end(),
-              [document](Shape *a, Shape *b) { return document->indexOf(a) < document->indexOf(b); });
-    for (Shape *shape : m_shapes)
-        m_indices.push_back(document->indexOf(shape));
-    m_ownedGroup = std::make_unique<Shape>(std::vector<std::unique_ptr<Shape>>{});
+    for (Shape *shape : shapes) {
+        Layer *layer = document->layerOf(shape);
+        m_positions.push_back({shape, layer, document->indexOfLayer(layer), document->indexOf(shape)});
+    }
+    std::sort(m_positions.begin(), m_positions.end(), [](const Position &a, const Position &b) {
+        return a.layerIndex != b.layerIndex ? a.layerIndex < b.layerIndex : a.index < b.index;
+    });
+    m_ownedGroup = std::make_unique<Shape>(ShapeList{});
     m_group = m_ownedGroup.get();
 }
 
 void GroupCommand::redo()
 {
-    std::vector<std::unique_ptr<Shape>> children;
-    for (Shape *shape : m_shapes)
-        children.push_back(m_document->takeShape(shape));
+    const Position &top = m_positions.back();
+    // The topmost shape's old index, shifted down by the grouped shapes taken out below it.
+    const int below = int(std::count_if(m_positions.begin(), m_positions.end(),
+                                        [&top](const Position &p) { return p.layer == top.layer && p.index < top.index; }));
+    ShapeList children;
+    for (const Position &p : m_positions)
+        children.push_back(m_document->takeShape(p.shape));
     m_ownedGroup->setChildren(std::move(children));
-    // The topmost shape's old index, shifted down by the shapes taken out below it.
-    const int index = m_indices.back() - int(m_indices.size()) + 1;
-    m_document->insertShape(index, std::move(m_ownedGroup));
+    m_document->insertShape(top.layer, top.index - below, std::move(m_ownedGroup));
 }
 
 void GroupCommand::undo()
 {
     m_ownedGroup = m_document->takeShape(m_group);
-    std::vector<std::unique_ptr<Shape>> children = m_ownedGroup->takeChildren();
+    ShapeList children = m_ownedGroup->takeChildren();
+    // Ascending positions per layer, so every shape lands where it was.
     for (std::size_t i = 0; i < children.size(); ++i)
-        m_document->insertShape(m_indices[i], std::move(children[i]));
+        m_document->insertShape(m_positions[i].layer, m_positions[i].index, std::move(children[i]));
 }
 
 UngroupCommand::UngroupCommand(Document *document, Shape *group, QUndoCommand *parent)
-    : QUndoCommand(QCoreApplication::translate("Commands", "Ungroup"), parent)
+    : QUndoCommand(tr("Ungroup"), parent)
     , m_document(document)
     , m_group(group)
 {
@@ -200,40 +219,70 @@ UngroupCommand::UngroupCommand(Document *document, Shape *group, QUndoCommand *p
 
 void UngroupCommand::redo()
 {
+    m_layer = m_document->layerOf(m_group);
     m_index = m_document->indexOf(m_group);
     m_ownedGroup = m_document->takeShape(m_group);
-    std::vector<std::unique_ptr<Shape>> children = m_ownedGroup->takeChildren();
+    ShapeList children = m_ownedGroup->takeChildren();
     for (std::size_t i = 0; i < children.size(); ++i)
-        m_document->insertShape(m_index + int(i), std::move(children[i]));
+        m_document->insertShape(m_layer, m_index + int(i), std::move(children[i]));
 }
 
 void UngroupCommand::undo()
 {
-    std::vector<std::unique_ptr<Shape>> children;
+    ShapeList children;
     for (Shape *child : m_children)
         children.push_back(m_document->takeShape(child));
     m_ownedGroup->setChildren(std::move(children));
-    m_document->insertShape(m_index, std::move(m_ownedGroup));
+    m_document->insertShape(m_layer, m_index, std::move(m_ownedGroup));
+}
+
+ReorderCommand::ReorderCommand(Document *document, Layer *layer, std::vector<Shape *> newOrder,
+                               const QString &text, QUndoCommand *parent)
+    : QUndoCommand(text, parent)
+    , m_document(document)
+    , m_layer(layer)
+    , m_oldOrder(document->order(layer))
+    , m_newOrder(std::move(newOrder))
+{
 }
 
 ReorderCommand::ReorderCommand(Document *document, std::vector<Shape *> newOrder, const QString &text,
                                QUndoCommand *parent)
-    : QUndoCommand(text, parent)
-    , m_document(document)
-    , m_oldOrder(document->order())
-    , m_newOrder(std::move(newOrder))
+    : ReorderCommand(document, document->activeLayer(), std::move(newOrder), text, parent)
 {
 }
 
 void ReorderCommand::redo()
 {
-    m_document->setOrder(m_newOrder);
+    m_document->setOrder(m_layer, m_newOrder);
 }
 
 void ReorderCommand::undo()
 {
-    m_document->setOrder(m_oldOrder);
+    m_document->setOrder(m_layer, m_oldOrder);
 }
+
+MoveToLayerCommand::MoveToLayerCommand(Document *document, Shape *shape, Layer *target, QUndoCommand *parent)
+    : QUndoCommand(tr("Move to layer"), parent)
+    , m_document(document)
+    , m_shape(shape)
+    , m_source(document->layerOf(shape))
+    , m_target(target)
+    , m_index(document->indexOf(shape))
+{
+}
+
+void MoveToLayerCommand::redo()
+{
+    m_document->insertShape(m_target, -1, m_document->takeShape(m_shape));
+}
+
+void MoveToLayerCommand::undo()
+{
+    m_document->insertShape(m_source, m_index, m_document->takeShape(m_shape));
+}
+
+// --- Content and style
 
 SetTextCommand::SetTextCommand(Document *document, Shape *shape, TextData oldText, TextData newText,
                                const QString &text, QUndoCommand *parent)
@@ -258,7 +307,7 @@ void SetTextCommand::undo()
 }
 
 SetStyleCommand::SetStyleCommand(Document *document, Shape *shape, const Style &style, QUndoCommand *parent)
-    : QUndoCommand(QCoreApplication::translate("Commands", "Change style"), parent)
+    : QUndoCommand(tr("Change style"), parent)
     , m_document(document)
     , m_shape(shape)
     , m_newStyle(style)
@@ -276,6 +325,161 @@ void SetStyleCommand::undo()
 {
     m_shape->setStyle(m_oldStyle);
     m_document->notifyShapeChanged(m_shape);
+}
+
+// --- Layers
+
+AddLayerCommand::AddLayerCommand(Document *document, Page *page, QUndoCommand *parent)
+    : QUndoCommand(tr("New layer"), parent)
+    , m_document(document)
+    , m_page(page)
+    , m_previousActive(page->activeLayer)
+    , m_owned(Document::makeLayer(document->newLayerName(page)))
+    , m_index(document->indexOfLayer(page->activeLayer) + 1)
+{
+    m_layer = m_owned.get();
+}
+
+void AddLayerCommand::redo()
+{
+    m_document->insertLayer(m_page, m_index, std::move(m_owned));
+    m_document->setActiveLayer(m_layer);
+}
+
+void AddLayerCommand::undo()
+{
+    m_document->setActiveLayer(m_previousActive);
+    m_owned = m_document->takeLayer(m_layer);
+}
+
+RemoveLayerCommand::RemoveLayerCommand(Document *document, Layer *layer, QUndoCommand *parent)
+    : QUndoCommand(tr("Delete layer"), parent)
+    , m_document(document)
+    , m_page(document->pageOf(layer))
+    , m_layer(layer)
+    , m_wasActive(m_page->activeLayer == layer)
+    , m_index(document->indexOfLayer(layer))
+{
+}
+
+void RemoveLayerCommand::redo()
+{
+    m_owned = m_document->takeLayer(m_layer);
+}
+
+void RemoveLayerCommand::undo()
+{
+    m_document->insertLayer(m_page, m_index, std::move(m_owned));
+    if (m_wasActive)
+        m_document->setActiveLayer(m_layer);
+}
+
+MoveLayerCommand::MoveLayerCommand(Document *document, Layer *layer, int newIndex, QUndoCommand *parent)
+    : QUndoCommand(tr("Move layer"), parent)
+    , m_document(document)
+    , m_layer(layer)
+    , m_oldIndex(document->indexOfLayer(layer))
+    , m_newIndex(newIndex)
+{
+}
+
+void MoveLayerCommand::redo()
+{
+    m_document->moveLayer(m_layer, m_newIndex);
+}
+
+void MoveLayerCommand::undo()
+{
+    m_document->moveLayer(m_layer, m_oldIndex);
+}
+
+LayerPropertiesCommand::LayerPropertiesCommand(Document *document, Layer *layer, const QString &name, bool visible,
+                                               bool locked, const QString &text, QUndoCommand *parent)
+    : QUndoCommand(text, parent)
+    , m_document(document)
+    , m_layer(layer)
+    , m_oldName(layer->name)
+    , m_newName(name)
+    , m_oldVisible(layer->visible)
+    , m_newVisible(visible)
+    , m_oldLocked(layer->locked)
+    , m_newLocked(locked)
+{
+}
+
+void LayerPropertiesCommand::redo()
+{
+    m_document->setLayerProperties(m_layer, m_newName, m_newVisible, m_newLocked);
+}
+
+void LayerPropertiesCommand::undo()
+{
+    m_document->setLayerProperties(m_layer, m_oldName, m_oldVisible, m_oldLocked);
+}
+
+// --- Pages
+
+AddPageCommand::AddPageCommand(Document *document, int index, QUndoCommand *parent)
+    : QUndoCommand(tr("Insert page"), parent)
+    , m_document(document)
+    , m_owned(Document::makePage(document->newPageName()))
+    , m_index(index)
+    , m_previousCurrent(document->currentPageIndex())
+{
+    m_page = m_owned.get();
+}
+
+void AddPageCommand::redo()
+{
+    m_previousCurrent = m_document->currentPageIndex();
+    m_document->insertPage(m_index, std::move(m_owned));
+    m_document->setCurrentPage(m_document->indexOfPage(m_page));
+}
+
+void AddPageCommand::undo()
+{
+    m_owned = m_document->takePage(m_page);
+    m_document->setCurrentPage(m_previousCurrent);
+}
+
+RemovePageCommand::RemovePageCommand(Document *document, Page *page, QUndoCommand *parent)
+    : QUndoCommand(tr("Delete page"), parent)
+    , m_document(document)
+    , m_page(page)
+    , m_index(document->indexOfPage(page))
+    , m_previousCurrent(document->currentPageIndex())
+{
+}
+
+void RemovePageCommand::redo()
+{
+    m_previousCurrent = m_document->currentPageIndex();
+    m_owned = m_document->takePage(m_page);
+}
+
+void RemovePageCommand::undo()
+{
+    m_document->insertPage(m_index, std::move(m_owned));
+    m_document->setCurrentPage(m_previousCurrent);
+}
+
+RenamePageCommand::RenamePageCommand(Document *document, Page *page, const QString &name, QUndoCommand *parent)
+    : QUndoCommand(tr("Rename page"), parent)
+    , m_document(document)
+    , m_page(page)
+    , m_oldName(page->name)
+    , m_newName(name)
+{
+}
+
+void RenamePageCommand::redo()
+{
+    m_document->renamePage(m_page, m_newName);
+}
+
+void RenamePageCommand::undo()
+{
+    m_document->renamePage(m_page, m_oldName);
 }
 
 } // namespace opendraw

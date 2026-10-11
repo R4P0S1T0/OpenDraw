@@ -6,13 +6,17 @@
 #include <QUndoCommand>
 
 #include <memory>
+#include <vector>
 
 namespace opendraw {
 
 class Document;
+struct Layer;
+struct Page;
 
 // Every document change goes through one of these so it can be undone.
 
+// Adds a shape to the layer that is active when the command is created.
 class AddShapeCommand : public QUndoCommand {
 public:
     AddShapeCommand(Document *document, std::unique_ptr<Shape> shape, QUndoCommand *parent = nullptr);
@@ -24,6 +28,7 @@ public:
 
 private:
     Document *m_document;
+    Layer *m_layer;
     Shape *m_shape;
     std::unique_ptr<Shape> m_owned;
     int m_index = -1;
@@ -38,6 +43,7 @@ public:
 
 private:
     Document *m_document;
+    Layer *m_layer;
     Shape *m_shape;
     std::unique_ptr<Shape> m_owned;
     int m_index;
@@ -104,13 +110,15 @@ public:
 
 private:
     Document *m_document;
+    Layer *m_layer;
     Shape *m_oldShape;
     Shape *m_newShape;
     std::unique_ptr<Shape> m_owned; // whichever shape is currently out of the document
     int m_index;
 };
 
-// Puts shapes into a new group, which takes the stacking position of the topmost of them.
+// Puts shapes into a new group. The group goes into the layer and stacking position of the
+// topmost of them; the shapes may come from different layers.
 class GroupCommand : public QUndoCommand {
 public:
     GroupCommand(Document *document, std::vector<Shape *> shapes, QUndoCommand *parent = nullptr);
@@ -121,9 +129,14 @@ public:
     void undo() override;
 
 private:
+    struct Position {
+        Shape *shape;
+        Layer *layer;
+        int layerIndex; // stacking of the layer on its page
+        int index;      // position in the layer before grouping
+    };
     Document *m_document;
-    std::vector<Shape *> m_shapes; // in paint order
-    std::vector<int> m_indices;    // their positions before grouping
+    std::vector<Position> m_positions; // bottom to top
     Shape *m_group;
     std::unique_ptr<Shape> m_ownedGroup; // while the group is not in the document
 };
@@ -143,12 +156,16 @@ private:
     Shape *m_group;
     std::vector<Shape *> m_children;
     std::unique_ptr<Shape> m_ownedGroup;
+    Layer *m_layer = nullptr;
     int m_index = -1;
 };
 
-// Changes the stacking order of the document's shapes.
+// Changes the stacking order of one layer's shapes.
 class ReorderCommand : public QUndoCommand {
 public:
+    ReorderCommand(Document *document, Layer *layer, std::vector<Shape *> newOrder, const QString &text,
+                   QUndoCommand *parent = nullptr);
+    // On the active layer.
     ReorderCommand(Document *document, std::vector<Shape *> newOrder, const QString &text,
                    QUndoCommand *parent = nullptr);
 
@@ -157,8 +174,25 @@ public:
 
 private:
     Document *m_document;
+    Layer *m_layer;
     std::vector<Shape *> m_oldOrder;
     std::vector<Shape *> m_newOrder;
+};
+
+// Moves a shape to the top of another layer.
+class MoveToLayerCommand : public QUndoCommand {
+public:
+    MoveToLayerCommand(Document *document, Shape *shape, Layer *target, QUndoCommand *parent = nullptr);
+
+    void redo() override;
+    void undo() override;
+
+private:
+    Document *m_document;
+    Shape *m_shape;
+    Layer *m_source;
+    Layer *m_target;
+    int m_index;
 };
 
 // Changes a text object's content and/or format. The shape may already hold `newText`.
@@ -189,6 +223,119 @@ private:
     Shape *m_shape;
     Style m_newStyle;
     Style m_oldStyle;
+};
+
+// --- Layers and pages
+
+// Adds a new layer above the active one and makes it active.
+class AddLayerCommand : public QUndoCommand {
+public:
+    AddLayerCommand(Document *document, Page *page, QUndoCommand *parent = nullptr);
+
+    Layer *layer() const { return m_layer; }
+
+    void redo() override;
+    void undo() override;
+
+private:
+    Document *m_document;
+    Page *m_page;
+    Layer *m_layer;
+    Layer *m_previousActive;
+    std::unique_ptr<Layer> m_owned;
+    int m_index;
+};
+
+class RemoveLayerCommand : public QUndoCommand {
+public:
+    RemoveLayerCommand(Document *document, Layer *layer, QUndoCommand *parent = nullptr);
+
+    void redo() override;
+    void undo() override;
+
+private:
+    Document *m_document;
+    Page *m_page;
+    Layer *m_layer;
+    bool m_wasActive;
+    std::unique_ptr<Layer> m_owned;
+    int m_index;
+};
+
+class MoveLayerCommand : public QUndoCommand {
+public:
+    MoveLayerCommand(Document *document, Layer *layer, int newIndex, QUndoCommand *parent = nullptr);
+
+    void redo() override;
+    void undo() override;
+
+private:
+    Document *m_document;
+    Layer *m_layer;
+    int m_oldIndex;
+    int m_newIndex;
+};
+
+// Name, visibility and lock of a layer.
+class LayerPropertiesCommand : public QUndoCommand {
+public:
+    LayerPropertiesCommand(Document *document, Layer *layer, const QString &name, bool visible, bool locked,
+                           const QString &text, QUndoCommand *parent = nullptr);
+
+    void redo() override;
+    void undo() override;
+
+private:
+    Document *m_document;
+    Layer *m_layer;
+    QString m_oldName, m_newName;
+    bool m_oldVisible, m_newVisible;
+    bool m_oldLocked, m_newLocked;
+};
+
+// Inserts a new page with one empty layer at `index` and shows it.
+class AddPageCommand : public QUndoCommand {
+public:
+    AddPageCommand(Document *document, int index, QUndoCommand *parent = nullptr);
+
+    void redo() override;
+    void undo() override;
+
+private:
+    Document *m_document;
+    Page *m_page;
+    std::unique_ptr<Page> m_owned;
+    int m_index;
+    int m_previousCurrent;
+};
+
+class RemovePageCommand : public QUndoCommand {
+public:
+    RemovePageCommand(Document *document, Page *page, QUndoCommand *parent = nullptr);
+
+    void redo() override;
+    void undo() override;
+
+private:
+    Document *m_document;
+    Page *m_page;
+    std::unique_ptr<Page> m_owned;
+    int m_index;
+    int m_previousCurrent;
+};
+
+class RenamePageCommand : public QUndoCommand {
+public:
+    RenamePageCommand(Document *document, Page *page, const QString &name, QUndoCommand *parent = nullptr);
+
+    void redo() override;
+    void undo() override;
+
+private:
+    Document *m_document;
+    Page *m_page;
+    QString m_oldName;
+    QString m_newName;
 };
 
 } // namespace opendraw

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/Arrange.h"
+#include "core/Document.h"
 #include "core/Shape.h"
 
 #include <QPointF>
@@ -8,6 +9,7 @@
 #include <QWidget>
 
 #include <array>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <vector>
@@ -16,8 +18,6 @@ class QPainter;
 class QUndoStack;
 
 namespace opendraw {
-
-class Document;
 
 // Draws the page and its shapes, and turns mouse input into document edits.
 class CanvasWidget : public QWidget {
@@ -76,6 +76,7 @@ public slots:
     void align(arrange::Alignment alignment);
     void centerOnPage();
     void distribute(Qt::Orientation orientation);
+    void moveSelectionToLayer(opendraw::Layer *layer);
 
     // Node commands for the shape tool. They act on the active node; joining also needs a
     // second end node, picked with Shift+click.
@@ -129,7 +130,7 @@ private:
     QRectF selectionBounds() const;
     // Moves each selected shape by its offset as one undoable step.
     void moveSelection(const std::vector<QPointF> &offsets, const QString &text);
-    void reorder(std::vector<Shape *> order, const QString &text);
+    void reorder(const std::function<std::vector<Shape *>(std::vector<Shape *>)> &rearrange, const QString &text);
 
     // Select tool: bounding-box handles in widget coordinates, clockwise from the top-left corner.
     std::array<QRectF, 8> resizeHandleRects() const;

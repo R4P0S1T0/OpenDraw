@@ -248,11 +248,17 @@ bool isUnsupportedGraphic(QStringView name)
 }
 
 // What an element inherits from its ancestors.
+// What an open element collects its children into.
+enum class Role { Other, Group, Layer, Page };
+
 struct Context {
     QTransform transform;
     QHash<QString, QString> inherited;
     bool rendering = true;
-    bool isGroup = false; // a <g> collecting its children into a group
+    Role role = Role::Other;
+    Layer *layer = nullptr; // for Role::Layer
+    bool inPage = false;    // inside a page group
+    bool inLayer = false;   // inside a layer (nested layers become groups)
 };
 
 // The presentation properties of one element: style attribute, then attributes, then inherited values.
@@ -488,6 +494,7 @@ bool write(const Document &document, QIODevice *device)
     w.writeStartElement(QStringLiteral("svg"));
     w.writeDefaultNamespace(QStringLiteral("http://www.w3.org/2000/svg"));
     w.writeNamespace(QString::fromLatin1(kNamespace), QStringLiteral("opendraw"));
+    w.writeNamespace(QString::fromLatin1(kInkscapeNamespace), QStringLiteral("inkscape"));
     w.writeAttribute(QStringLiteral("version"), QStringLiteral("1.1"));
     w.writeAttribute(QString::fromLatin1(kNamespace), QStringLiteral("format-version"),
                      QString::number(kFormatVersion));
@@ -495,9 +502,35 @@ bool write(const Document &document, QIODevice *device)
     w.writeAttribute(QStringLiteral("height"), number(page.height()));
     w.writeAttribute(QStringLiteral("viewBox"),
                      QStringLiteral("0 0 %1 %2").arg(number(page.width()), number(page.height())));
+    w.writeAttribute(QString::fromLatin1(kNamespace), QStringLiteral("page-name"), document.pages().front()->name);
 
-    for (const auto &shape : document.shapes())
-        writeShape(w, *shape);
+    // Layers use Inkscape's layer markup too, so other editors show them as layers.
+    auto writeLayer = [&w](const Layer &layer) {
+        w.writeStartElement(QStringLiteral("g"));
+        w.writeAttribute(QString::fromLatin1(kNamespace), QStringLiteral("layer"), layer.name);
+        w.writeAttribute(QString::fromLatin1(kInkscapeNamespace), QStringLiteral("groupmode"), QStringLiteral("layer"));
+        w.writeAttribute(QString::fromLatin1(kInkscapeNamespace), QStringLiteral("label"), layer.name);
+        if (!layer.visible)
+            w.writeAttribute(QStringLiteral("display"), QStringLiteral("none"));
+        if (layer.locked)
+            w.writeAttribute(QString::fromLatin1(kNamespace), QStringLiteral("locked"), QStringLiteral("true"));
+        for (const auto &shape : layer.shapes)
+            writeShape(w, *shape);
+        w.writeEndElement();
+    };
+
+    // The first page is the drawing every SVG viewer shows; further pages are hidden groups.
+    const auto &pages = document.pages();
+    for (const auto &layer : pages.front()->layers)
+        writeLayer(*layer);
+    for (std::size_t i = 1; i < pages.size(); ++i) {
+        w.writeStartElement(QStringLiteral("g"));
+        w.writeAttribute(QString::fromLatin1(kNamespace), QStringLiteral("page"), pages[i]->name);
+        w.writeAttribute(QStringLiteral("display"), QStringLiteral("none"));
+        for (const auto &layer : pages[i]->layers)
+            writeLayer(*layer);
+        w.writeEndElement();
+    }
 
     w.writeEndElement();
     w.writeEndDocument();
@@ -513,18 +546,41 @@ bool read(QIODevice *device, Document &document, QString *errorMessage, ReadRepo
 
     // One entry per open element: every start element pushes, every end element pops.
     std::vector<Context> stack{Context{}};
-    // Shapes being collected: the document's top level, then one list per open <g>.
-    std::vector<std::vector<std::unique_ptr<Shape>>> containers(1);
+    // Shapes being collected: loose top-level shapes, then one list per open group, layer or page.
+    std::vector<ShapeList> containers(1);
+    // pages[0] is the first page, whose layers sit at the top level of the file.
+    std::vector<std::unique_ptr<Page>> pages;
+    pages.push_back(std::make_unique<Page>());
 
     while (!r.atEnd()) {
         r.readNext();
         if (r.isEndElement()) {
             if (stack.size() > 1) {
-                if (stack.back().isGroup) {
-                    std::vector<std::unique_ptr<Shape>> children = std::move(containers.back());
+                switch (stack.back().role) {
+                case Role::Group: {
+                    ShapeList children = std::move(containers.back());
                     containers.pop_back();
                     if (!children.empty())
                         containers.back().push_back(std::make_unique<Shape>(std::move(children)));
+                    break;
+                }
+                case Role::Layer:
+                    stack.back().layer->shapes = std::move(containers.back());
+                    containers.pop_back();
+                    break;
+                case Role::Page: {
+                    // Shapes on the page but outside any layer get a layer of their own.
+                    ShapeList loose = std::move(containers.back());
+                    containers.pop_back();
+                    if (!loose.empty()) {
+                        auto layer = Document::makeLayer(tr("Layer"));
+                        layer->shapes = std::move(loose);
+                        pages.back()->layers.push_back(std::move(layer));
+                    }
+                    break;
+                }
+                case Role::Other:
+                    break;
                 }
                 stack.pop_back();
             }
@@ -539,7 +595,8 @@ bool read(QIODevice *device, Document &document, QString *errorMessage, ReadRepo
         const Properties props(attributes, parent.inherited);
 
         Context context = parent;
-        context.isGroup = false; // inherited state only; set below if this element is a <g>
+        context.role = Role::Other; // not inherited; set below for groups, layers and pages
+        context.layer = nullptr;
         const QStringView transformText = attributes.value(QStringLiteral("transform"));
         if (!transformText.isEmpty())
             context.transform = parseTransform(transformText) * parent.transform;
@@ -551,10 +608,43 @@ bool read(QIODevice *device, Document &document, QString *errorMessage, ReadRepo
         if (isNonRendering(name))
             context.rendering = false;
 
-        if (name == u"svg" && !foundSvg) {
+        const QString ns = QString::fromLatin1(kNamespace);
+        const bool hidden = props.own(QStringLiteral("display")) == u"none";
+        const bool isPage = name == u"g" && !parent.inPage && !parent.inLayer && attributes.hasAttribute(ns, QStringLiteral("page"));
+        const bool isLayer = name == u"g" && !parent.inLayer
+                             && (attributes.hasAttribute(ns, QStringLiteral("layer"))
+                                 || attributes.value(QString::fromLatin1(kInkscapeNamespace), QStringLiteral("groupmode"))
+                                        == u"layer");
+        // Hidden pages and layers are still read; any other hidden element is skipped.
+        if (hidden && !isPage && !isLayer)
+            context.rendering = false;
+
+        if (isPage && context.rendering) {
+            auto page = std::make_unique<Page>();
+            page->name = attributes.value(ns, QStringLiteral("page")).toString();
+            pages.push_back(std::move(page));
+            containers.emplace_back();
+            context.role = Role::Page;
+            context.inPage = true;
+        } else if (isLayer && context.rendering) {
+            QString layerName = attributes.value(ns, QStringLiteral("layer")).toString();
+            if (layerName.isEmpty())
+                layerName = attributes.value(QString::fromLatin1(kInkscapeNamespace), QStringLiteral("label")).toString();
+            auto layer = Document::makeLayer(layerName.isEmpty() ? tr("Layer") : layerName);
+            layer->visible = !hidden;
+            layer->locked = attributes.value(ns, QStringLiteral("locked")) == u"true"
+                            || attributes.value(QString::fromLatin1(kSodipodiNamespace), QStringLiteral("insensitive"))
+                                   == u"true";
+            Page *target = parent.inPage ? pages.back().get() : pages.front().get();
+            context.layer = layer.get();
+            target->layers.push_back(std::move(layer));
+            containers.emplace_back();
+            context.role = Role::Layer;
+            context.inLayer = true;
+        } else if (name == u"svg" && !foundSvg) {
             foundSvg = true;
-            localReport.formatVersion =
-                attributes.value(QString::fromLatin1(kNamespace), QStringLiteral("format-version")).toInt();
+            localReport.formatVersion = attributes.value(ns, QStringLiteral("format-version")).toInt();
+            pages.front()->name = attributes.value(ns, QStringLiteral("page-name")).toString();
             const std::vector<double> viewBox = parseNumberList(attributes.value(QStringLiteral("viewBox")));
             if (viewBox.size() == 4 && viewBox[2] > 0 && viewBox[3] > 0) {
                 pageSize = {viewBox[2], viewBox[3]};
@@ -621,7 +711,7 @@ bool read(QIODevice *device, Document &document, QString *errorMessage, ReadRepo
                 containers.back().push_back(std::move(shape));
 
             if (name == u"g") {
-                context.isGroup = true;
+                context.role = Role::Group;
                 containers.emplace_back();
             }
         }
@@ -640,10 +730,21 @@ bool read(QIODevice *device, Document &document, QString *errorMessage, ReadRepo
         return false;
     }
 
-    document.clear();
+    // Shapes outside any layer (a plain SVG) form the bottom layer of the first page.
+    if (!containers.front().empty()) {
+        auto layer = Document::makeLayer(QCoreApplication::translate("Document", "Layer 1"));
+        layer->shapes = std::move(containers.front());
+        pages.front()->layers.insert(pages.front()->layers.begin(), std::move(layer));
+    }
+    if (pages.front()->layers.empty() && pages.size() > 1)
+        pages.erase(pages.begin());
+    for (std::size_t i = 0; i < pages.size(); ++i) {
+        if (pages[i]->name.isEmpty())
+            pages[i]->name = QCoreApplication::translate("Document", "Page %1").arg(i + 1);
+    }
+
+    document.setPages(std::move(pages));
     document.setPageSize(pageSize);
-    for (auto &shape : containers.front())
-        document.insertShape(-1, std::move(shape));
     if (report)
         *report = localReport;
     return true;

@@ -11,6 +11,8 @@ class QActionGroup;
 class QDoubleSpinBox;
 class QFontComboBox;
 class QLabel;
+class QMenu;
+class QTabBar;
 class QToolBar;
 class QUndoStack;
 
@@ -37,6 +39,10 @@ private slots:
     bool save();
     bool saveAs();
     void exportDocument();
+    void insertPage();
+    void deletePage();
+    void renamePage();
+    void syncPageTabs();
     void chooseFillColor();
     void chooseOutlineColor();
     void applyFill(const QColor &color);
@@ -67,6 +73,11 @@ private:
     QToolBar *m_nodeBar = nullptr;
     QList<QAction *> m_nodeActions; // need an active node
     QAction *m_joinAction = nullptr; // needs two end nodes
+
+    QTabBar *m_pageTabs = nullptr;
+    bool m_updatingPageTabs = false;
+    QAction *m_deletePageAction = nullptr;
+    QMenu *m_viewMenu = nullptr;
 
     QToolBar *m_textBar = nullptr;
     QFontComboBox *m_fontBox = nullptr;

@@ -20,10 +20,19 @@ void paintShape(QPainter &painter, const Shape &shape)
     painter.drawPath(shape.path());
 }
 
+void paintPage(QPainter &painter, const Page &page)
+{
+    for (const auto &layer : page.layers) {
+        if (!layer->visible)
+            continue;
+        for (const auto &shape : layer->shapes)
+            paintShape(painter, *shape);
+    }
+}
+
 void paintDocument(QPainter &painter, const Document &document)
 {
-    for (const auto &shape : document.shapes())
-        paintShape(painter, *shape);
+    paintPage(painter, *document.currentPage());
 }
 
 } // namespace opendraw::render

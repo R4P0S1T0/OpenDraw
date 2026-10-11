@@ -67,6 +67,21 @@ CanvasWidget::CanvasWidget(Document *document, QUndoStack *undoStack, QWidget *p
         setSelection({});
         m_bezier = {};
     });
+    connect(m_document, &Document::currentPageChanged, this, [this] {
+        finishTextEdit();
+        m_bezier = {};
+        setSelection({});
+    });
+    // Shapes on a layer that was just hidden or locked can no longer stay selected.
+    connect(m_document, &Document::structureChanged, this, [this] {
+        const std::vector<Shape *> editable = m_document->editableShapes();
+        std::vector<Shape *> kept;
+        for (Shape *shape : m_selection) {
+            if (std::find(editable.begin(), editable.end(), shape) != editable.end())
+                kept.push_back(shape);
+        }
+        setSelection(std::move(kept));
+    });
 }
 
 void CanvasWidget::setTool(Tool tool)
@@ -408,7 +423,7 @@ void CanvasWidget::addNewShape(std::unique_ptr<Shape> shape)
 
 void CanvasWidget::selectAll()
 {
-    setSelection(m_document->order());
+    setSelection(m_document->editableShapes());
 }
 
 void CanvasWidget::deleteSelection()
@@ -487,51 +502,103 @@ void CanvasWidget::ungroupSelection()
     setSelection(std::move(released));
 }
 
-void CanvasWidget::reorder(std::vector<Shape *> order, const QString &text)
+// Stacking order is per layer: each layer holding selected shapes is reordered on its own.
+void CanvasWidget::reorder(const std::function<std::vector<Shape *>(std::vector<Shape *>)> &rearrange,
+                           const QString &text)
 {
-    if (order != m_document->order())
-        m_undoStack->push(new ReorderCommand(m_document, std::move(order), text));
+    std::vector<std::pair<Layer *, std::vector<Shape *>>> changes;
+    for (const auto &layer : m_document->currentPage()->layers) {
+        const std::vector<Shape *> current = m_document->order(layer.get());
+        if (std::none_of(current.begin(), current.end(), [this](Shape *s) { return isSelected(s); }))
+            continue;
+        std::vector<Shape *> rearranged = rearrange(current);
+        if (rearranged != current)
+            changes.emplace_back(layer.get(), std::move(rearranged));
+    }
+    if (changes.empty())
+        return;
+    m_undoStack->beginMacro(text);
+    for (auto &[layer, order] : changes)
+        m_undoStack->push(new ReorderCommand(m_document, layer, std::move(order), text));
+    m_undoStack->endMacro();
 }
 
 void CanvasWidget::orderToFront()
 {
-    std::vector<Shape *> order;
-    std::vector<Shape *> selected;
-    for (Shape *shape : m_document->order())
-        (isSelected(shape) ? selected : order).push_back(shape);
-    order.insert(order.end(), selected.begin(), selected.end());
-    reorder(std::move(order), tr("To front"));
+    reorder(
+        [this](const std::vector<Shape *> &current) {
+            std::vector<Shape *> order;
+            std::vector<Shape *> selected;
+            for (Shape *shape : current)
+                (isSelected(shape) ? selected : order).push_back(shape);
+            order.insert(order.end(), selected.begin(), selected.end());
+            return order;
+        },
+        tr("To front"));
 }
 
 void CanvasWidget::orderToBack()
 {
-    std::vector<Shape *> order;
-    std::vector<Shape *> others;
-    for (Shape *shape : m_document->order())
-        (isSelected(shape) ? order : others).push_back(shape);
-    order.insert(order.end(), others.begin(), others.end());
-    reorder(std::move(order), tr("To back"));
+    reorder(
+        [this](const std::vector<Shape *> &current) {
+            std::vector<Shape *> order;
+            std::vector<Shape *> others;
+            for (Shape *shape : current)
+                (isSelected(shape) ? order : others).push_back(shape);
+            order.insert(order.end(), others.begin(), others.end());
+            return order;
+        },
+        tr("To back"));
 }
 
 void CanvasWidget::orderForwardOne()
 {
-    std::vector<Shape *> order = m_document->order();
-    // From the top down, so a selected shape never jumps over another selected one.
-    for (int i = int(order.size()) - 2; i >= 0; --i) {
-        if (isSelected(order[i]) && !isSelected(order[i + 1]))
-            std::swap(order[i], order[i + 1]);
-    }
-    reorder(std::move(order), tr("Forward one"));
+    reorder(
+        [this](std::vector<Shape *> order) {
+            // From the top down, so a selected shape never jumps over another selected one.
+            for (int i = int(order.size()) - 2; i >= 0; --i) {
+                if (isSelected(order[i]) && !isSelected(order[i + 1]))
+                    std::swap(order[i], order[i + 1]);
+            }
+            return order;
+        },
+        tr("Forward one"));
 }
 
 void CanvasWidget::orderBackOne()
 {
-    std::vector<Shape *> order = m_document->order();
-    for (int i = 1; i < int(order.size()); ++i) {
-        if (isSelected(order[i]) && !isSelected(order[i - 1]))
-            std::swap(order[i], order[i - 1]);
+    reorder(
+        [this](std::vector<Shape *> order) {
+            for (int i = 1; i < int(order.size()); ++i) {
+                if (isSelected(order[i]) && !isSelected(order[i - 1]))
+                    std::swap(order[i], order[i - 1]);
+            }
+            return order;
+        },
+        tr("Back one"));
+}
+
+void CanvasWidget::moveSelectionToLayer(Layer *layer)
+{
+    std::vector<Shape *> moving;
+    for (Shape *shape : m_selection) {
+        if (m_document->layerOf(shape) != layer)
+            moving.push_back(shape);
     }
-    reorder(std::move(order), tr("Back one"));
+    if (moving.empty())
+        return;
+    // Keep their relative stacking: move them bottom to top.
+    std::vector<Shape *> ordered;
+    for (const auto &l : m_document->currentPage()->layers) {
+        for (Shape *shape : m_document->order(l.get())) {
+            if (std::find(moving.begin(), moving.end(), shape) != moving.end())
+                ordered.push_back(shape);
+        }
+    }
+    m_undoStack->beginMacro(tr("Move to layer"));
+    for (Shape *shape : ordered)
+        m_undoStack->push(new MoveToLayerCommand(m_document, shape, layer));
+    m_undoStack->endMacro();
 }
 
 void CanvasWidget::moveSelection(const std::vector<QPointF> &offsets, const QString &text)
@@ -800,8 +867,12 @@ void CanvasWidget::paintEvent(QPaintEvent *)
     painter.setBrush(Qt::NoBrush);
     painter.drawRect(page);
 
-    for (const auto &shape : m_document->shapes())
-        paintShape(painter, *shape);
+    for (const auto &layer : m_document->currentPage()->layers) {
+        if (!layer->visible)
+            continue;
+        for (const auto &shape : layer->shapes)
+            paintShape(painter, *shape);
+    }
     if (m_pendingText)
         paintShape(painter, *m_pendingText);
 
@@ -1278,7 +1349,7 @@ void CanvasWidget::mouseReleaseEvent(QMouseEvent *event)
         const QRectF band = m_marquee;
         m_marquee = QRectF();
         if (band.width() * m_zoom >= kMinMarqueePx || band.height() * m_zoom >= kMinMarqueePx) {
-            for (Shape *shape : m_document->order()) {
+            for (Shape *shape : m_document->editableShapes()) {
                 if (band.contains(shape->bounds()) && std::find(selection.begin(), selection.end(), shape) == selection.end())
                     selection.push_back(shape);
             }

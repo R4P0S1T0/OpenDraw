@@ -3,6 +3,7 @@
 #include "CanvasWidget.h"
 #include "ColorPalette.h"
 #include "ExportImageDialog.h"
+#include "LayersPanel.h"
 #include "PropertyBar.h"
 #include "core/Export.h"
 #include "core/Commands.h"
@@ -16,7 +17,13 @@
 #include <QColorDialog>
 #include <QFileDialog>
 #include <QDir>
+#include <QDockWidget>
 #include <QDoubleSpinBox>
+#include <QHBoxLayout>
+#include <QInputDialog>
+#include <QTabBar>
+#include <QToolButton>
+#include <QVBoxLayout>
 #include <QSettings>
 #include <QFileInfo>
 #include <QFontComboBox>
@@ -144,8 +151,61 @@ MainWindow::MainWindow(QWidget *parent)
     , m_undoStack(new QUndoStack(this))
     , m_canvas(new CanvasWidget(m_document, m_undoStack, this))
 {
-    setCentralWidget(m_canvas);
+    // Canvas with the page tabs underneath, as in other desktop vector editors.
+    auto *central = new QWidget(this);
+    auto *centralLayout = new QVBoxLayout(central);
+    centralLayout->setContentsMargins(0, 0, 0, 0);
+    centralLayout->setSpacing(0);
+    centralLayout->addWidget(m_canvas, 1);
+    auto *pageRow = new QHBoxLayout;
+    pageRow->setContentsMargins(4, 0, 4, 0);
+    m_pageTabs = new QTabBar(this);
+    m_pageTabs->setShape(QTabBar::RoundedSouth);
+    m_pageTabs->setExpanding(false);
+    m_pageTabs->setContextMenuPolicy(Qt::CustomContextMenu);
+    auto *addPage = new QToolButton(this);
+    addPage->setText(QStringLiteral("+"));
+    addPage->setToolTip(tr("Insert page after the current one"));
+    addPage->setAutoRaise(true);
+    pageRow->addWidget(m_pageTabs);
+    pageRow->addWidget(addPage);
+    pageRow->addStretch();
+    centralLayout->addLayout(pageRow);
+    setCentralWidget(central);
+
+    connect(addPage, &QToolButton::clicked, this, &MainWindow::insertPage);
+    connect(m_pageTabs, &QTabBar::currentChanged, this, [this](int index) {
+        if (!m_updatingPageTabs && index >= 0)
+            m_document->setCurrentPage(index);
+    });
+    connect(m_pageTabs, &QTabBar::tabBarDoubleClicked, this, [this](int index) {
+        if (index >= 0)
+            renamePage();
+    });
+    connect(m_pageTabs, &QTabBar::customContextMenuRequested, this, [this](const QPoint &pos) {
+        const int index = m_pageTabs->tabAt(pos);
+        if (index < 0)
+            return;
+        m_document->setCurrentPage(index);
+        QMenu menu(this);
+        menu.addAction(tr("Rename Page…"), this, &MainWindow::renamePage);
+        menu.addAction(tr("Insert Page After"), this, &MainWindow::insertPage);
+        QAction *remove = menu.addAction(tr("Delete Page"), this, &MainWindow::deletePage);
+        remove->setEnabled(m_document->pageCount() > 1);
+        menu.exec(m_pageTabs->mapToGlobal(pos));
+    });
+    connect(m_document, &Document::structureChanged, this, &MainWindow::syncPageTabs);
+    connect(m_document, &Document::currentPageChanged, this, &MainWindow::syncPageTabs);
+    syncPageTabs();
+
     createActions();
+
+    auto *layersDock = new QDockWidget(tr("Layers"), this);
+    layersDock->setObjectName(QStringLiteral("layers"));
+    layersDock->setWidget(new LayersPanel(m_document, m_undoStack, m_canvas, layersDock));
+    addDockWidget(Qt::RightDockWidgetArea, layersDock);
+    m_viewMenu->addSeparator();
+    m_viewMenu->addAction(layersDock->toggleViewAction());
 
     m_propertyBar = new PropertyBar(m_document, m_undoStack, this);
     addToolBar(Qt::TopToolBarArea, m_propertyBar);
@@ -226,11 +286,23 @@ void MainWindow::createActions()
 
     // View
     QMenu *viewMenu = menuBar()->addMenu(tr("&View"));
+    m_viewMenu = viewMenu;
     viewMenu->addAction(tr("Zoom &In"), QKeySequence::ZoomIn, m_canvas, &CanvasWidget::zoomIn);
     viewMenu->addAction(tr("Zoom &Out"), QKeySequence::ZoomOut, m_canvas, &CanvasWidget::zoomOut);
     viewMenu->addAction(tr("&Actual Size"), QKeySequence(Qt::CTRL | Qt::Key_1), m_canvas,
                         &CanvasWidget::zoomToActualSize);
     viewMenu->addAction(tr("&Fit Page"), QKeySequence(Qt::SHIFT | Qt::Key_F4), m_canvas, &CanvasWidget::fitPage);
+
+    // Layout: pages
+    QMenu *layoutMenu = menuBar()->addMenu(tr("&Layout"));
+    layoutMenu->addAction(tr("&Insert Page"), this, &MainWindow::insertPage);
+    m_deletePageAction = layoutMenu->addAction(tr("&Delete Page"), this, &MainWindow::deletePage);
+    layoutMenu->addAction(tr("&Rename Page…"), this, &MainWindow::renamePage);
+    layoutMenu->addSeparator();
+    layoutMenu->addAction(tr("&Next Page"), QKeySequence(Qt::Key_PageDown), this,
+                          [this] { m_document->setCurrentPage(m_document->currentPageIndex() + 1); });
+    layoutMenu->addAction(tr("&Previous Page"), QKeySequence(Qt::Key_PageUp), this,
+                          [this] { m_document->setCurrentPage(m_document->currentPageIndex() - 1); });
 
     // Object
     QMenu *objectMenu = menuBar()->addMenu(tr("&Object"));
@@ -451,6 +523,48 @@ bool MainWindow::writeFile(const QString &path)
     setFilePath(path);
     statusBar()->showMessage(tr("Saved %1").arg(QFileInfo(path).fileName()), 3000);
     return true;
+}
+
+void MainWindow::syncPageTabs()
+{
+    m_updatingPageTabs = true;
+    while (m_pageTabs->count() > m_document->pageCount())
+        m_pageTabs->removeTab(m_pageTabs->count() - 1);
+    for (int i = 0; i < m_document->pageCount(); ++i) {
+        const QString name = m_document->pages()[i]->name;
+        if (i < m_pageTabs->count())
+            m_pageTabs->setTabText(i, name);
+        else
+            m_pageTabs->addTab(name);
+    }
+    m_pageTabs->setCurrentIndex(m_document->currentPageIndex());
+    if (m_deletePageAction)
+        m_deletePageAction->setEnabled(m_document->pageCount() > 1);
+    m_updatingPageTabs = false;
+}
+
+void MainWindow::insertPage()
+{
+    m_canvas->finishTextEdit();
+    m_undoStack->push(new AddPageCommand(m_document, m_document->currentPageIndex() + 1));
+}
+
+void MainWindow::deletePage()
+{
+    if (m_document->pageCount() < 2)
+        return;
+    m_canvas->finishTextEdit();
+    m_undoStack->push(new RemovePageCommand(m_document, m_document->currentPage()));
+}
+
+void MainWindow::renamePage()
+{
+    Page *page = m_document->currentPage();
+    bool ok = false;
+    const QString name =
+        QInputDialog::getText(this, tr("Rename Page"), tr("Page name:"), QLineEdit::Normal, page->name, &ok).trimmed();
+    if (ok && !name.isEmpty() && name != page->name)
+        m_undoStack->push(new RenamePageCommand(m_document, page, name));
 }
 
 void MainWindow::exportDocument()

@@ -32,7 +32,7 @@ Rough order of work. Items move as contributors pick them up.
 - [x] Groups (also imported from and saved as SVG `<g>`), ordering, alignment and distribution
 - [x] Text objects: font, size, bold, italic, alignment, multiple lines; SVG `<text>` import and export; convert to curves
 - [ ] Text: selecting part of a text, per-character formatting, text on a path, paragraph frames
-- [ ] Layers and multiple pages
+- [x] Layers (visible, locked, rename, reorder, move objects between layers) and multiple pages (tabs, Layout menu, PgUp/PgDn); Inkscape layers import; one PDF page per page
 
 ## 0.4 — No more locked files
 

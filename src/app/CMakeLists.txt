@@ -8,6 +8,8 @@ add_library(opendraw_ui STATIC
     ColorPalette.h
     ExportImageDialog.cpp
     ExportImageDialog.h
+    LayersPanel.cpp
+    LayersPanel.h
     MainWindow.cpp
     MainWindow.h
     PropertyBar.cpp

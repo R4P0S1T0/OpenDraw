@@ -29,10 +29,10 @@ inline constexpr int kMaxImageSide = 30000;
 // Pixel size the image would have; may exceed kMaxImageSide.
 QSize imageSize(const Document &document, const ImageOptions &options);
 
-// Renders to an image. Returns a null image when it would be larger than kMaxImageSide.
+// Renders the current page to an image. Returns a null image when it would be larger than kMaxImageSide.
 QImage renderImage(const Document &document, const ImageOptions &options);
 
-// Writes a one-page vector PDF with the document's page size.
+// Writes a vector PDF with one page per document page, at the document's page size.
 bool writePdf(const Document &document, const QString &path, QString *errorMessage = nullptr);
 
 } // namespace exporter

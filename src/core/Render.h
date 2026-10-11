@@ -8,10 +8,14 @@ namespace opendraw {
 
 class Document;
 class Shape;
+struct Page;
 
 namespace render {
 
 void paintShape(QPainter &painter, const Shape &shape);
+// Every visible layer of the page, bottom to top.
+void paintPage(QPainter &painter, const Page &page);
+// The current page.
 void paintDocument(QPainter &painter, const Document &document);
 
 } // namespace render

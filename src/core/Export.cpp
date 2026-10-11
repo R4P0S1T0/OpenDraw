@@ -79,7 +79,13 @@ bool writePdf(const Document &document, const QString &path, QString *errorMessa
     painter.setRenderHint(QPainter::Antialiasing);
     const double scale = writer.resolution() / kScreenDpi;
     painter.scale(scale, scale);
-    render::paintDocument(painter, document);
+    // One PDF page per document page.
+    const auto &pages = document.pages();
+    for (std::size_t i = 0; i < pages.size(); ++i) {
+        if (i > 0)
+            writer.newPage();
+        render::paintPage(painter, *pages[i]);
+    }
     return painter.end();
 }
 
