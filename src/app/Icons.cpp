@@ -435,6 +435,64 @@ void draw(QPainter &p, Icon id, const QColor &ink, const QColor &accent, const Q
         p.setPen(Qt::NoPen);
         p.drawEllipse(QPointF(16, 9), 1.8, 1.8);
         break;
+    case Icon::FillNone:
+        p.drawRect(QRectF(4, 4, 16, 16));
+        p.setPen(QPen(QColor(0xd0, 0x30, 0x30), 1.8, Qt::SolidLine, Qt::RoundCap));
+        p.drawLine(QPointF(5, 19), QPointF(19, 5));
+        break;
+    case Icon::FillUniform:
+        p.setBrush(accent);
+        p.drawRect(QRectF(4, 4, 16, 16));
+        break;
+    case Icon::FillLinear:
+    case Icon::FillRadial: {
+        QGradient *g = nullptr;
+        QLinearGradient linear(4, 0, 20, 0);
+        QRadialGradient radial(12, 12, 9);
+        g = id == Icon::FillLinear ? static_cast<QGradient *>(&linear) : static_cast<QGradient *>(&radial);
+        g->setColorAt(0, paper);
+        g->setColorAt(1, accent);
+        p.setBrush(*g);
+        p.drawRect(QRectF(4, 4, 16, 16));
+        break;
+    }
+    case Icon::Transparency:
+        // Checkerboard showing through a half-solid square.
+        p.setPen(Qt::NoPen);
+        for (int y = 0; y < 4; ++y) {
+            for (int x = 0; x < 4; ++x) {
+                p.setBrush((x + y) % 2 ? ink : paper);
+                p.drawRect(QRectF(4 + x * 4, 4 + y * 4, 4, 4));
+            }
+        }
+        p.setBrush(QColor(accent.red(), accent.green(), accent.blue(), 150));
+        p.drawRect(QRectF(4, 4, 16, 8));
+        p.setPen(line);
+        p.setBrush(Qt::NoBrush);
+        p.drawRect(QRectF(4, 4, 16, 16));
+        break;
+    case Icon::CapButt:
+    case Icon::CapRound:
+    case Icon::CapSquare: {
+        // A thick line ending at the dashed mark, with the chosen end.
+        QPen thick(accent, 8);
+        thick.setCapStyle(id == Icon::CapButt ? Qt::FlatCap : id == Icon::CapRound ? Qt::RoundCap : Qt::SquareCap);
+        p.setPen(thick);
+        p.drawLine(QPointF(2, 12), QPointF(14, 12));
+        p.setPen(QPen(ink, 1, Qt::DashLine));
+        p.drawLine(QPointF(14, 4), QPointF(14, 20));
+        break;
+    }
+    case Icon::JoinMiter:
+    case Icon::JoinRound:
+    case Icon::JoinBevel: {
+        QPen thick(accent, 6);
+        thick.setJoinStyle(id == Icon::JoinMiter ? Qt::MiterJoin : id == Icon::JoinRound ? Qt::RoundJoin : Qt::BevelJoin);
+        thick.setCapStyle(Qt::FlatCap);
+        p.setPen(thick);
+        polyline({{4, 21}, {7, 7}, {21, 7}});
+        break;
+    }
     case Icon::ScrollUp:
     case Icon::ScrollDown:
     case Icon::ScrollLeft:

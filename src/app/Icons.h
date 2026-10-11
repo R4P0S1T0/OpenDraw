@@ -17,6 +17,8 @@ enum class Icon {
     Line, Polygon, Star, Spiral, GraphPaper, Eyedropper, Grid, Guidelines, Snap, CornerRadius,
     Rotate, RotateCounterclockwise,
     Eye, EyeOff, Lock, Unlock, Layer, Page, Group, Bitmap,
+    FillNone, FillUniform, FillLinear, FillRadial, Transparency,
+    CapButt, CapRound, CapSquare, JoinMiter, JoinRound, JoinBevel,
 };
 
 QIcon icon(Icon id);

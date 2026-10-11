@@ -56,6 +56,11 @@ struct PatternFill {
     }
 };
 
+// How the ends of open outlines and dashes look (SVG stroke-linecap).
+enum class LineCap { Butt, Round, Square };
+// How outlines turn at corners (SVG stroke-linejoin).
+enum class LineJoin { Miter, Round, Bevel };
+
 struct Style {
     QColor fill = QColor(0x4a, 0x90, 0xd9);
     QColor stroke = QColor(0x1d, 0x2b, 0x3a);
@@ -63,6 +68,10 @@ struct Style {
     std::optional<Gradient> gradient; // when set, used instead of `fill`
     double opacity = 1.0;             // of the whole object, fill and outline together
     std::optional<PatternFill> pattern; // when set, used instead of `fill` and `gradient`
+    // Dash and gap lengths, alternating, in multiples of the outline width; empty = solid.
+    std::vector<double> dashes;
+    LineCap cap = LineCap::Butt;
+    LineJoin join = LineJoin::Miter;
 
     bool hasFill() const { return pattern.has_value() || gradient.has_value() || fill.alpha() > 0; }
     bool hasStroke() const { return stroke.alpha() > 0 && strokeWidth > 0.0; }

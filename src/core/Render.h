@@ -1,6 +1,7 @@
 #pragma once
 
 class QBrush;
+class QPen;
 class QPainter;
 class QRectF;
 
@@ -18,6 +19,8 @@ namespace render {
 // Solid colour, gradient, texture or no brush, as the style says. `bounds` is the bounding box
 // of the shape being filled (textures are positioned against it).
 QBrush fillBrush(const Style &style, const QRectF &bounds);
+// Outline pen: colour, width, dashes, caps and joins, or no pen.
+QPen outlinePen(const Style &style);
 
 void paintShape(QPainter &painter, const Shape &shape);
 // Every visible layer of the page, bottom to top.

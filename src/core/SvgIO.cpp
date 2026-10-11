@@ -129,8 +129,21 @@ void writeStyle(QXmlStreamWriter &w, const Style &style, const QString &gradient
     else
         writePaint(w, QStringLiteral("fill"), style.fill, style.hasFill());
     writePaint(w, QStringLiteral("stroke"), style.stroke, style.hasStroke());
-    if (style.hasStroke())
+    if (style.hasStroke()) {
         w.writeAttribute(QStringLiteral("stroke-width"), number(style.strokeWidth));
+        if (!style.dashes.empty()) {
+            QStringList lengths;
+            for (double d : style.dashes)
+                lengths << number(d * style.strokeWidth);
+            w.writeAttribute(QStringLiteral("stroke-dasharray"), lengths.join(QLatin1Char(' ')));
+        }
+        if (style.cap != LineCap::Butt)
+            w.writeAttribute(QStringLiteral("stroke-linecap"),
+                             style.cap == LineCap::Round ? QStringLiteral("round") : QStringLiteral("square"));
+        if (style.join != LineJoin::Miter)
+            w.writeAttribute(QStringLiteral("stroke-linejoin"),
+                             style.join == LineJoin::Round ? QStringLiteral("round") : QStringLiteral("bevel"));
+    }
     if (style.opacity < 1.0)
         w.writeAttribute(QStringLiteral("opacity"), number(std::clamp(style.opacity, 0.0, 1.0)));
 }
@@ -349,6 +362,7 @@ const QString kInheritedProperties[] = {
     QStringLiteral("fill-opacity"), QStringLiteral("stroke-opacity"), QStringLiteral("color"),
     QStringLiteral("font-family"), QStringLiteral("font-size"),   QStringLiteral("font-weight"),
     QStringLiteral("font-style"),  QStringLiteral("text-anchor"), QStringLiteral("xml:space"),
+    QStringLiteral("stroke-dasharray"), QStringLiteral("stroke-linecap"), QStringLiteral("stroke-linejoin"),
 };
 
 // Elements whose children are never drawn directly.
@@ -432,6 +446,22 @@ public:
         style.strokeWidth = length(QStringLiteral("stroke-width"), 1.0) * strokeScale;
         applyOpacity(style.fill, value(QStringLiteral("fill-opacity")));
         applyOpacity(style.stroke, value(QStringLiteral("stroke-opacity")));
+        // Dashes are stored relative to the outline width.
+        const QString dashText = value(QStringLiteral("stroke-dasharray")).trimmed();
+        if (!dashText.isEmpty() && dashText != u"none" && style.strokeWidth > 0.0) {
+            std::vector<double> dashes = parseNumberList(dashText);
+            const bool valid = !dashes.empty() && std::all_of(dashes.begin(), dashes.end(), [](double d) { return d >= 0; })
+                               && std::any_of(dashes.begin(), dashes.end(), [](double d) { return d > 0; });
+            if (valid) {
+                for (double &d : dashes)
+                    d = d * strokeScale / style.strokeWidth;
+                style.dashes = std::move(dashes);
+            }
+        }
+        const QString cap = value(QStringLiteral("stroke-linecap")).trimmed();
+        style.cap = cap == u"round" ? LineCap::Round : cap == u"square" ? LineCap::Square : LineCap::Butt;
+        const QString join = value(QStringLiteral("stroke-linejoin")).trimmed();
+        style.join = join == u"round" ? LineJoin::Round : join == u"bevel" ? LineJoin::Bevel : LineJoin::Miter;
         bool ok = false;
         const double opacity = own(QStringLiteral("opacity")).toDouble(&ok);
         if (ok)

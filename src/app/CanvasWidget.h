@@ -46,7 +46,13 @@ public:
     bool rotateMode() const { return m_rotateMode; }
 
     const Style &defaultStyle() const { return m_defaultStyle; }
-    void setDefaultStyle(const Style &style) { m_defaultStyle = style; }
+    void setDefaultStyle(const Style &style);
+    // The style shown for the selection (its first plain object), or the default style for
+    // new shapes when nothing is selected.
+    const Style &currentStyle() const;
+    // Changes the style of every selected object (inside groups too) as one undoable step,
+    // or the default style for new shapes when nothing is selected.
+    void restyle(const QString &text, const std::function<void(Style &)> &change);
 
     // Arrow keys move the selection by this much (document units); Shift moves ten times further.
     double nudgeDistance() const { return m_nudge; }
@@ -160,6 +166,8 @@ signals:
     void nodeSelectionChanged();
     void textEditingChanged();
     void eyedropperColorChanged(const QColor &color);
+    // The default style for new shapes changed.
+    void defaultStyleChanged();
 
 protected:
     bool event(QEvent *event) override;

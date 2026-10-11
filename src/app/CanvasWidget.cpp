@@ -107,6 +107,45 @@ void CanvasWidget::setTool(Tool tool)
     emit toolChanged(tool);
 }
 
+void CanvasWidget::setDefaultStyle(const Style &style)
+{
+    m_defaultStyle = style;
+    emit defaultStyleChanged();
+}
+
+const Style &CanvasWidget::currentStyle() const
+{
+    for (Shape *shape : m_selection) {
+        const Style *found = nullptr;
+        shape->forEachLeaf([&found](Shape &leaf) {
+            if (!found && leaf.kind() != ShapeKind::Image)
+                found = &leaf.style();
+        });
+        if (found)
+            return *found;
+    }
+    return m_defaultStyle;
+}
+
+void CanvasWidget::restyle(const QString &text, const std::function<void(Style &)> &change)
+{
+    if (m_selection.empty()) {
+        Style style = m_defaultStyle;
+        change(style);
+        setDefaultStyle(style);
+        return;
+    }
+    m_undoStack->beginMacro(text);
+    for (Shape *shape : m_selection) {
+        shape->forEachLeaf([&](Shape &leaf) {
+            Style style = leaf.style();
+            change(style);
+            m_undoStack->push(new SetStyleCommand(m_document, &leaf, style));
+        });
+    }
+    m_undoStack->endMacro();
+}
+
 void CanvasWidget::setGridSettings(const GridSettings &settings)
 {
     m_grid = settings;

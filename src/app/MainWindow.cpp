@@ -9,6 +9,7 @@
 #include "Language.h"
 #include "ObjectsPanel.h"
 #include "PageBar.h"
+#include "PropertiesPanel.h"
 #include "PropertyBar.h"
 #include "Theme.h"
 #include "Units.h"
@@ -158,12 +159,20 @@ MainWindow::MainWindow(QWidget *parent)
     updateNodeActions();
 
     // Dockers sit between the drawing and the colour palette, which hugs the window edge.
+    auto *propertiesDock = new QDockWidget(tr("Properties"), this);
+    propertiesDock->setObjectName(QStringLiteral("properties"));
+    propertiesDock->setWidget(new PropertiesPanel(m_document, m_canvas, propertiesDock));
+    addDockWidget(Qt::RightDockWidgetArea, propertiesDock);
+
     auto *layersDock = new QDockWidget(tr("Objects"), this);
     layersDock->setObjectName(QStringLiteral("objects"));
     layersDock->setWidget(new ObjectsPanel(m_document, m_undoStack, m_canvas, layersDock));
     addDockWidget(Qt::RightDockWidgetArea, layersDock);
     // Sizes only stick once the window is laid out.
-    QTimer::singleShot(0, this, [this, layersDock] { resizeDocks({layersDock}, {260}, Qt::Horizontal); });
+    QTimer::singleShot(0, this, [this, layersDock, propertiesDock] {
+        resizeDocks({layersDock}, {270}, Qt::Horizontal);
+        resizeDocks({propertiesDock, layersDock}, {330, 400}, Qt::Vertical);
+    });
 
     auto *palette = new ColorPalette(Qt::Vertical, this);
     m_paletteBar = new QToolBar(tr("Color Palette"), this);
@@ -176,6 +185,7 @@ MainWindow::MainWindow(QWidget *parent)
 
     // Window menu: dockers, toolbars and palettes can be hidden and brought back.
     QMenu *dockers = m_windowMenu->addMenu(tr("&Dockers"));
+    dockers->addAction(propertiesDock->toggleViewAction());
     dockers->addAction(layersDock->toggleViewAction());
     QMenu *toolbars = m_windowMenu->addMenu(tr("&Toolbars"));
     for (QToolBar *bar : {m_standardBar, static_cast<QToolBar *>(m_propertyBar), m_toolbox}) {
@@ -222,6 +232,7 @@ MainWindow::MainWindow(QWidget *parent)
     });
     connect(m_document, &Document::changed, this, &MainWindow::updateStyleIndicators);
     connect(m_canvas, &CanvasWidget::eyedropperColorChanged, this, &MainWindow::updateStyleIndicators);
+    connect(m_canvas, &CanvasWidget::defaultStyleChanged, this, &MainWindow::updateStyleIndicators);
     connect(&Units::instance(), &Units::unitChanged, this, &MainWindow::updateStyleIndicators);
     connect(m_undoStack, &QUndoStack::cleanChanged, this, &MainWindow::updateTitle);
     m_cutAction->setEnabled(false);
@@ -1070,16 +1081,7 @@ void MainWindow::closeEvent(QCloseEvent *event)
 // The style shown for the selection: its first plain shape (groups have no style of their own).
 const Style &MainWindow::displayedStyle() const
 {
-    for (Shape *shape : m_canvas->selection()) {
-        const Style *found = nullptr;
-        shape->forEachLeaf([&found](Shape &leaf) {
-            if (!found)
-                found = &leaf.style();
-        });
-        if (found)
-            return *found;
-    }
-    return m_canvas->defaultStyle();
+    return m_canvas->currentStyle();
 }
 
 void MainWindow::chooseFillColor()
@@ -1106,15 +1108,7 @@ void MainWindow::chooseOutlineColor()
 
 void MainWindow::restyleSelection(const QString &text, const std::function<void(Style &)> &change)
 {
-    m_undoStack->beginMacro(text);
-    for (Shape *shape : m_canvas->selection()) {
-        shape->forEachLeaf([&](Shape &leaf) {
-            Style style = leaf.style();
-            change(style);
-            m_undoStack->push(new SetStyleCommand(m_document, &leaf, style));
-        });
-    }
-    m_undoStack->endMacro();
+    m_canvas->restyle(text, change);
 }
 
 // With a selection, colours apply to every object in it (including inside groups);

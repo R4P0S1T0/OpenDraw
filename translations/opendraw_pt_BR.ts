@@ -455,6 +455,10 @@ Clique esquerdo: preenchimento · Clique direito: contorno</translation>
         <translation>Paleta de documentos: as cores usadas neste desenho</translation>
     </message>
     <message>
+        <source>Properties</source>
+        <translation>Propriedades</translation>
+    </message>
+    <message>
         <source>Objects</source>
         <translation>Objetos</translation>
     </message>
@@ -1478,6 +1482,153 @@ Clique esquerdo: preenchimento · Clique direito: contorno</translation>
     <message>
         <source>%1 of %2</source>
         <translation>%1 de %2</translation>
+    </message>
+</context>
+<context>
+    <name>opendraw::PropertiesPanel</name>
+    <message>
+        <source>Outline</source>
+        <translation>Contorno</translation>
+    </message>
+    <message>
+        <source>Fill</source>
+        <translation>Preenchimento</translation>
+    </message>
+    <message>
+        <source>Transparency</source>
+        <translation>Transparência</translation>
+    </message>
+    <message>
+        <source>No fill</source>
+        <translation>Sem preenchimento</translation>
+    </message>
+    <message>
+        <source>Uniform fill</source>
+        <translation>Preenchimento uniforme</translation>
+    </message>
+    <message>
+        <source>Linear gradient</source>
+        <translation>Degradê linear</translation>
+    </message>
+    <message>
+        <source>Radial gradient</source>
+        <translation>Degradê radial</translation>
+    </message>
+    <message>
+        <source>Fill colour</source>
+        <translation>Cor do preenchimento</translation>
+    </message>
+    <message>
+        <source>End colour of the gradient</source>
+        <translation>Cor final do degradê</translation>
+    </message>
+    <message>
+        <source>End colour:</source>
+        <translation>Cor final:</translation>
+    </message>
+    <message>
+        <source>Angle:</source>
+        <translation>Ângulo:</translation>
+    </message>
+    <message>
+        <source>Colour:</source>
+        <translation>Cor:</translation>
+    </message>
+    <message>
+        <source>Bitmap pattern (pick another fill type to replace it)</source>
+        <translation>Padrão de bitmap (escolha outro tipo de preenchimento para substituí-lo)</translation>
+    </message>
+    <message>
+        <source>Click a colour for a uniform fill</source>
+        <translation>Clique numa cor para um preenchimento uniforme</translation>
+    </message>
+    <message>
+        <source>Gradient angle</source>
+        <translation>Ângulo do degradê</translation>
+    </message>
+    <message>
+        <source>End colour</source>
+        <translation>Cor final</translation>
+    </message>
+    <message>
+        <source>Outline colour</source>
+        <translation>Cor do contorno</translation>
+    </message>
+    <message>
+        <source>No outline</source>
+        <translation>Sem contorno</translation>
+    </message>
+    <message>
+        <source>Outline width (0 = no outline)</source>
+        <translation>Largura do contorno (0 = sem contorno)</translation>
+    </message>
+    <message>
+        <source>Width:</source>
+        <translation>Largura:</translation>
+    </message>
+    <message>
+        <source>Custom</source>
+        <translation>Personalizado</translation>
+    </message>
+    <message>
+        <source>Line style</source>
+        <translation>Estilo da linha</translation>
+    </message>
+    <message>
+        <source>Style:</source>
+        <translation>Estilo:</translation>
+    </message>
+    <message>
+        <source>Flat ends</source>
+        <translation>Pontas retas</translation>
+    </message>
+    <message>
+        <source>Round ends</source>
+        <translation>Pontas arredondadas</translation>
+    </message>
+    <message>
+        <source>Square ends</source>
+        <translation>Pontas quadradas</translation>
+    </message>
+    <message>
+        <source>Ends:</source>
+        <translation>Pontas:</translation>
+    </message>
+    <message>
+        <source>Sharp corners</source>
+        <translation>Cantos vivos</translation>
+    </message>
+    <message>
+        <source>Round corners</source>
+        <translation>Cantos arredondados</translation>
+    </message>
+    <message>
+        <source>Bevelled corners</source>
+        <translation>Cantos chanfrados</translation>
+    </message>
+    <message>
+        <source>Corners:</source>
+        <translation>Cantos:</translation>
+    </message>
+    <message>
+        <source>Click a colour for the outline</source>
+        <translation>Clique numa cor para o contorno</translation>
+    </message>
+    <message>
+        <source>Outline width</source>
+        <translation>Largura do contorno</translation>
+    </message>
+    <message>
+        <source>Line ends</source>
+        <translation>Pontas da linha</translation>
+    </message>
+    <message>
+        <source>Line corners</source>
+        <translation>Cantos da linha</translation>
+    </message>
+    <message>
+        <source>0 % is solid, 100 % invisible. Applies to the whole object, fill and outline.</source>
+        <translation>0 % é sólido, 100 % invisível. Vale para o objeto inteiro, preenchimento e contorno.</translation>
     </message>
 </context>
 <context>

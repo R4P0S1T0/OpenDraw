@@ -40,6 +40,28 @@ QBrush fillBrush(const Style &style, const QRectF &bounds)
     return style.fill.alpha() > 0 ? QBrush(style.fill) : QBrush(Qt::NoBrush);
 }
 
+QPen outlinePen(const Style &style)
+{
+    if (!style.hasStroke())
+        return QPen(Qt::NoPen);
+    QPen pen(QBrush(style.stroke), style.strokeWidth);
+    static const Qt::PenCapStyle caps[] = {Qt::FlatCap, Qt::RoundCap, Qt::SquareCap};
+    static const Qt::PenJoinStyle joins[] = {Qt::MiterJoin, Qt::RoundJoin, Qt::BevelJoin};
+    pen.setCapStyle(caps[int(style.cap)]);
+    pen.setJoinStyle(joins[int(style.join)]);
+    pen.setMiterLimit(4.0); // the SVG default
+    if (!style.dashes.empty()) {
+        // Qt wants dash/gap pairs; an odd list repeats, as in SVG.
+        QList<qreal> pattern(style.dashes.begin(), style.dashes.end());
+        if (pattern.size() % 2)
+            pattern += pattern;
+        for (qreal &v : pattern)
+            v = std::max(v, 0.001);
+        pen.setDashPattern(pattern);
+    }
+    return pen;
+}
+
 void paintShape(QPainter &painter, const Shape &shape)
 {
     if (shape.kind() == ShapeKind::Group) {
@@ -66,7 +88,7 @@ void paintShape(QPainter &painter, const Shape &shape)
     const QTransform own = shape.shapeTransform();
     if (own.isIdentity()) {
         painter.setBrush(fillBrush(style, shape.bounds()));
-        painter.setPen(style.hasStroke() ? QPen(style.stroke, style.strokeWidth) : QPen(Qt::NoPen));
+        painter.setPen(outlinePen(style));
         painter.drawPath(shape.path());
     } else {
         // Rotated or skewed: the fill (gradient, texture) turns with the shape; the outline
@@ -79,7 +101,7 @@ void paintShape(QPainter &painter, const Shape &shape)
         painter.restore();
         if (style.hasStroke()) {
             painter.setBrush(Qt::NoBrush);
-            painter.setPen(QPen(style.stroke, style.strokeWidth));
+            painter.setPen(outlinePen(style));
             painter.drawPath(shape.path());
         }
     }

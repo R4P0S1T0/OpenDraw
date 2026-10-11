@@ -2,6 +2,9 @@
 #include "core/Document.h"
 #include "core/Generators.h"
 #include "core/PathOps.h"
+#include "core/Render.h"
+
+#include <QPen>
 #include "core/SvgIO.h"
 
 #include <QBuffer>
@@ -51,7 +54,48 @@ private slots:
     void rotatedShapesStayEditable();
     void rotatedTextAndSvg();
     void objectNamesAreSaved();
+    void outlineStyles();
 };
+
+// Dashes (relative to the outline width), ends and corners survive SVG, and the renderer uses them.
+void ToolTests::outlineStyles()
+{
+    Style style;
+    style.strokeWidth = 2;
+    style.dashes = {4, 2};
+    style.cap = LineCap::Round;
+    style.join = LineJoin::Bevel;
+    const QPen pen = render::outlinePen(style);
+    QCOMPARE(pen.capStyle(), Qt::RoundCap);
+    QCOMPARE(pen.joinStyle(), Qt::BevelJoin);
+    QCOMPARE(pen.dashPattern(), QList<qreal>({4, 2}));
+
+    Document doc;
+    doc.insertShape(-1, std::make_unique<Shape>(generators::line({0, 0}, {100, 0}), style));
+    const QByteArray data = writeSvg(doc);
+    QVERIFY(data.contains("stroke-dasharray=\"8 4\"")); // absolute lengths in the file
+    QVERIFY(data.contains("stroke-linecap=\"round\""));
+    QVERIFY(data.contains("stroke-linejoin=\"bevel\""));
+    auto copy = readSvg(data);
+    const Style &read = copy->shapes().front()->style();
+    QCOMPARE(read.dashes, std::vector<double>({4, 2}));
+    QCOMPARE(read.cap, LineCap::Round);
+    QCOMPARE(read.join, LineJoin::Bevel);
+
+    // From other programs: inherited from a group, odd-length patterns kept as they are.
+    auto other = readSvg(QByteArrayLiteral(
+        R"svg(<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">
+                <g stroke="black" stroke-width="3" stroke-dasharray="3,6,9" stroke-linecap="square">
+                  <line x1="0" y1="0" x2="50" y2="0"/>
+                </g>
+                <line x1="0" y1="10" x2="50" y2="10" stroke="black" stroke-dasharray="none"/>
+              </svg>)svg"));
+    const Style &dashed = other->shapes()[0]->children().front()->style();
+    QCOMPARE(dashed.dashes, std::vector<double>({1, 2, 3}));
+    QCOMPARE(dashed.cap, LineCap::Square);
+    QVERIFY(other->shapes()[1]->style().dashes.empty());
+    QCOMPARE(render::outlinePen(dashed).dashPattern().size(), 6); // repeated to an even length
+}
 
 // Names given in the Objects docker are stored as Inkscape labels.
 void ToolTests::objectNamesAreSaved()

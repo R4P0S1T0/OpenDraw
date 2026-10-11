@@ -5,6 +5,7 @@
 #include "ObjectsPanel.h"
 #include "MainWindow.h"
 #include "PageBar.h"
+#include "PropertiesPanel.h"
 #include "PropertyBar.h"
 #include "Theme.h"
 #include "Units.h"
@@ -13,7 +14,9 @@
 #include "core/Document.h"
 #include "core/Export.h"
 
+#include <QComboBox>
 #include <QDoubleSpinBox>
+#include <QSpinBox>
 #include <QMouseEvent>
 #include <QSignalSpy>
 #include <QToolBar>
@@ -120,6 +123,7 @@ private slots:
     void guidelinesFromRulersAndSnapping();
     void spaceTogglesThePickTool();
     void secondClickRotatesAndSkews();
+    void propertiesDockerAppliesStyles();
     void screenshot();
 
 private:
@@ -827,12 +831,34 @@ void CanvasTests::mainWindowWorkspace()
         canvas->rotateSelection(-20);
         canvas->setSelectedShape(rect);
         canvas->rotateSelection(25);
-        const QPointF onRect = canvas->documentToWidget(rect->path().pointAtPercent(0.1) * 0.8
-                                                        + rect->bounds().center() * 0.2);
+        // Halfway between the centre (the rotation marker) and a corner: on the rectangle,
+        // away from the guidelines.
+        const QPointF onRect = canvas->documentToWidget(rect->path().pointAtPercent(0.1) * 0.5
+                                                        + rect->bounds().center() * 0.5);
         click(canvas, onRect);
         QVERIFY(canvas->rotateMode());
         QTest::qWait(50);
         QVERIFY(window.grab().save(dir + QStringLiteral("/window-rotate.png")));
+
+        // Dashed, round-cornered outline, as set from the Properties docker.
+        canvas->setSelectedShape(text);
+        canvas->restyle(QStringLiteral("Outline"), [](Style &s) {
+            s.stroke = QColor(0xe5, 0x39, 0x35);
+            s.strokeWidth = 1.5;
+        });
+        canvas->setSelectedShape(rect);
+        canvas->restyle(QStringLiteral("Outline"), [](Style &s) {
+            s.stroke = QColor(0x0d, 0x47, 0xa1);
+            s.strokeWidth = 6;
+            s.dashes = {3, 1.5};
+            s.join = LineJoin::Round;
+            s.cap = LineCap::Round;
+        });
+        if (auto *properties = window.findChild<PropertiesPanel *>())
+            properties->showSection(PropertiesPanel::Section::Outline);
+        canvas->zoomToSelection();
+        QTest::qWait(200); // the Objects docker refreshes shortly after changes
+        QVERIFY(window.grab().save(dir + QStringLiteral("/window-properties.png")));
         theme::apply(ColorScheme::Light);
     }
 }
@@ -1044,6 +1070,69 @@ void CanvasTests::secondClickRotatesAndSkews()
     QVERIFY(std::abs(rect->rotation() - 45) < 1e-6);
     m_undo->undo();
     QVERIFY(rect->shapeTransform().isIdentity());
+}
+
+void CanvasTests::propertiesDockerAppliesStyles()
+{
+    PropertiesPanel panel(m_doc, m_canvas);
+    auto button = [&panel](const QString &tip) {
+        for (QToolButton *b : panel.findChildren<QToolButton *>()) {
+            if (b->toolTip() == tip)
+                return b;
+        }
+        return static_cast<QToolButton *>(nullptr);
+    };
+    auto spin = [&panel](const QString &suffix) {
+        for (QSpinBox *b : panel.findChildren<QSpinBox *>()) {
+            if (b->suffix() == suffix)
+                return b;
+        }
+        return static_cast<QSpinBox *>(nullptr);
+    };
+
+    Shape *rect = m_doc->insertShape(-1, std::make_unique<Shape>(ShapeKind::Rectangle, QRectF(0, 0, 100, 50)));
+    m_canvas->setSelectedShape(rect);
+    const int before = m_undo->count();
+
+    // Fill: radial gradient, then no fill.
+    button(QStringLiteral("Radial gradient"))->click();
+    QVERIFY(rect->style().gradient);
+    QCOMPARE(rect->style().gradient->type, Gradient::Type::Radial);
+    button(QStringLiteral("No fill"))->click();
+    QVERIFY(!rect->style().hasFill());
+
+    // Outline: width (in the display unit), dashes, ends and corners.
+    auto *width = panel.findChild<QDoubleSpinBox *>();
+    QVERIFY(width);
+    width->setValue(Units::instance().toDisplay(4.0));
+    QVERIFY(std::abs(rect->style().strokeWidth - 4.0) < 0.05);
+    auto *dashes = panel.findChild<QComboBox *>();
+    QVERIFY(dashes);
+    dashes->setCurrentIndex(1);
+    emit dashes->activated(1);
+    QCOMPARE(rect->style().dashes, PropertiesPanel::dashPresets()[1]);
+    button(QStringLiteral("Round ends"))->click();
+    QCOMPARE(rect->style().cap, LineCap::Round);
+    button(QStringLiteral("Round corners"))->click();
+    QCOMPARE(rect->style().join, LineJoin::Round);
+
+    // Transparency.
+    spin(QStringLiteral(" %"))->setValue(30);
+    QVERIFY(std::abs(rect->style().opacity - 0.7) < 1e-9);
+
+    // Every change is its own undoable step.
+    QCOMPARE(m_undo->count(), before + 7);
+    while (m_undo->index() > before)
+        m_undo->undo();
+    QVERIFY(!rect->style().gradient);
+    QVERIFY(rect->style().dashes.empty());
+    QCOMPARE(rect->style().opacity, 1.0);
+
+    // With nothing selected it sets the style of new shapes.
+    m_canvas->setSelection({});
+    button(QStringLiteral("Square ends"))->click();
+    QCOMPARE(m_canvas->defaultStyle().cap, LineCap::Square);
+    QCOMPARE(m_undo->index(), before); // not an undoable document change
 }
 
 // Not an assertion: saves a picture of the canvas for manual review when

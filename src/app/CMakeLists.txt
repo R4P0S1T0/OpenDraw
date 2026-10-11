@@ -22,6 +22,8 @@ add_library(opendraw_ui STATIC
     ObjectsPanel.h
     PageBar.cpp
     PageBar.h
+    PropertiesPanel.cpp
+    PropertiesPanel.h
     PropertyBar.cpp
     PropertyBar.h
     Theme.cpp
