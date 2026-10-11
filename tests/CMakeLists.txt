@@ -13,6 +13,7 @@ endfunction()
 opendraw_add_test(test_core opendraw_core)
 opendraw_add_test(test_paths opendraw_core)
 opendraw_add_test(test_text opendraw_core)
+opendraw_add_test(test_export opendraw_core)
 
 # Drives the drawing canvas with simulated mouse and keyboard input.
 opendraw_add_test(test_canvas opendraw_ui)

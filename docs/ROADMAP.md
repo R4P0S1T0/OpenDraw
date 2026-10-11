@@ -37,7 +37,8 @@ Rough order of work. Items move as contributors pick them up.
 ## 0.4 — No more locked files
 
 - [ ] CorelDRAW (`.cdr`) import through libcdr
-- [ ] PDF and PNG export
+- [x] PDF export (vector, exact page size) and PNG export (dpi, transparency, selection only)
+- [ ] PDF with selectable text, CMYK and bleed for print shops
 - [ ] "Save for older version" is never needed: document the compatibility promise and test it in CI with files from every past release
 
 ## Later

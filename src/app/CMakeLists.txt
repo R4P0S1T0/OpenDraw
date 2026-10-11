@@ -6,6 +6,8 @@ add_library(opendraw_ui STATIC
     CanvasWidget.h
     ColorPalette.cpp
     ColorPalette.h
+    ExportImageDialog.cpp
+    ExportImageDialog.h
     MainWindow.cpp
     MainWindow.h
     PropertyBar.cpp

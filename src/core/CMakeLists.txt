@@ -5,8 +5,12 @@ add_library(opendraw_core STATIC
     Commands.h
     Document.cpp
     Document.h
+    Export.cpp
+    Export.h
     PathOps.cpp
     PathOps.h
+    Render.cpp
+    Render.h
     Shape.cpp
     Shape.h
     SvgIO.cpp

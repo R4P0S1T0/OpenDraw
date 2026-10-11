@@ -2,7 +2,9 @@
 
 #include "CanvasWidget.h"
 #include "ColorPalette.h"
+#include "ExportImageDialog.h"
 #include "PropertyBar.h"
+#include "core/Export.h"
 #include "core/Commands.h"
 #include "core/Document.h"
 #include "core/SvgIO.h"
@@ -13,7 +15,9 @@
 #include <QCloseEvent>
 #include <QColorDialog>
 #include <QFileDialog>
+#include <QDir>
 #include <QDoubleSpinBox>
+#include <QSettings>
 #include <QFileInfo>
 #include <QFontComboBox>
 #include <QLabel>
@@ -203,6 +207,7 @@ void MainWindow::createActions()
     fileMenu->addAction(tr("&Open…"), QKeySequence::Open, this, &MainWindow::open);
     fileMenu->addAction(tr("&Save"), QKeySequence::Save, this, &MainWindow::save);
     fileMenu->addAction(tr("Save &As…"), QKeySequence::SaveAs, this, &MainWindow::saveAs);
+    fileMenu->addAction(tr("&Export…"), QKeySequence(Qt::CTRL | Qt::Key_E), this, &MainWindow::exportDocument);
     fileMenu->addSeparator();
     fileMenu->addAction(tr("&Quit"), QKeySequence::Quit, this, &QWidget::close);
 
@@ -446,6 +451,51 @@ bool MainWindow::writeFile(const QString &path)
     setFilePath(path);
     statusBar()->showMessage(tr("Saved %1").arg(QFileInfo(path).fileName()), 3000);
     return true;
+}
+
+void MainWindow::exportDocument()
+{
+    m_canvas->finishTextEdit();
+    const QString pdfFilter = tr("PDF document (*.pdf)");
+    const QString pngFilter = tr("PNG image (*.png)");
+
+    QSettings settings;
+    QString filter = settings.value(QStringLiteral("export/filter"), pdfFilter).toString();
+    const QString base = m_filePath.isEmpty() ? tr("Untitled") : QFileInfo(m_filePath).completeBaseName();
+    const QString dir = settings.value(QStringLiteral("export/dir"), QFileInfo(m_filePath).absolutePath()).toString();
+    const QString suggested = QDir(dir).filePath(base + (filter == pngFilter ? QStringLiteral(".png")
+                                                                               : QStringLiteral(".pdf")));
+    QString path = QFileDialog::getSaveFileName(this, tr("Export"), suggested, pdfFilter + QStringLiteral(";;") + pngFilter,
+                                                &filter);
+    if (path.isEmpty())
+        return;
+
+    const bool png = filter == pngFilter || path.endsWith(QStringLiteral(".png"), Qt::CaseInsensitive);
+    if (QFileInfo(path).suffix().isEmpty())
+        path += png ? QStringLiteral(".png") : QStringLiteral(".pdf");
+    settings.setValue(QStringLiteral("export/filter"), png ? pngFilter : pdfFilter);
+    settings.setValue(QStringLiteral("export/dir"), QFileInfo(path).absolutePath());
+
+    bool ok = false;
+    QString error;
+    if (png) {
+        std::vector<const Shape *> selection(m_canvas->selection().begin(), m_canvas->selection().end());
+        ExportImageDialog dialog(*m_document, std::move(selection), this);
+        if (dialog.exec() != QDialog::Accepted)
+            return;
+        const QImage image = exporter::renderImage(*m_document, dialog.options());
+        ok = !image.isNull() && image.save(path, "PNG");
+        if (!ok)
+            error = image.isNull() ? tr("The image is too large or there is not enough memory.")
+                                   : tr("The file could not be written.");
+    } else {
+        ok = exporter::writePdf(*m_document, path, &error);
+    }
+
+    if (ok)
+        statusBar()->showMessage(tr("Exported %1").arg(QFileInfo(path).fileName()), 4000);
+    else
+        QMessageBox::warning(this, tr("Export"), tr("Could not export %1:\n%2").arg(path, error));
 }
 
 bool MainWindow::maybeSave()

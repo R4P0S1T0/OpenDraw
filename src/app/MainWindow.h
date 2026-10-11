@@ -36,6 +36,7 @@ private slots:
     void open();
     bool save();
     bool saveAs();
+    void exportDocument();
     void chooseFillColor();
     void chooseOutlineColor();
     void applyFill(const QColor &color);

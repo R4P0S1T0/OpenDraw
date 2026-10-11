@@ -12,7 +12,7 @@
 
 OpenDraw is a free, open-source, cross-platform vector graphics editor for Linux and Windows. It aims to offer professional tools for illustration and graphic design, with a workflow that feels familiar to people coming from other desktop vector editors, and without the lock-in that comes with closed file formats.
 
-> **Status: early development (0.3).** You can draw rectangles, ellipses, Bézier and freehand curves, edit curve nodes, write text, select several objects, group, order, align and distribute them, recolour them, undo and redo, and open SVG files from other programs. Layers, multiple pages and PDF/PNG export are still missing, so it is not ready for real work yet.
+> **Status: early development (0.3).** You can draw rectangles, ellipses, Bézier and freehand curves, edit curve nodes, write text, select several objects, group, order, align and distribute them, recolour them, undo and redo, open SVG files from other programs, and export PDF and PNG. Layers, multiple pages, gradients and CorelDRAW import are still missing.
 
 ## Goals
 
@@ -53,6 +53,7 @@ See [docs/ROADMAP.md](docs/ROADMAP.md) for what is planned next.
 | Pan | Middle mouse button, or hold `Space` and drag |
 | Delete | `Delete` |
 | Undo / redo | `Ctrl` `Z` / `Ctrl` `Y` |
+| Export | `Ctrl` `E`: PDF (vector, exact page size) or PNG (choose the dpi, transparent background, or only the selected objects) |
 
 ## Building
 

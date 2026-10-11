@@ -3,6 +3,7 @@
 #include "core/Commands.h"
 #include "core/Document.h"
 #include "core/PathOps.h"
+#include "core/Render.h"
 #include "core/TextLayout.h"
 
 #include <QKeyEvent>
@@ -780,15 +781,7 @@ void CanvasWidget::setHoverCursor(const QPointF &widgetPosition)
 
 void CanvasWidget::paintShape(QPainter &painter, const Shape &shape)
 {
-    if (shape.kind() == ShapeKind::Group) {
-        for (const auto &child : shape.children())
-            paintShape(painter, *child);
-        return;
-    }
-    const Style &style = shape.style();
-    painter.setBrush(style.hasFill() ? QBrush(style.fill) : QBrush(Qt::NoBrush));
-    painter.setPen(style.hasStroke() ? QPen(style.stroke, style.strokeWidth) : QPen(Qt::NoPen));
-    painter.drawPath(shape.path());
+    render::paintShape(painter, shape);
 }
 
 void CanvasWidget::paintEvent(QPaintEvent *)

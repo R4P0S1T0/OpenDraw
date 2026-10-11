@@ -1,5 +1,6 @@
 #include "CanvasWidget.h"
 #include "core/Document.h"
+#include "core/Export.h"
 
 #include <QMouseEvent>
 #include <QUndoStack>
@@ -497,6 +498,13 @@ void CanvasTests::screenshot()
     QTest::keyClick(m_canvas, Qt::Key_Return);
     QTest::keyClicks(m_canvas, QStringLiteral("text tool"));
     QVERIFY(m_canvas->grab().save(dir + QStringLiteral("/canvas-text.png")));
+
+    // The same drawing exported, to compare with what the canvas shows.
+    m_canvas->finishTextEdit();
+    exporter::ImageOptions options;
+    options.dpi = 72;
+    QVERIFY(exporter::renderImage(*m_doc, options).save(dir + QStringLiteral("/export.png")));
+    QVERIFY(exporter::writePdf(*m_doc, dir + QStringLiteral("/export.pdf")));
 }
 
 QTEST_MAIN(CanvasTests)
