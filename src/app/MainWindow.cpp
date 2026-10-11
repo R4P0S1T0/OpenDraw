@@ -7,6 +7,7 @@
 #include "LayersPanel.h"
 #include "core/Render.h"
 #include "PropertyBar.h"
+#include "core/CdrImport.h"
 #include "core/Export.h"
 #include "core/Commands.h"
 #include "core/Document.h"
@@ -145,6 +146,8 @@ QString describeColor(const QColor &color)
 
 QString describeFill(const Style &style)
 {
+    if (style.pattern)
+        return QCoreApplication::translate("MainWindow", "bitmap pattern");
     if (style.gradient) {
         return style.gradient->type == Gradient::Type::Radial
                    ? QCoreApplication::translate("MainWindow", "radial gradient")
@@ -153,17 +156,17 @@ QString describeFill(const Style &style)
     return describeColor(style.fill);
 }
 
-// Fill swatch that also shows gradients.
+// Fill swatch that also shows gradients and patterns.
 QIcon fillSwatchIcon(const Style &style)
 {
-    if (!style.gradient)
+    if (!style.gradient && !style.pattern)
         return swatchIcon(style.fill, false);
     QPixmap pixmap(32, 32);
     pixmap.fill(Qt::transparent);
     QPainter p(&pixmap);
     p.setRenderHint(QPainter::Antialiasing);
     p.setPen(QPen(QColor(0, 0, 0, 120), 1));
-    p.setBrush(render::fillBrush(style));
+    p.setBrush(render::fillBrush(style, QRectF(5.5, 5.5, 21, 21)));
     p.drawRoundedRect(QRectF(5.5, 5.5, 21, 21), 3, 3);
     return QIcon(pixmap);
 }
@@ -480,7 +483,12 @@ void MainWindow::open()
 {
     if (!maybeSave())
         return;
-    const QString path = QFileDialog::getOpenFileName(this, tr("Open"), QString(), kSvgFilter);
+    QStringList filters{kSvgFilter};
+    if (cdr::isAvailable()) {
+        filters.prepend(tr("All supported files (*.svg *.cdr *.cdt)"));
+        filters << tr("CorelDRAW (*.cdr *.cdt)");
+    }
+    const QString path = QFileDialog::getOpenFileName(this, tr("Open"), QString(), filters.join(QStringLiteral(";;")));
     if (!path.isEmpty())
         openFile(path);
 }
@@ -492,14 +500,19 @@ bool MainWindow::openFile(const QString &path)
         QMessageBox::warning(this, tr("Open"), tr("Could not open %1:\n%2").arg(path, file.errorString()));
         return false;
     }
+    const QString suffix = QFileInfo(path).suffix().toLower();
+    const bool corel = suffix == u"cdr" || suffix == u"cdt";
     QString error;
     svg::ReadReport report;
-    if (!svg::read(&file, *m_document, &error, &report)) {
+    const bool ok = corel ? cdr::read(file.readAll(), *m_document, &error, &report)
+                          : svg::read(&file, *m_document, &error, &report);
+    if (!ok) {
         QMessageBox::warning(this, tr("Open"), tr("Could not read %1:\n%2").arg(path, error));
         return false;
     }
     m_undoStack->clear();
-    setFilePath(path);
+    // An imported file is not overwritten: Save asks where to put the SVG.
+    setFilePath(corel ? QString() : path, path);
     m_canvas->fitPage();
 
     // Never refuse a file: open what we understand and say what was left out.
@@ -516,7 +529,8 @@ bool MainWindow::openFile(const QString &path)
             details << tr("%n item(s) this version does not support yet were left out or simplified: %1.",
                           nullptr, report.skippedCount())
                            .arg(kinds.join(QStringLiteral(", ")));
-            details << tr("Saving over the original file would lose them. Use Save As to keep both.");
+            if (!corel)
+                details << tr("Saving over the original file would lose them. Use Save As to keep both.");
         }
         QMessageBox::information(this, tr("Opened with limitations"), details.join(QStringLiteral("\n\n")));
     }
@@ -530,9 +544,13 @@ bool MainWindow::save()
 
 bool MainWindow::saveAs()
 {
-    QString path = QFileDialog::getSaveFileName(this, tr("Save As"),
-                                                m_filePath.isEmpty() ? tr("Untitled.svg") : m_filePath,
-                                                kSvgFilter);
+    QString suggested = m_filePath;
+    if (suggested.isEmpty()) {
+        const QFileInfo source(m_sourcePath);
+        suggested = m_sourcePath.isEmpty() ? tr("Untitled.svg")
+                                           : source.dir().filePath(source.completeBaseName() + QStringLiteral(".svg"));
+    }
+    QString path = QFileDialog::getSaveFileName(this, tr("Save As"), suggested, kSvgFilter);
     if (path.isEmpty())
         return false;
     if (QFileInfo(path).suffix().isEmpty())
@@ -603,8 +621,8 @@ void MainWindow::exportDocument()
 
     QSettings settings;
     QString filter = settings.value(QStringLiteral("export/filter"), pdfFilter).toString();
-    const QString base = m_filePath.isEmpty() ? tr("Untitled") : QFileInfo(m_filePath).completeBaseName();
-    const QString dir = settings.value(QStringLiteral("export/dir"), QFileInfo(m_filePath).absolutePath()).toString();
+    const QString base = m_sourcePath.isEmpty() ? tr("Untitled") : QFileInfo(m_sourcePath).completeBaseName();
+    const QString dir = settings.value(QStringLiteral("export/dir"), QFileInfo(m_sourcePath).absolutePath()).toString();
     const QString suggested = QDir(dir).filePath(base + (filter == pngFilter ? QStringLiteral(".png")
                                                                                : QStringLiteral(".pdf")));
     QString path = QFileDialog::getSaveFileName(this, tr("Export"), suggested, pdfFilter + QStringLiteral(";;") + pngFilter,
@@ -717,12 +735,14 @@ void MainWindow::applyFill(const QColor &color)
     if (!m_canvas->selection().empty()) {
         restyleSelection(tr("Fill"), [&color](Style &style) {
             style.fill = color;
-            style.gradient.reset(); // a palette colour replaces a gradient
+            style.gradient.reset(); // a palette colour replaces a gradient or pattern
+            style.pattern.reset();
         });
     } else {
         Style defaults = m_canvas->defaultStyle();
         defaults.fill = color;
         defaults.gradient.reset();
+        defaults.pattern.reset();
         m_canvas->setDefaultStyle(defaults);
         statusBar()->showMessage(tr("Default fill for new shapes: %1").arg(describeColor(color)), 3000);
     }
@@ -888,6 +908,9 @@ void MainWindow::updateStyleIndicators()
             prefix = tr("Text, %1 %2 pt").arg(f.family).arg(f.size * 72.0 / 96.0, 0, 'f', 1);
             break;
         }
+        case ShapeKind::Image:
+            prefix = tr("Bitmap, %1 × %2 pixels").arg(selected->image().width()).arg(selected->image().height());
+            break;
         }
     }
     QString text = tr("%1 — Fill: %2   Outline: %3").arg(prefix, describeFill(style), outline);
@@ -907,15 +930,16 @@ void MainWindow::about()
                            .arg(QApplication::applicationVersion()));
 }
 
-void MainWindow::setFilePath(const QString &path)
+void MainWindow::setFilePath(const QString &path, const QString &sourcePath)
 {
     m_filePath = path;
+    m_sourcePath = sourcePath;
     updateTitle();
 }
 
 void MainWindow::updateTitle()
 {
-    const QString name = m_filePath.isEmpty() ? tr("Untitled") : QFileInfo(m_filePath).fileName();
+    const QString name = m_sourcePath.isEmpty() ? tr("Untitled") : QFileInfo(m_sourcePath).fileName();
     setWindowTitle(QStringLiteral("%1[*] — OpenDraw").arg(name));
     setWindowModified(!m_undoStack->isClean());
 }

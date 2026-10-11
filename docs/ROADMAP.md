@@ -36,7 +36,9 @@ Rough order of work. Items move as contributors pick them up.
 
 ## 0.4 — No more locked files
 
-- [ ] CorelDRAW (`.cdr`) import through libcdr
+- [x] CorelDRAW (`.cdr`, `.cdt`) import through libcdr: all pages, curves, groups, colours, gradients, bitmaps and texture fills, text (checked against the 134 sample files shipped with CorelDRAW 2026; none fails)
+- [ ] CorelDRAW import gaps, mostly in libcdr itself: PowerClip clipping, transparency effects, lenses, paragraph text frames
+- [x] Bitmaps (SVG `<image>` with embedded data) and bitmap pattern fills
 - [x] PDF export (vector, exact page size) and PNG export (dpi, transparency, selection only)
 - [ ] PDF with selectable text, CMYK and bleed for print shops
 - [ ] "Save for older version" is never needed: document the compatibility promise and test it in CI with files from every past release
@@ -44,7 +46,7 @@ Rough order of work. Items move as contributors pick them up.
 ## Later
 
 - [x] Linear and radial gradients, object opacity (SVG import/export, including Inkscape-style `xlink:href` gradients)
-- Interactive gradient handles on the canvas, editing more than two colours, patterns
+- Interactive gradient handles on the canvas, editing more than two colours, creating pattern fills, importing bitmaps from files
 - Effects (shadow, blend, contour)
 - Colour management (CMYK, ICC profiles)
 - Plugin / scripting API

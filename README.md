@@ -12,13 +12,13 @@
 
 OpenDraw is a free, open-source, cross-platform vector graphics editor for Linux and Windows. It aims to offer professional tools for illustration and graphic design, with a workflow that feels familiar to people coming from other desktop vector editors, and without the lock-in that comes with closed file formats.
 
-> **Status: early development (0.3).** You can draw rectangles, ellipses, Bézier and freehand curves, edit curve nodes, write text, select several objects, group, order, align and distribute them, recolour them, undo and redo, organise work in layers and multiple pages, open SVG files from other programs (Inkscape layers included), fill with gradients and set transparency, and export PDF and PNG. CorelDRAW import is the next big piece.
+> **Status: early development (0.3).** You can draw rectangles, ellipses, Bézier and freehand curves, edit curve nodes, write text, select several objects, group, order, align and distribute them, recolour them, undo and redo, organise work in layers and multiple pages, open SVG files from other programs (Inkscape layers included), fill with gradients and set transparency, open CorelDRAW (`.cdr`) files, and export PDF and PNG.
 
 ## Goals
 
 - **Works with files from other programs.** SVG import understands paths, transforms, groups and inherited styles, so drawings exported from other editors open as editable objects.
 - **Files you can always open.** Drawings are stored in open formats (SVG today). Every file records its format version, and an older OpenDraw never refuses a newer file: it opens everything it understands and tells you exactly what it had to leave out.
-- **Import from proprietary formats.** Planned: CorelDRAW (`.cdr`) import through [libcdr](https://wiki.documentfoundation.org/DLP/Libraries/libcdr), so existing work is not trapped.
+- **Import from proprietary formats.** CorelDRAW (`.cdr`, `.cdt`) files open through [libcdr](https://wiki.documentfoundation.org/DLP/Libraries/libcdr), so existing work is not trapped: every page, with curves, groups, colours, gradients, bitmaps, texture fills and text, as editable objects. The original is never overwritten; *Save* asks for a new `.svg` file. Not imported yet (limits of libcdr): PowerClip clipping, transparency effects other than uniform opacity, lenses and paragraph text wrapping.
 - **A familiar workflow.** Toolbox, property bar, colour palette and keyboard shortcuts that experienced designers already know.
 - **Same app on Linux and Windows**, built with C++20 and Qt 6.
 
@@ -55,17 +55,18 @@ See [docs/ROADMAP.md](docs/ROADMAP.md) for what is planned next.
 | Delete | `Delete` |
 | Layers | Layers panel on the right: checkbox shows/hides, Locked column locks, double-click renames, the bold layer receives new objects. `+` / `−` / `↑` / `↓` add, delete and reorder; *Move here* moves the selection to the highlighted layer |
 | Pages | Tabs under the drawing; `+` inserts a page, right-click or double-click a tab to rename or delete. `PgUp` / `PgDn` switch pages (Layout menu) |
+| Open CorelDRAW files | `Ctrl` `O` and pick a `.cdr` file, or pass it on the command line. A report lists anything that could not be imported |
 | Undo / redo | `Ctrl` `Z` / `Ctrl` `Y` |
 | Export | `Ctrl` `E`: PDF (vector, exact page size, one PDF page per page) or PNG of the current page (choose the dpi, transparent background, or only the selected objects) |
 
 ## Building
 
-Requirements: a C++20 compiler, CMake 3.21+, Ninja (optional) and Qt 6.4+ (Core, Gui, Widgets; Test for the tests).
+Requirements: a C++20 compiler, CMake 3.21+, Ninja (optional) and Qt 6.4+ (Core, Gui, Widgets; Test for the tests). Optional: libcdr 0.1 and librevenge 0.0, found with pkg-config, for CorelDRAW import (without them OpenDraw builds and runs, but cannot open `.cdr` files; `-DOPENDRAW_REQUIRE_LIBCDR=ON` makes their absence an error).
 
 ### Linux (Debian / Ubuntu)
 
 ```sh
-sudo apt install build-essential cmake ninja-build qt6-base-dev libgl-dev
+sudo apt install build-essential cmake ninja-build pkg-config qt6-base-dev libgl-dev libcdr-dev librevenge-dev
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ctest --test-dir build
@@ -77,7 +78,7 @@ ctest --test-dir build
 Install [MSYS2](https://www.msys2.org/), open the **UCRT64** shell and run:
 
 ```sh
-pacman -S --needed mingw-w64-ucrt-x86_64-{gcc,cmake,ninja,qt6-base}
+pacman -S --needed mingw-w64-ucrt-x86_64-{gcc,cmake,ninja,pkgconf,qt6-base,libcdr,librevenge}
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ctest --test-dir build
@@ -89,7 +90,7 @@ Visual Studio with the official Qt installer also works: open the folder in Visu
 ## Project layout
 
 ```
-src/core          document model, shapes, undo commands, SVG reading and writing (no GUI code)
+src/core          document model, shapes, undo commands, SVG reading and writing, CorelDRAW import (no GUI code)
 src/app           the Qt Widgets application: main window and drawing canvas
 tests             unit tests for src/core and UI tests that drive the canvas with simulated input
 assets/branding   OpenDraw logo and application icons
@@ -104,3 +105,5 @@ Contributions are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) first,
 ## Licence
 
 OpenDraw is licensed under the [GNU General Public License v3.0 or later](LICENSE).
+
+Packaged builds also include Qt (LGPL-3.0) and, for CorelDRAW import, libcdr and librevenge (MPL-2.0 / LGPL-2.1+) with their dependencies. CorelDRAW is a trademark of its owner; OpenDraw is not affiliated with it.

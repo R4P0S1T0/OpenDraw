@@ -77,6 +77,16 @@ Shape::Shape(TextData text, const QPointF &origin, const Style &style)
 {
 }
 
+Shape::Shape(QImage image, const QTransform &placement)
+    : m_id(nextShapeId++)
+    , m_kind(ShapeKind::Image)
+    , m_image(std::move(image))
+    , m_imagePlacement(placement)
+{
+    m_style.fill = Qt::transparent;
+    m_style.stroke = Qt::transparent;
+}
+
 Shape::~Shape() = default;
 
 QRectF Shape::bounds() const
@@ -95,6 +105,8 @@ QRectF Shape::bounds() const
     }
     case ShapeKind::Text:
         return textlayout::layout(m_text, m_textOrigin).bounds;
+    case ShapeKind::Image:
+        return m_imagePlacement.mapRect(QRectF(0, 0, 1, 1));
     }
     return {};
 }
@@ -102,7 +114,7 @@ QRectF Shape::bounds() const
 void Shape::setBounds(const QRectF &bounds)
 {
     const QRectF target = bounds.normalized();
-    if (m_kind == ShapeKind::Rectangle || m_kind == ShapeKind::Ellipse) {
+    if ((m_kind == ShapeKind::Rectangle || m_kind == ShapeKind::Ellipse) && !m_style.pattern) {
         m_bounds = target;
         return;
     }
@@ -124,7 +136,19 @@ void Shape::moveBy(const QPointF &delta)
 
 void Shape::transform(const QTransform &t)
 {
+    // A texture fill scales along with the shape it fills.
+    if (m_style.pattern) {
+        const double sx = std::hypot(t.m11(), t.m12());
+        const double sy = std::hypot(t.m21(), t.m22());
+        m_style.pattern->tileSize = QSizeF(m_style.pattern->tileSize.width() * sx,
+                                           m_style.pattern->tileSize.height() * sy);
+        m_style.pattern->origin = QPointF(m_style.pattern->origin.x() * sx, m_style.pattern->origin.y() * sy);
+    }
+
     switch (m_kind) {
+    case ShapeKind::Image:
+        m_imagePlacement = m_imagePlacement * t;
+        break;
     case ShapeKind::Rectangle:
     case ShapeKind::Ellipse:
         m_bounds = t.mapRect(m_bounds);
@@ -167,6 +191,12 @@ QPainterPath Shape::path() const
     case ShapeKind::Text:
         path = textlayout::outline(m_text, m_textOrigin);
         break;
+    case ShapeKind::Image: {
+        QPainterPath square;
+        square.addRect(0, 0, 1, 1);
+        path = m_imagePlacement.map(square);
+        break;
+    }
     }
     return path;
 }
@@ -179,6 +209,8 @@ bool Shape::contains(const QPointF &point, double tolerance) const
     }
     if (m_kind == ShapeKind::Text) // letters are thin: the whole text box is clickable
         return bounds().adjusted(-tolerance, -tolerance, tolerance, tolerance).contains(point);
+    if (m_kind == ShapeKind::Image)
+        return path().contains(point);
 
     const QPainterPath outline = path();
     if (m_style.hasFill() && outline.contains(point))

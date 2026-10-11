@@ -60,13 +60,17 @@ private:
     void restyleSelection(const QString &text, const std::function<void(Style &)> &change);
     bool maybeSave();
     bool writeFile(const QString &path);
-    void setFilePath(const QString &path);
+    // `sourcePath` is the file the document came from; Save writes to `path` (empty after an
+    // import, so a CorelDRAW file is never overwritten with SVG).
+    void setFilePath(const QString &path, const QString &sourcePath);
+    void setFilePath(const QString &path) { setFilePath(path, path); }
 
     Document *m_document;
     QUndoStack *m_undoStack;
     CanvasWidget *m_canvas;
     PropertyBar *m_propertyBar = nullptr;
     QString m_filePath;
+    QString m_sourcePath;
 
     QAction *m_fillAction = nullptr;
     QAction *m_outlineAction = nullptr;

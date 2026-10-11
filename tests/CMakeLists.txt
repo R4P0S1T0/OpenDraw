@@ -16,6 +16,8 @@ opendraw_add_test(test_text opendraw_core)
 opendraw_add_test(test_export opendraw_core)
 opendraw_add_test(test_layers opendraw_core)
 opendraw_add_test(test_gradients opendraw_core)
+opendraw_add_test(test_bitmaps opendraw_core)
+opendraw_add_test(test_cdr opendraw_core)
 
 # Drives the drawing canvas with simulated mouse and keyboard input.
 opendraw_add_test(test_canvas opendraw_ui)

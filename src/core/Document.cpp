@@ -129,6 +129,19 @@ void Document::setPages(std::vector<std::unique_ptr<Page>> pages)
     emit changed();
 }
 
+std::vector<std::unique_ptr<Page>> Document::releasePages()
+{
+    std::vector<std::unique_ptr<Page>> released;
+    released.push_back(makePage(tr("Page 1")));
+    released.swap(m_pages);
+    m_currentPage = 0;
+    emit cleared();
+    emit currentPageChanged();
+    emit structureChanged();
+    emit changed();
+    return released;
+}
+
 QString Document::newPageName() const
 {
     for (int n = pageCount() + 1;; ++n) {

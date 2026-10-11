@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QColor>
+#include <QImage>
 #include <QPainterPath>
 #include <QPointF>
 #include <QRectF>
@@ -41,14 +42,28 @@ struct Gradient {
     bool operator==(const Gradient &) const = default;
 };
 
+// A bitmap repeated across the shape (bitmap or texture fill). `origin` is where a tile
+// starts, relative to the top-left of the shape's bounding box, so the texture moves with it.
+struct PatternFill {
+    QImage image;
+    QSizeF tileSize; // document units
+    QPointF origin;
+
+    bool operator==(const PatternFill &other) const
+    {
+        return image == other.image && tileSize == other.tileSize && origin == other.origin;
+    }
+};
+
 struct Style {
     QColor fill = QColor(0x4a, 0x90, 0xd9);
     QColor stroke = QColor(0x1d, 0x2b, 0x3a);
     double strokeWidth = 1.0;
     std::optional<Gradient> gradient; // when set, used instead of `fill`
     double opacity = 1.0;             // of the whole object, fill and outline together
+    std::optional<PatternFill> pattern; // when set, used instead of `fill` and `gradient`
 
-    bool hasFill() const { return gradient.has_value() || fill.alpha() > 0; }
+    bool hasFill() const { return pattern.has_value() || gradient.has_value() || fill.alpha() > 0; }
     bool hasStroke() const { return stroke.alpha() > 0 && strokeWidth > 0.0; }
 };
 
@@ -104,7 +119,7 @@ struct TextData {
     bool operator==(const TextData &) const = default;
 };
 
-enum class ShapeKind { Rectangle, Ellipse, Path, Group, Text };
+enum class ShapeKind { Rectangle, Ellipse, Path, Group, Text, Image };
 
 // A drawable object. Geometry is stored in document units (SVG user units, 96 per inch).
 class Shape {
@@ -118,6 +133,9 @@ public:
     // Text whose first line sits on a baseline through `origin`; `origin.x` is the left edge,
     // centre or right edge depending on the alignment.
     Shape(TextData text, const QPointF &origin, const Style &style);
+    // Bitmap. `placement` maps the unit square (0,0)-(1,1) onto the page, so it can hold
+    // position, size, rotation and skew.
+    Shape(QImage image, const QTransform &placement);
 
     Shape(const Shape &) = delete;
     Shape &operator=(const Shape &) = delete;
@@ -145,6 +163,10 @@ public:
     const TextData &textData() const { return m_text; }
     void setTextData(TextData text) { m_text = std::move(text); }
     QPointF textOrigin() const { return m_textOrigin; }
+
+    // Only meaningful for ShapeKind::Image.
+    const QImage &image() const { return m_image; }
+    QTransform imagePlacement() const { return m_imagePlacement; }
 
     // Only meaningful for ShapeKind::Group.
     const std::vector<std::unique_ptr<Shape>> &children() const { return m_children; }
@@ -177,6 +199,8 @@ private:
     std::vector<std::unique_ptr<Shape>> m_children; // groups
     TextData m_text;                                // text
     QPointF m_textOrigin;                           // text
+    QImage m_image;                                 // image
+    QTransform m_imagePlacement;                    // image
     Style m_style;
 };
 

@@ -9,8 +9,17 @@
 
 namespace opendraw::render {
 
-QBrush fillBrush(const Style &style)
+QBrush fillBrush(const Style &style, const QRectF &bounds)
 {
+    if (style.pattern && !style.pattern->image.isNull()) {
+        const PatternFill &p = *style.pattern;
+        QBrush brush(p.image);
+        QTransform t;
+        t.translate(bounds.left() + p.origin.x(), bounds.top() + p.origin.y());
+        t.scale(p.tileSize.width() / p.image.width(), p.tileSize.height() / p.image.height());
+        brush.setTransform(t);
+        return brush;
+    }
     if (style.gradient) {
         const Gradient &g = *style.gradient;
         // Object-bounding mode: 0..1 spans the bounding box of the path being drawn.
@@ -41,7 +50,20 @@ void paintShape(QPainter &painter, const Shape &shape)
     const Style &style = shape.style();
     painter.save();
     painter.setOpacity(painter.opacity() * std::clamp(style.opacity, 0.0, 1.0));
-    painter.setBrush(fillBrush(style));
+    if (shape.kind() == ShapeKind::Image) {
+        const QImage &image = shape.image();
+        if (!image.isNull()) {
+            // The placement maps the unit square to the page; the image is drawn in it.
+            painter.setRenderHint(QPainter::SmoothPixmapTransform);
+            painter.setTransform(QTransform::fromScale(1.0 / image.width(), 1.0 / image.height())
+                                     * shape.imagePlacement(),
+                                 true);
+            painter.drawImage(0, 0, image);
+        }
+        painter.restore();
+        return;
+    }
+    painter.setBrush(fillBrush(style, shape.bounds()));
     painter.setPen(style.hasStroke() ? QPen(style.stroke, style.strokeWidth) : QPen(Qt::NoPen));
     painter.drawPath(shape.path());
     painter.restore();

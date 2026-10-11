@@ -230,7 +230,7 @@ void CoreTests::opensNewerFormatAndReportsSkipped()
     QCOMPARE(doc.pageSize(), QSizeF(200, 100));
     QCOMPARE(report.formatVersion, 99);
     QVERIFY(report.isNewerFormat());
-    QCOMPARE(report.skippedElements.value(QStringLiteral("<image>")), 2);
+    QCOMPARE(report.skippedElements.value(QStringLiteral("<image> linked to a separate file")), 2);
     QCOMPARE(report.skippedCount(), 2);
 }
 

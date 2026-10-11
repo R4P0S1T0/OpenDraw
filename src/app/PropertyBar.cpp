@@ -101,7 +101,7 @@ void PropertyBar::refresh()
     if (!enabled)
         return;
     // A group has no outline of its own; colours and widths are set on its members.
-    m_outline->setEnabled(m_shape->kind() != ShapeKind::Group);
+    m_outline->setEnabled(m_shape->kind() != ShapeKind::Group && m_shape->kind() != ShapeKind::Image);
 
     // For a group, the opacity shown is that of its first member.
     double opacity = 1.0;

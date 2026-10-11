@@ -3,6 +3,7 @@
 #include "core/Document.h"
 #include "core/PathOps.h"
 
+#include <QBuffer>
 #include <QCoreApplication>
 #include <QHash>
 #include <QRegularExpression>
@@ -71,6 +72,52 @@ void writeGradient(QXmlStreamWriter &w, const Gradient &g, const QString &id)
     w.writeEndElement();
 }
 
+QString pngDataUri(const QImage &image)
+{
+    QByteArray png;
+    QBuffer buffer(&png);
+    buffer.open(QIODevice::WriteOnly);
+    image.save(&buffer, "PNG");
+    return QStringLiteral("data:image/png;base64,") + QString::fromLatin1(png.toBase64());
+}
+
+QString matrix(const QTransform &t)
+{
+    return QStringLiteral("matrix(%1 %2 %3 %4 %5 %6)")
+        .arg(number(t.m11()), number(t.m12()), number(t.m21()), number(t.m22()), number(t.dx()), number(t.dy()));
+}
+
+const QString kXlinkNamespace = QStringLiteral("http://www.w3.org/1999/xlink");
+
+// An <image> filling the unit square, placed by a matrix (no aspect-ratio fitting).
+void writeImageElement(QXmlStreamWriter &w, const QImage &image, const QRectF &rect, const QTransform &placement)
+{
+    w.writeStartElement(QStringLiteral("image"));
+    w.writeAttribute(QStringLiteral("x"), number(rect.x()));
+    w.writeAttribute(QStringLiteral("y"), number(rect.y()));
+    w.writeAttribute(QStringLiteral("width"), number(rect.width()));
+    w.writeAttribute(QStringLiteral("height"), number(rect.height()));
+    w.writeAttribute(QStringLiteral("preserveAspectRatio"), QStringLiteral("none"));
+    if (!placement.isIdentity())
+        w.writeAttribute(QStringLiteral("transform"), matrix(placement));
+    w.writeAttribute(kXlinkNamespace, QStringLiteral("href"), pngDataUri(image));
+    w.writeEndElement();
+}
+
+void writePattern(QXmlStreamWriter &w, const PatternFill &pattern, const QRectF &bounds, const QString &id)
+{
+    const QPointF topLeft = bounds.topLeft() + pattern.origin;
+    w.writeStartElement(QStringLiteral("pattern"));
+    w.writeAttribute(QStringLiteral("id"), id);
+    w.writeAttribute(QStringLiteral("patternUnits"), QStringLiteral("userSpaceOnUse"));
+    w.writeAttribute(QStringLiteral("x"), number(topLeft.x()));
+    w.writeAttribute(QStringLiteral("y"), number(topLeft.y()));
+    w.writeAttribute(QStringLiteral("width"), number(pattern.tileSize.width()));
+    w.writeAttribute(QStringLiteral("height"), number(pattern.tileSize.height()));
+    writeImageElement(w, pattern.image, QRectF(QPointF(0, 0), pattern.tileSize), QTransform());
+    w.writeEndElement();
+}
+
 void writeStyle(QXmlStreamWriter &w, const Style &style, const QString &gradientId)
 {
     if (!gradientId.isEmpty())
@@ -88,12 +135,20 @@ void writeShape(QXmlStreamWriter &w, const Shape &shape, int &gradientCount)
 {
     // A gradient is written right before the element that uses it.
     QString gradientId;
-    if (shape.kind() != ShapeKind::Group && shape.style().gradient) {
-        gradientId = QStringLiteral("gradient%1").arg(++gradientCount);
-        writeGradient(w, *shape.style().gradient, gradientId);
+    if (shape.kind() != ShapeKind::Group && shape.kind() != ShapeKind::Image) {
+        if (shape.style().pattern) {
+            gradientId = QStringLiteral("pattern%1").arg(++gradientCount);
+            writePattern(w, *shape.style().pattern, shape.bounds(), gradientId);
+        } else if (shape.style().gradient) {
+            gradientId = QStringLiteral("gradient%1").arg(++gradientCount);
+            writeGradient(w, *shape.style().gradient, gradientId);
+        }
     }
 
     switch (shape.kind()) {
+    case ShapeKind::Image:
+        writeImageElement(w, shape.image(), QRectF(0, 0, 1, 1), shape.imagePlacement());
+        return;
     case ShapeKind::Rectangle: {
         const QRectF r = shape.bounds();
         w.writeStartElement(QStringLiteral("rect"));
@@ -283,7 +338,7 @@ bool isNonRendering(QStringView name)
 // Drawing elements OpenDraw does not import yet; reported so nothing disappears silently.
 bool isUnsupportedGraphic(QStringView name)
 {
-    static const QStringView names[] = {u"image", u"use", u"foreignObject", u"switch", u"textPath"};
+    static const QStringView names[] = {u"use", u"foreignObject", u"switch", u"textPath"};
     return std::find(std::begin(names), std::end(names), name) != std::end(names);
 }
 
@@ -459,6 +514,73 @@ struct GradientDef {
 };
 using GradientDefs = QHash<QString, GradientDef>;
 
+// A <pattern> holding a single image, as produced by bitmap and texture fills.
+struct PatternDef {
+    QHash<QString, QString> attributes; // x, y, width, height, patternUnits, patternTransform
+    QImage image;
+};
+
+struct PaintServers {
+    GradientDefs gradients;
+    QHash<QString, PatternDef> patterns;
+};
+
+// Uncompressed 32-bit BMPs often carry alpha in the fourth byte (libcdr writes bitmaps that
+// way), which Qt's reader ignores. Returns a null image for anything else, and for 32-bit
+// BMPs whose fourth byte is unused (all zero).
+QImage bmpWithAlpha(const QByteArray &bytes)
+{
+    const auto u8 = [&](qsizetype i) { return quint32(quint8(bytes[i])); };
+    const auto u16 = [&](qsizetype i) { return u8(i) | u8(i + 1) << 8; };
+    const auto u32 = [&](qsizetype i) { return u16(i) | u16(i + 2) << 16; };
+    if (bytes.size() < 54 || !bytes.startsWith("BM") || u32(14) < 40 || u16(28) != 32 || u32(30) != 0)
+        return {};
+    const qsizetype offset = u32(10);
+    const int width = int(u32(18));
+    const int rawHeight = int(u32(22));
+    const int height = std::abs(rawHeight);
+    if (width <= 0 || height <= 0 || width > 1 << 15 || height > 1 << 15
+        || offset + qsizetype(width) * height * 4 > bytes.size())
+        return {};
+    QImage image(width, height, QImage::Format_ARGB32);
+    bool hasAlpha = false;
+    for (int y = 0; y < height; ++y) {
+        const int row = rawHeight > 0 ? height - 1 - y : y; // positive height = bottom-up
+        const auto *src = reinterpret_cast<const uchar *>(bytes.constData() + offset + qsizetype(row) * width * 4);
+        auto *dst = reinterpret_cast<QRgb *>(image.scanLine(y));
+        for (int x = 0; x < width; ++x, src += 4) {
+            dst[x] = qRgba(src[2], src[1], src[0], src[3]);
+            hasAlpha |= src[3] != 0;
+        }
+    }
+    return hasAlpha ? image : QImage();
+}
+
+// Decodes "data:image/png;base64,...." (any format Qt reads). Linked files are not supported.
+QImage decodeDataUri(QStringView href)
+{
+    if (!href.startsWith(u"data:"))
+        return {};
+    const qsizetype comma = href.indexOf(u',');
+    if (comma < 0)
+        return {};
+    const QStringView header = href.mid(5, comma - 5);
+    const QByteArray payload = href.mid(comma + 1).toLatin1();
+    const QByteArray bytes = header.contains(u";base64") ? QByteArray::fromBase64(payload)
+                                                         : QByteArray::fromPercentEncoding(payload);
+    if (QImage image = bmpWithAlpha(bytes); !image.isNull())
+        return image;
+    return QImage::fromData(bytes);
+}
+
+QString imageHref(const QXmlStreamAttributes &a)
+{
+    QString href = a.value(QStringLiteral("http://www.w3.org/1999/xlink"), QStringLiteral("href")).toString();
+    if (href.isEmpty())
+        href = a.value(QStringLiteral("href")).toString();
+    return href.trimmed();
+}
+
 double parseOffset(QStringView text)
 {
     text = text.trimmed();
@@ -470,20 +592,45 @@ double parseOffset(QStringView text)
 
 // Gradients can be defined anywhere, also after the shapes using them, so they are
 // collected in a separate pass over the file.
-GradientDefs collectGradients(const QByteArray &data)
+PaintServers collectPaintServers(const QByteArray &data)
 {
-    GradientDefs defs;
+    PaintServers servers;
+    GradientDefs &defs = servers.gradients;
     QXmlStreamReader r(data);
     QString current;
+    QString currentPattern;
     while (!r.atEnd()) {
         r.readNext();
         if (r.isEndElement() && (r.name() == u"linearGradient" || r.name() == u"radialGradient")) {
             current.clear();
             continue;
         }
+        if (r.isEndElement() && r.name() == u"pattern") {
+            currentPattern.clear();
+            continue;
+        }
         if (!r.isStartElement())
             continue;
         const QXmlStreamAttributes a = r.attributes();
+        if (r.name() == u"pattern") {
+            currentPattern = a.value(QStringLiteral("id")).toString();
+            PatternDef def;
+            for (const QString &name : {QStringLiteral("x"), QStringLiteral("y"), QStringLiteral("width"),
+                                        QStringLiteral("height"), QStringLiteral("patternUnits"),
+                                        QStringLiteral("patternTransform")}) {
+                if (a.hasAttribute(name))
+                    def.attributes.insert(name, a.value(name).toString());
+            }
+            if (!currentPattern.isEmpty())
+                servers.patterns.insert(currentPattern, def);
+            continue;
+        }
+        if (r.name() == u"image" && !currentPattern.isEmpty() && servers.patterns.contains(currentPattern)) {
+            PatternDef &def = servers.patterns[currentPattern];
+            if (def.image.isNull())
+                def.image = decodeDataUri(imageHref(a));
+            continue;
+        }
         if (r.name() == u"linearGradient" || r.name() == u"radialGradient") {
             current = a.value(QStringLiteral("id")).toString();
             GradientDef def;
@@ -511,7 +658,7 @@ GradientDefs collectGradients(const QByteArray &data)
             defs[current].stops.push_back({parseOffset(a.value(QStringLiteral("offset"))), color});
         }
     }
-    return defs;
+    return servers;
 }
 
 // Follows xlink:href so inherited stops and attributes are filled in.
@@ -575,14 +722,43 @@ std::optional<Gradient> toGradient(const GradientDef &def, const QRectF &bounds,
     return g;
 }
 
-void applyFillGradient(Shape &shape, const Properties &props, const QTransform &context, const GradientDefs &defs,
-                       ReadReport &report)
+// Texture from a single-image pattern, positioned relative to the shape it fills.
+std::optional<PatternFill> toPattern(const PatternDef &def, const QRectF &bounds, const QTransform &context)
+{
+    if (def.image.isNull())
+        return std::nullopt;
+    auto value = [&def](const QString &name, double fallback) {
+        return parseLength(def.attributes.value(name)).value_or(fallback);
+    };
+    QRectF tile(value(QStringLiteral("x"), 0.0), value(QStringLiteral("y"), 0.0), value(QStringLiteral("width"), 0.0),
+                value(QStringLiteral("height"), 0.0));
+    if (def.attributes.value(QStringLiteral("patternUnits")) == u"objectBoundingBox") {
+        tile = QRectF(bounds.left() + tile.x() * bounds.width(), bounds.top() + tile.y() * bounds.height(),
+                      tile.width() * bounds.width(), tile.height() * bounds.height());
+    } else {
+        const QTransform t = parseTransform(def.attributes.value(QStringLiteral("patternTransform"))) * context;
+        tile = t.mapRect(tile);
+    }
+    if (tile.width() <= 0.0 || tile.height() <= 0.0)
+        return std::nullopt;
+    return PatternFill{def.image, tile.size(), tile.topLeft() - bounds.topLeft()};
+}
+
+void applyFillPaint(Shape &shape, const Properties &props, const QTransform &context, const PaintServers &servers,
+                    ReadReport &report)
 {
     const QString id = props.fillReference();
     if (id.isEmpty())
         return;
     Style style = shape.style();
-    if (const auto gradient = toGradient(resolveGradient(defs, id), shape.bounds(), context)) {
+    if (servers.patterns.contains(id)) {
+        if (const auto pattern = toPattern(servers.patterns.value(id), shape.bounds(), context)) {
+            style.pattern = *pattern;
+        } else {
+            style.fill = QColor(0x80, 0x80, 0x80);
+            ++report.skippedElements[QCoreApplication::translate("SvgIO", "pattern fill (replaced with gray)")];
+        }
+    } else if (const auto gradient = toGradient(resolveGradient(servers.gradients, id), shape.bounds(), context)) {
         style.gradient = *gradient;
         // fill-opacity applies to every stop.
         bool ok = false;
@@ -698,6 +874,7 @@ bool write(const Document &document, QIODevice *device)
     w.writeDefaultNamespace(QStringLiteral("http://www.w3.org/2000/svg"));
     w.writeNamespace(QString::fromLatin1(kNamespace), QStringLiteral("opendraw"));
     w.writeNamespace(QString::fromLatin1(kInkscapeNamespace), QStringLiteral("inkscape"));
+    w.writeNamespace(kXlinkNamespace, QStringLiteral("xlink"));
     w.writeAttribute(QStringLiteral("version"), QStringLiteral("1.1"));
     w.writeAttribute(QString::fromLatin1(kNamespace), QStringLiteral("format-version"),
                      QString::number(kFormatVersion));
@@ -744,7 +921,7 @@ bool write(const Document &document, QIODevice *device)
 bool read(QIODevice *device, Document &document, QString *errorMessage, ReadReport *report)
 {
     const QByteArray data = device->readAll();
-    const GradientDefs gradients = collectGradients(data);
+    const PaintServers paintServers = collectPaintServers(data);
     QXmlStreamReader r(data);
     QSizeF pageSize = Document::defaultPageSize();
     bool foundSvg = false;
@@ -853,15 +1030,22 @@ bool read(QIODevice *device, Document &document, QString *errorMessage, ReadRepo
             pages.front()->name = attributes.value(ns, QStringLiteral("page-name")).toString();
             const std::vector<double> viewBox = parseNumberList(attributes.value(QStringLiteral("viewBox")));
             if (viewBox.size() == 4 && viewBox[2] > 0 && viewBox[3] > 0) {
-                pageSize = {viewBox[2], viewBox[3]};
-                context.transform = context.transform * QTransform::fromTranslate(-viewBox[0], -viewBox[1]);
+                // width/height give the real size; the viewBox maps drawing units onto it
+                // (e.g. width="8.5in" with a viewBox in points).
+                const auto width = parseLength(attributes.value(QStringLiteral("width")));
+                const auto height = parseLength(attributes.value(QStringLiteral("height")));
+                const double sx = width && *width > 0 ? *width / viewBox[2] : 1.0;
+                const double sy = height && *height > 0 ? *height / viewBox[3] : sx;
+                pageSize = {viewBox[2] * sx, viewBox[3] * sy};
+                context.transform = context.transform * QTransform::fromTranslate(-viewBox[0], -viewBox[1])
+                                    * QTransform::fromScale(sx, sy);
             } else {
                 pageSize = {props.length(QStringLiteral("width"), pageSize.width()),
                             props.length(QStringLiteral("height"), pageSize.height())};
             }
         } else if (name == u"text" && context.rendering) {
             if (auto text = readText(r, props, context, localReport)) {
-                applyFillGradient(*text, props, context.transform, gradients, localReport);
+                applyFillPaint(*text, props, context.transform, paintServers, localReport);
                 containers.back().push_back(std::move(text));
             }
             continue; // readText consumed the whole element, end tag included
@@ -911,12 +1095,30 @@ bool read(QIODevice *device, Document &document, QString *errorMessage, ReadRepo
             } else if (name == u"polyline" || name == u"polygon") {
                 shape = makePathShape(pointsToPath(attributes.value(QStringLiteral("points")), name == u"polygon"), t,
                                       props.style(strokeScale, localReport));
+            } else if (name == u"image") {
+                QImage image = decodeDataUri(imageHref(attributes));
+                const QRectF rect(props.length(QStringLiteral("x")), props.length(QStringLiteral("y")),
+                                  props.length(QStringLiteral("width")), props.length(QStringLiteral("height")));
+                if (image.isNull()) {
+                    ++localReport.skippedElements[tr("<image> linked to a separate file")];
+                } else if (rect.width() > 0 && rect.height() > 0) {
+                    // Stretched to its box; preserveAspectRatio fitting is not applied.
+                    const QTransform placement =
+                        QTransform(rect.width(), 0, 0, rect.height(), rect.x(), rect.y()) * t;
+                    shape = std::make_unique<Shape>(std::move(image), placement);
+                    const double opacity = props.own(QStringLiteral("opacity")).toDouble();
+                    if (props.own(QStringLiteral("opacity")).size()) {
+                        Style style = shape->style();
+                        style.opacity = std::clamp(opacity, 0.0, 1.0);
+                        shape->setStyle(style);
+                    }
+                }
             } else if (isUnsupportedGraphic(name)) {
                 ++localReport.skippedElements[QStringLiteral("<%1>").arg(name)];
             }
 
             if (shape) {
-                applyFillGradient(*shape, props, t, gradients, localReport);
+                applyFillPaint(*shape, props, t, paintServers, localReport);
                 containers.back().push_back(std::move(shape));
             }
 

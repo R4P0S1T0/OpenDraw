@@ -24,11 +24,14 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build qt6-base-dev qmake6 libgl-dev libxkbcommon-dev \
-              libfuse2 file 2>&1 | tail -n 3
+          sudo apt-get install -y cmake ninja-build pkg-config qt6-base-dev qmake6 libgl-dev libxkbcommon-dev \
+              libcdr-dev librevenge-dev libfuse2 file 2>&1 | tail -n 3
 
       - name: Configure
-        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr 2>&1 | tee -a ci.log
+        run: |
+          set -o pipefail
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr \
+              -DOPENDRAW_REQUIRE_LIBCDR=ON 2>&1 | tee -a ci.log
 
       - name: Build
         run: cmake --build build 2>&1 | tee -a ci.log
@@ -91,6 +94,9 @@ jobs:
             mingw-w64-ucrt-x86_64-ninja
             mingw-w64-ucrt-x86_64-qt6-base
             mingw-w64-ucrt-x86_64-qt6-tools
+            mingw-w64-ucrt-x86_64-pkgconf
+            mingw-w64-ucrt-x86_64-libcdr
+            mingw-w64-ucrt-x86_64-librevenge
             zip
 
       - name: Version
@@ -101,7 +107,7 @@ jobs:
       - name: Configure
         run: |
           set -o pipefail
-          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release 2>&1 | tee -a ci.log
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DOPENDRAW_REQUIRE_LIBCDR=ON 2>&1 | tee -a ci.log
 
       - name: Build
         run: |

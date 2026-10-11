@@ -38,8 +38,9 @@ protected:
                 p.fillRect(x, y, cell, cell, ((x + y) / cell) % 2 ? QColor(0xdd, 0xdd, 0xdd) : Qt::white);
         }
         p.setPen(QPen(palette().color(QPalette::Mid), 1));
-        p.setBrush(render::fillBrush(m_style()));
-        p.drawRoundedRect(QRectF(rect()).adjusted(6, 6, -6, -6), 6, 6);
+        const QRectF box = QRectF(rect()).adjusted(6, 6, -6, -6);
+        p.setBrush(render::fillBrush(m_style(), box));
+        p.drawRoundedRect(box, 6, 6);
     }
 
 private:
@@ -147,6 +148,7 @@ Style FillDialog::applyTo(Style style) const
 Style FillDialog::applyToUnconditionally(Style style) const
 {
     style.gradient.reset();
+    style.pattern.reset();
     switch (FillType(m_type->currentIndex())) {
     case FillType::None:
         style.fill = Qt::transparent;

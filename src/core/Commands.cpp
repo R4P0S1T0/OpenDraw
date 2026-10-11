@@ -40,6 +40,9 @@ AddShapeCommand::AddShapeCommand(Document *document, std::unique_ptr<Shape> shap
     case ShapeKind::Text:
         setText(tr("Add text"));
         break;
+    case ShapeKind::Image:
+        setText(tr("Add bitmap"));
+        break;
     }
 }
 

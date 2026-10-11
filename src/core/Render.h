@@ -2,6 +2,7 @@
 
 class QBrush;
 class QPainter;
+class QRectF;
 
 // Draws shapes with a QPainter in document coordinates. Used by the canvas and by every
 // export, so what is exported looks exactly like what is on screen.
@@ -14,8 +15,9 @@ struct Style;
 
 namespace render {
 
-// Solid colour, gradient or no brush, as the style says.
-QBrush fillBrush(const Style &style);
+// Solid colour, gradient, texture or no brush, as the style says. `bounds` is the bounding box
+// of the shape being filled (textures are positioned against it).
+QBrush fillBrush(const Style &style, const QRectF &bounds);
 
 void paintShape(QPainter &painter, const Shape &shape);
 // Every visible layer of the page, bottom to top.

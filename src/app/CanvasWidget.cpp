@@ -449,7 +449,8 @@ void CanvasWidget::deleteSelection()
 void CanvasWidget::convertSelectionToCurves()
 {
     Shape *shape = selectedShape();
-    if (!shape || shape->kind() == ShapeKind::Path || shape->kind() == ShapeKind::Group)
+    if (!shape || shape->kind() == ShapeKind::Path || shape->kind() == ShapeKind::Group
+        || shape->kind() == ShapeKind::Image)
         return;
     auto curve = std::make_unique<Shape>(pathops::fromPainterPath(shape->path()), shape->style());
     auto *command = new ReplaceShapeCommand(m_document, shape, std::move(curve), tr("Convert to curves"));

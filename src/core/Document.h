@@ -62,6 +62,8 @@ public:
     void renamePage(Page *page, const QString &name);
     // Replaces every page (used when loading a file).
     void setPages(std::vector<std::unique_ptr<Page>> pages);
+    // Hands over every page, leaving one empty page behind (used to merge documents).
+    std::vector<std::unique_ptr<Page>> releasePages();
 
     // --- Layers
     Layer *activeLayer() const { return currentPage()->activeLayer; }
