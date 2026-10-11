@@ -51,6 +51,39 @@ void Document::setPageSize(const QSizeF &size)
 }
 
 // ---------------------------------------------------------------------------------------------
+// Guidelines
+
+void Document::insertGuide(int index, const Guide &guide)
+{
+    if (index < 0 || index > int(m_guides.size()))
+        index = int(m_guides.size());
+    m_guides.insert(m_guides.begin() + index, guide);
+    emit changed();
+}
+
+void Document::setGuide(int index, const Guide &guide)
+{
+    if (index < 0 || index >= int(m_guides.size()) || m_guides[index] == guide)
+        return;
+    m_guides[index] = guide;
+    emit changed();
+}
+
+Guide Document::takeGuide(int index)
+{
+    const Guide guide = m_guides.at(index);
+    m_guides.erase(m_guides.begin() + index);
+    emit changed();
+    return guide;
+}
+
+void Document::setGuides(std::vector<Guide> guides)
+{
+    m_guides = std::move(guides);
+    emit changed();
+}
+
+// ---------------------------------------------------------------------------------------------
 // Pages
 
 void Document::setCurrentPage(int index)
@@ -342,6 +375,7 @@ void Document::clear()
     std::vector<std::unique_ptr<Page>> pages;
     pages.push_back(makePage(QCoreApplication::translate("Document", "Page 1")));
     m_pageSize = defaultPageSize();
+    m_guides.clear();
     setPages(std::move(pages));
 }
 

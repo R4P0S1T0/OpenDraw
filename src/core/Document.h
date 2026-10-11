@@ -33,6 +33,14 @@ struct Page {
     Layer *activeLayer = nullptr;               // where new shapes go
 };
 
+// A guideline across the whole drawing: vertical guides sit at x = position, horizontal ones at
+// y = position (document units). Guides are shared by every page.
+struct Guide {
+    Qt::Orientation orientation = Qt::Vertical;
+    double position = 0.0;
+    bool operator==(const Guide &) const = default;
+};
+
 // Pages, each with layers of shapes. All pages share one page size.
 // Shape operations without an explicit layer act on the current page's active layer.
 class Document : public QObject {
@@ -49,6 +57,13 @@ public:
 
     QSizeF pageSize() const { return m_pageSize; }
     void setPageSize(const QSizeF &size);
+
+    // --- Guidelines
+    const std::vector<Guide> &guides() const { return m_guides; }
+    void insertGuide(int index, const Guide &guide); // appends when out of range
+    void setGuide(int index, const Guide &guide);
+    Guide takeGuide(int index);
+    void setGuides(std::vector<Guide> guides);
 
     // --- Pages
     const std::vector<std::unique_ptr<Page>> &pages() const { return m_pages; }
@@ -117,6 +132,7 @@ signals:
 
 private:
     QSizeF m_pageSize;
+    std::vector<Guide> m_guides;
     std::vector<std::unique_ptr<Page>> m_pages;
     int m_currentPage = 0;
 };

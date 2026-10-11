@@ -145,6 +145,12 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_propertyBar, &PropertyBar::mirrorRequested, m_canvas, &CanvasWidget::mirrorSelection);
     connect(m_propertyBar, &PropertyBar::nudgeDistanceChanged, m_canvas, &CanvasWidget::setNudgeDistance);
     connect(m_propertyBar, &PropertyBar::duplicateOffsetChanged, m_canvas, &CanvasWidget::setDuplicateOffset);
+    connect(m_propertyBar, &PropertyBar::toolSettingsChanged, m_canvas, &CanvasWidget::setToolSettings);
+    connect(m_propertyBar, &PropertyBar::eyedropperResetRequested, m_canvas,
+            [this] { m_canvas->setEyedropperColor(std::nullopt); });
+    connect(m_canvas, &CanvasWidget::eyedropperColorChanged, m_propertyBar, &PropertyBar::setEyedropperColor);
+    connect(m_canvas, &CanvasWidget::toolChanged, m_propertyBar, &PropertyBar::setTool);
+    m_propertyBar->setToolSettings(m_canvas->toolSettings());
     connect(m_canvas, &CanvasWidget::nodeSelectionChanged, this, &MainWindow::updateNodeActions);
     connect(m_document, &Document::changed, this, &MainWindow::updateNodeActions);
     updateNodeActions();
@@ -213,6 +219,7 @@ MainWindow::MainWindow(QWidget *parent)
         updateStyleIndicators();
     });
     connect(m_document, &Document::changed, this, &MainWindow::updateStyleIndicators);
+    connect(m_canvas, &CanvasWidget::eyedropperColorChanged, this, &MainWindow::updateStyleIndicators);
     connect(&Units::instance(), &Units::unitChanged, this, &MainWindow::updateStyleIndicators);
     connect(m_undoStack, &QUndoStack::cleanChanged, this, &MainWindow::updateTitle);
     m_cutAction->setEnabled(false);
@@ -501,6 +508,7 @@ void MainWindow::createActions()
     createStandardBar();
     m_standardBar->addSeparator();
     m_standardBar->addAction(m_rulersAction);
+    createSnapActions(m_viewMenu);
 }
 
 // Zoom levels box on the standard toolbar.
@@ -602,14 +610,114 @@ void MainWindow::createToolbox(QMenu *toolsMenu)
                {CanvasWidget::Tool::Pan, Icon::Pan, tr("Pan"), QKeySequence(Qt::Key_H)}});
     m_toolbox->addSeparator();
     addFlyout({{CanvasWidget::Tool::Freehand, Icon::Freehand, tr("Freehand"), QKeySequence(Qt::Key_F5)},
+               {CanvasWidget::Tool::Line, Icon::Line, tr("2-Point Line"), QKeySequence()},
                {CanvasWidget::Tool::Bezier, Icon::Bezier, tr("Bézier"), QKeySequence(Qt::SHIFT | Qt::Key_B)}});
     m_toolbox->addSeparator();
     m_toolbox->addAction(
         makeAction({CanvasWidget::Tool::Rectangle, Icon::Rectangle, tr("Rectangle"), QKeySequence(Qt::Key_F6)}));
     m_toolbox->addAction(
         makeAction({CanvasWidget::Tool::Ellipse, Icon::Ellipse, tr("Ellipse"), QKeySequence(Qt::Key_F7)}));
+    addFlyout({{CanvasWidget::Tool::Polygon, Icon::Polygon, tr("Polygon"), QKeySequence(Qt::Key_Y)},
+               {CanvasWidget::Tool::Star, Icon::Star, tr("Star"), QKeySequence()},
+               {CanvasWidget::Tool::Spiral, Icon::Spiral, tr("Spiral"), QKeySequence(Qt::Key_A)},
+               {CanvasWidget::Tool::GraphPaper, Icon::GraphPaper, tr("Graph Paper"), QKeySequence(Qt::Key_D)}});
     m_toolbox->addSeparator();
     m_toolbox->addAction(makeAction({CanvasWidget::Tool::Text, Icon::Text, tr("Text"), QKeySequence(Qt::Key_F8)}));
+    m_toolbox->addSeparator();
+    m_toolbox->addAction(
+        makeAction({CanvasWidget::Tool::Eyedropper, Icon::Eyedropper, tr("Color Eyedropper"), QKeySequence(Qt::Key_I)}));
+}
+
+// Grid, guidelines and snapping: View menu and the "Snap To" button on the standard toolbar.
+void MainWindow::createSnapActions(QMenu *viewMenu)
+{
+    QSettings settings;
+    SnapSettings snap;
+    snap.grid = settings.value(QStringLiteral("snap/grid"), snap.grid).toBool();
+    snap.guides = settings.value(QStringLiteral("snap/guides"), snap.guides).toBool();
+    snap.objects = settings.value(QStringLiteral("snap/objects"), snap.objects).toBool();
+    snap.page = settings.value(QStringLiteral("snap/page"), snap.page).toBool();
+    m_canvas->setSnapSettings(snap);
+    GridSettings grid;
+    grid.visible = settings.value(QStringLiteral("view/grid"), grid.visible).toBool();
+    grid.spacing = settings.value(QStringLiteral("view/gridSpacing"), grid.spacing).toDouble();
+    m_canvas->setGridSettings(grid);
+    m_canvas->setGuidesVisible(settings.value(QStringLiteral("view/guides"), true).toBool());
+
+    viewMenu->addSeparator();
+    QAction *showGrid = viewMenu->addAction(icon(Icon::Grid), tr("&Grid"));
+    showGrid->setCheckable(true);
+    showGrid->setChecked(grid.visible);
+    connect(showGrid, &QAction::toggled, this, [this](bool on) {
+        GridSettings g = m_canvas->gridSettings();
+        g.visible = on;
+        m_canvas->setGridSettings(g);
+        QSettings().setValue(QStringLiteral("view/grid"), on);
+    });
+    viewMenu->addAction(tr("Grid &Spacing…"), this, [this] {
+        const Units &units = Units::instance();
+        bool ok = false;
+        const double value = QInputDialog::getDouble(this, tr("Grid Spacing"), tr("Distance between grid lines (%1):").arg(units.suffix()),
+                                                      units.toDisplay(m_canvas->gridSettings().spacing), 0.001, 100000.0,
+                                                      units.decimals(), &ok);
+        if (!ok)
+            return;
+        GridSettings g = m_canvas->gridSettings();
+        g.spacing = units.fromDisplay(value);
+        m_canvas->setGridSettings(g);
+        QSettings().setValue(QStringLiteral("view/gridSpacing"), g.spacing);
+    });
+    QAction *showGuides = viewMenu->addAction(icon(Icon::Guidelines), tr("G&uidelines"));
+    showGuides->setCheckable(true);
+    showGuides->setChecked(m_canvas->guidesVisible());
+    connect(showGuides, &QAction::toggled, this, [this](bool on) {
+        m_canvas->setGuidesVisible(on);
+        QSettings().setValue(QStringLiteral("view/guides"), on);
+    });
+    viewMenu->addAction(tr("&Delete All Guidelines"), this, [this] {
+        const int count = int(m_document->guides().size());
+        if (count == 0)
+            return;
+        m_undoStack->beginMacro(tr("Delete all guidelines"));
+        for (int i = count - 1; i >= 0; --i)
+            m_undoStack->push(new GuideCommand(m_document, i, m_document->guides()[i], std::nullopt));
+        m_undoStack->endMacro();
+    });
+
+    QMenu *snapMenu = viewMenu->addMenu(icon(Icon::Snap), tr("S&nap To"));
+    struct SnapOption {
+        QString text;
+        QString key;
+        bool SnapSettings::*flag;
+    };
+    const SnapOption options[] = {
+        {tr("&Grid"), QStringLiteral("snap/grid"), &SnapSettings::grid},
+        {tr("G&uidelines"), QStringLiteral("snap/guides"), &SnapSettings::guides},
+        {tr("&Objects"), QStringLiteral("snap/objects"), &SnapSettings::objects},
+        {tr("&Page"), QStringLiteral("snap/page"), &SnapSettings::page},
+    };
+    for (const SnapOption &option : options) {
+        QAction *action = snapMenu->addAction(option.text);
+        action->setCheckable(true);
+        action->setChecked(snap.*option.flag);
+        connect(action, &QAction::toggled, this, [this, option](bool on) {
+            SnapSettings s = m_canvas->snapSettings();
+            s.*option.flag = on;
+            m_canvas->setSnapSettings(s);
+            QSettings().setValue(option.key, on);
+        });
+    }
+
+    auto *snapButton = new QToolButton(this);
+    snapButton->setIcon(icon(Icon::Snap));
+    snapButton->setText(tr("Snap To"));
+    snapButton->setToolTip(tr("Snap to grid, guidelines, objects or page"));
+    snapButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    snapButton->setPopupMode(QToolButton::InstantPopup);
+    snapButton->setMenu(snapMenu);
+    m_standardBar->addWidget(snapButton);
+    m_standardBar->addAction(showGrid);
+    m_standardBar->addAction(showGuides);
 }
 
 void MainWindow::createStatusBar()
@@ -687,12 +795,27 @@ QString MainWindow::toolHint() const
         return tr("Drag to draw; end near the start to close the shape");
     case CanvasWidget::Tool::Bezier:
         return tr("Click for a corner node, drag for a smooth node; click the first node to close, Enter to finish");
+    case CanvasWidget::Tool::Line:
+        return tr("Drag to draw a straight line; hold Ctrl for 15° steps");
     case CanvasWidget::Tool::Rectangle:
-        return tr("Drag to draw a rectangle; hold Shift for a square");
+        return tr("Drag to draw a rectangle; Ctrl for a square, Shift to draw from the centre");
     case CanvasWidget::Tool::Ellipse:
-        return tr("Drag to draw an ellipse; hold Shift for a circle");
+        return tr("Drag to draw an ellipse; Ctrl for a circle, Shift to draw from the centre");
+    case CanvasWidget::Tool::Polygon:
+        return tr("Drag to draw a polygon; Ctrl keeps it regular, Shift draws from the centre");
+    case CanvasWidget::Tool::Star:
+        return tr("Drag to draw a star; Ctrl keeps it regular, Shift draws from the centre");
+    case CanvasWidget::Tool::Spiral:
+        return tr("Drag to draw a spiral; Ctrl keeps it round, Shift draws from the centre");
+    case CanvasWidget::Tool::GraphPaper:
+        return tr("Drag to draw a grid of rectangles; Ctrl keeps it square");
     case CanvasWidget::Tool::Text:
         return tr("Click to place text and type; Esc finishes");
+    case CanvasWidget::Tool::Eyedropper:
+        return m_canvas->eyedropperColor()
+                   ? tr("Click inside an object to fill it, on its outline to colour the outline; Shift+click or Esc "
+                        "picks another colour")
+                   : tr("Click anywhere to pick up a colour");
     }
     return {};
 }

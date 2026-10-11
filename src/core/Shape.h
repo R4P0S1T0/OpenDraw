@@ -8,6 +8,7 @@
 #include <QString>
 #include <QTransform>
 
+#include <algorithm>
 #include <memory>
 #include <optional>
 #include <vector>
@@ -155,6 +156,11 @@ public:
     const Style &style() const { return m_style; }
     void setStyle(const Style &style) { m_style = style; }
 
+    // Only meaningful for ShapeKind::Rectangle: radius of the rounded corners (0 = square),
+    // limited to half the shorter side when drawn.
+    double cornerRadius() const { return m_cornerRadius; }
+    void setCornerRadius(double radius) { m_cornerRadius = std::max(radius, 0.0); }
+
     // Only meaningful for ShapeKind::Path.
     const PathData &pathData() const { return m_path; }
     void setPathData(PathData path) { m_path = std::move(path); }
@@ -195,6 +201,7 @@ private:
     quint64 m_id;
     ShapeKind m_kind;
     QRectF m_bounds;                              // rectangles and ellipses
+    double m_cornerRadius = 0.0;                  // rectangles
     PathData m_path;                              // paths
     std::vector<std::unique_ptr<Shape>> m_children; // groups
     TextData m_text;                                // text

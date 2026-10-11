@@ -46,8 +46,14 @@ The workspace follows the layout desktop designers know: menu bar and standard t
 | Copy, paste, duplicate | `Ctrl` `C` / `Ctrl` `X` / `Ctrl` `V` (objects travel as SVG, so they paste into other programs too), `Ctrl` `D` duplicates with the offset set on the property bar |
 | Mirror | Mirror buttons on the property bar, or Object › Transform |
 | Page size | With nothing selected: paper type (A3–A6, Letter, Legal, Tabloid), width, height and portrait/landscape on the property bar |
-| Rectangle | `F6`, drag on the page. Hold `Shift` for a square |
-| Ellipse | `F7`, drag on the page. Hold `Shift` for a circle |
+| Rectangle | `F6`, drag on the page. `Ctrl` for a square, `Shift` to draw from the centre (the same keys work for every shape tool). *Corners* on the property bar rounds the corners of new or selected rectangles |
+| Ellipse | `F7`, drag on the page. `Ctrl` for a circle |
+| Polygon, star, spiral, graph paper | Object flyout in the toolbox: polygon (`Y`), star, spiral (`A`), graph paper (`D`). Sides, points, sharpness, revolutions, columns and rows are on the property bar while the tool is active |
+| Straight line | 2-point line in the freehand flyout; `Ctrl` keeps the angle in 15° steps |
+| Colour eyedropper | `I`: click to pick up a colour, then click inside objects to fill them or on their outline to colour it. `Shift`+click or `Esc` picks a new colour |
+| Guidelines | Drag from a ruler onto the drawing; drag a guideline with the pick tool to move it, back onto a ruler to delete it. View › Guidelines shows or hides them |
+| Grid and snapping | View › Grid (spacing in View › Grid Spacing). *Snap To* on the standard toolbar: grid, guidelines, objects and page. While moving, `Ctrl` keeps the move horizontal or vertical |
+| Switch to the pick tool | Tap `Space`; tap again to go back to the previous tool (hold `Space` and drag to pan) |
 | Bézier curve | `Shift` `B`. Click for a corner node, click and drag for a smooth node. Click the first node to close the shape; `Enter`, `Esc` or double-click to finish. `Backspace` removes the last node while drawing |
 | Freehand | `F5`, drag to draw. The stroke is smoothed into a few curve segments; end near the start to close it |
 | Edit nodes | Shape tool (`F10`): drag nodes and handles, double-click a segment to add a node, double-click a node or press `Delete` to remove it. Hold `Alt` while dragging a handle to make a corner |

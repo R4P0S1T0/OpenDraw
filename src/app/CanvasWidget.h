@@ -3,6 +3,7 @@
 #include "core/Arrange.h"
 #include "core/Document.h"
 #include "core/Shape.h"
+#include "ToolSettings.h"
 
 #include <QPointF>
 #include <QRectF>
@@ -25,7 +26,10 @@ class CanvasWidget : public QWidget {
     Q_OBJECT
 
 public:
-    enum class Tool { Select, Node, Zoom, Pan, Freehand, Bezier, Rectangle, Ellipse, Text };
+    enum class Tool {
+        Select, Node, Zoom, Pan, Freehand, Line, Bezier, Rectangle, Ellipse,
+        Polygon, Star, Spiral, GraphPaper, Text, Eyedropper,
+    };
 
     CanvasWidget(Document *document, QUndoStack *undoStack, QWidget *parent = nullptr);
 
@@ -66,6 +70,24 @@ public:
     TextFormat currentTextFormat() const;
 
     QPointF documentToWidget(const QPointF &documentPosition) const { return toWidget(documentPosition); }
+
+    const ToolSettings &toolSettings() const { return m_toolSettings; }
+    void setToolSettings(const ToolSettings &settings) { m_toolSettings = settings; }
+    const SnapSettings &snapSettings() const { return m_snap; }
+    void setSnapSettings(const SnapSettings &settings) { m_snap = settings; }
+    const GridSettings &gridSettings() const { return m_grid; }
+    void setGridSettings(const GridSettings &settings);
+    bool guidesVisible() const { return m_guidesVisible; }
+    void setGuidesVisible(bool visible);
+
+    // Colour eyedropper: the colour picked up, applied by clicking objects afterwards.
+    std::optional<QColor> eyedropperColor() const { return m_eyedropperColor; }
+    void setEyedropperColor(const std::optional<QColor> &color);
+
+    // A guideline being dragged in from a ruler; positions are canvas widget coordinates.
+    void beginGuideDrag(Qt::Orientation orientation, const QPointF &widgetPosition);
+    void updateGuideDrag(const QPointF &widgetPosition);
+    void endGuideDrag(const QPointF &widgetPosition);
 
     // Adds shapes to the active layer as one undoable step and selects them.
     void addShapes(std::vector<std::unique_ptr<Shape>> shapes, const QPointF &offset, const QString &text);
@@ -131,6 +153,7 @@ signals:
     void selectionChanged();
     void nodeSelectionChanged();
     void textEditingChanged();
+    void eyedropperColorChanged(const QColor &color);
 
 protected:
     bool event(QEvent *event) override;
@@ -145,7 +168,9 @@ protected:
     void keyReleaseEvent(QKeyEvent *event) override;
 
 private:
-    enum class Drag { None, Pan, Move, Resize, Marquee, Create, NodeMove, NodeHandle, BezierHandle, Freehand, ZoomBox };
+    enum class Drag {
+        None, Pan, Move, Resize, Marquee, Create, NodeMove, NodeHandle, BezierHandle, Freehand, ZoomBox, Guide,
+    };
     enum class NodeHandle { In, Out };
 
     struct NodeRef {
@@ -185,6 +210,20 @@ private:
     template<typename Edit>
     bool editPath(const QString &text, Edit edit);
 
+    // Snapping. Returns the point moved onto the nearest guide, grid line, page edge or object
+    // edge within reach, axis by axis.
+    QPointF snapPoint(const QPointF &point) const;
+    // Offset that brings a moving box (its edges or centre) onto something to snap to.
+    QPointF snapBox(const QRectF &box) const;
+    std::vector<double> snapTargets(Qt::Orientation axis) const;
+    int guideAt(const QPointF &widgetPosition) const;
+    QPainterPath toolShapePreview(const QRectF &box) const;
+    std::unique_ptr<Shape> createToolShape(const QRectF &box) const;
+    QColor colorAt(const QPointF &widgetPosition) const;
+    void applyEyedropper(const QPointF &documentPosition);
+    void paintGrid(QPainter &painter);
+    void paintGuides(QPainter &painter);
+
     // Style given to new curves: open curves are never filled.
     Style curveStyle(bool closed) const;
     void addNewShape(std::unique_ptr<Shape> shape);
@@ -214,6 +253,18 @@ private:
     QPointF m_pan; // widget position of the document origin
     bool m_needsInitialFit = true;
     bool m_spaceHeld = false;
+    bool m_spacePanned = false;          // Space was used for panning, so releasing it keeps the tool
+    std::optional<Tool> m_toolBeforeSpace; // Space switches to the pick tool and back
+
+    ToolSettings m_toolSettings;
+    SnapSettings m_snap;
+    GridSettings m_grid;
+    bool m_guidesVisible = true;
+    std::optional<QColor> m_eyedropperColor;
+    int m_guide = -1;                    // guide being dragged (-1: a new one from a ruler)
+    std::optional<Guide> m_guideBefore;  // its position before the drag
+    std::optional<Guide> m_draggedGuide; // where it is now
+    QPointF m_lineEnd;                   // 2-point line being drawn
 
     Drag m_drag = Drag::None;
     QPointF m_dragStart; // document coordinates
@@ -223,6 +274,7 @@ private:
     QRectF m_creating;   // rectangle/ellipse being drawn
     QRectF m_marquee;    // rubber-band selection, document coordinates
     QRectF m_zoomBox;    // zoom tool rectangle, document coordinates
+    QRectF m_moveOriginal; // selection bounds when a move started
     bool m_marqueeAdds = false;
     int m_resizeHandle = -1;
     QRectF m_resizeOriginal;                // selection bounds when the resize started

@@ -9,6 +9,7 @@
 #include <QDoubleSpinBox>
 #include <QLabel>
 #include <QSignalBlocker>
+#include <QSpinBox>
 #include <QToolButton>
 #include <QUndoStack>
 
@@ -100,6 +101,9 @@ PropertyBar::PropertyBar(Document *document, QUndoStack *undoStack, QWidget *par
     m_lockRatio = addButton(icon(Icon::LockRatio), tr("Lock ratio: width and height change together"),
                             m_objectActions);
     m_lockRatio->setCheckable(true);
+    m_cornerActions << addSeparator();
+    m_cornerRadius = addField(tr("Corners"), tr("Corner radius of the rectangle"), 0.0, m_cornerActions);
+    m_objectActions << m_cornerActions;
     m_objectActions << addSeparator();
     QToolButton *mirrorH = addButton(icon(Icon::MirrorHorizontal), tr("Mirror horizontally"), m_objectActions);
     QToolButton *mirrorV = addButton(icon(Icon::MirrorVertical), tr("Mirror vertically"), m_objectActions);
@@ -111,6 +115,54 @@ PropertyBar::PropertyBar(Document *document, QUndoStack *undoStack, QWidget *par
     m_opacity->setDecimals(0);
     m_opacity->setSuffix(QStringLiteral(" %"));
     m_opacity->setMinimumWidth(70);
+
+    // --- Tool options ---
+    m_newCornerRadius = addField(tr("Corners"), tr("Corner radius of new rectangles"), 0.0, m_rectangleToolActions);
+    m_polygonSides = addIntField(tr("Sides"), tr("Number of sides of new polygons"), 3, 500, m_polygonActions);
+    m_starPoints = addIntField(tr("Points"), tr("Number of points of new stars"), 3, 500, m_starActions);
+    m_starSharpness = addIntField(tr("Sharpness"), tr("How deep the notches between the points go"), 1, 99,
+                                  m_starActions);
+    m_spiralRevolutions = new QDoubleSpinBox(this);
+    {
+        auto *caption = new QLabel(tr("Revolutions"), this);
+        caption->setContentsMargins(6, 0, 3, 0);
+        m_spiralActions << addWidget(caption);
+        m_spiralRevolutions->setRange(0.25, 100);
+        m_spiralRevolutions->setDecimals(2);
+        m_spiralRevolutions->setSingleStep(0.5);
+        m_spiralRevolutions->setToolTip(tr("Turns of new spirals"));
+        m_spiralActions << addWidget(m_spiralRevolutions);
+    }
+    m_graphColumns = addIntField(tr("Columns"), tr("Columns of new graph paper"), 1, 200, m_graphActions);
+    m_graphRows = addIntField(tr("Rows"), tr("Rows of new graph paper"), 1, 200, m_graphActions);
+
+    auto *eyedropperCaption = new QLabel(tr("Picked colour"), this);
+    eyedropperCaption->setContentsMargins(6, 0, 3, 0);
+    m_eyedropperActions << addWidget(eyedropperCaption);
+    m_eyedropperSwatch = new QLabel(this);
+    m_eyedropperSwatch->setFixedSize(40, 18);
+    m_eyedropperSwatch->setFrameShape(QFrame::Box);
+    m_eyedropperActions << addWidget(m_eyedropperSwatch);
+    QToolButton *pickAgain = addButton(icon(Icon::Eyedropper), tr("Pick a colour (or Shift+click)"),
+                                       m_eyedropperActions);
+    auto *eyedropperHint = new QLabel(this);
+    eyedropperHint->setContentsMargins(6, 0, 6, 0);
+    m_eyedropperActions << addWidget(eyedropperHint);
+    eyedropperHint->setText(tr("Click inside an object to fill it, on its outline to colour the outline"));
+    connect(pickAgain, &QToolButton::clicked, this, &PropertyBar::eyedropperResetRequested);
+
+    for (QSpinBox *box : {m_polygonSides, m_starPoints, m_starSharpness, m_graphColumns, m_graphRows})
+        connect(box, &QSpinBox::valueChanged, this, &PropertyBar::emitToolSettings);
+    connect(m_spiralRevolutions, &QDoubleSpinBox::valueChanged, this, &PropertyBar::emitToolSettings);
+    connect(m_newCornerRadius, &QDoubleSpinBox::valueChanged, this, &PropertyBar::emitToolSettings);
+    connect(m_cornerRadius, &QDoubleSpinBox::editingFinished, this, [this] {
+        if (!m_shape || m_shape->kind() != ShapeKind::Rectangle)
+            return;
+        const double radius = units().fromDisplay(m_cornerRadius->value());
+        if (std::abs(radius - m_shape->cornerRadius()) > 1e-6)
+            m_undoStack->push(new SetCornerRadiusCommand(m_document, m_shape, radius));
+    });
+    setToolSettings(m_toolSettings);
 
     for (QDoubleSpinBox *box : {m_x, m_y, m_width, m_height})
         connect(box, &QDoubleSpinBox::editingFinished, this, &PropertyBar::applyGeometry);
@@ -188,6 +240,80 @@ QDoubleSpinBox *PropertyBar::addField(const QString &label, const QString &toolT
     return box;
 }
 
+QSpinBox *PropertyBar::addIntField(const QString &label, const QString &toolTip, int minimum, int maximum,
+                                   QList<QAction *> &group)
+{
+    auto *caption = new QLabel(label, this);
+    caption->setContentsMargins(6, 0, 3, 0);
+    group << addWidget(caption);
+    auto *box = new QSpinBox(this);
+    box->setRange(minimum, maximum);
+    box->setToolTip(toolTip);
+    box->setMinimumWidth(60);
+    group << addWidget(box);
+    return box;
+}
+
+void PropertyBar::setToolSettings(const ToolSettings &settings)
+{
+    m_toolSettings = settings;
+    m_updatingToolFields = true;
+    m_polygonSides->setValue(settings.polygonSides);
+    m_starPoints->setValue(settings.starPoints);
+    m_starSharpness->setValue(int(std::lround(settings.starSharpness)));
+    m_spiralRevolutions->setValue(settings.spiralRevolutions);
+    m_graphColumns->setValue(settings.graphColumns);
+    m_graphRows->setValue(settings.graphRows);
+    m_newCornerRadius->setValue(units().toDisplay(settings.cornerRadius));
+    m_updatingToolFields = false;
+}
+
+void PropertyBar::emitToolSettings()
+{
+    if (m_updatingToolFields)
+        return;
+    m_toolSettings.polygonSides = m_polygonSides->value();
+    m_toolSettings.starPoints = m_starPoints->value();
+    m_toolSettings.starSharpness = m_starSharpness->value();
+    m_toolSettings.spiralRevolutions = m_spiralRevolutions->value();
+    m_toolSettings.graphColumns = m_graphColumns->value();
+    m_toolSettings.graphRows = m_graphRows->value();
+    m_toolSettings.cornerRadius = units().fromDisplay(m_newCornerRadius->value());
+    emit toolSettingsChanged(m_toolSettings);
+}
+
+void PropertyBar::setEyedropperColor(const QColor &color)
+{
+    m_eyedropperSwatch->setStyleSheet(QStringLiteral("background: %1;").arg(color.name()));
+    m_eyedropperSwatch->setToolTip(color.name().toUpper());
+}
+
+void PropertyBar::setTool(CanvasWidget::Tool tool)
+{
+    m_tool = tool;
+    updateMode();
+}
+
+QList<QAction *> *PropertyBar::toolGroup()
+{
+    switch (m_tool) {
+    case CanvasWidget::Tool::Rectangle:
+        return &m_rectangleToolActions;
+    case CanvasWidget::Tool::Polygon:
+        return &m_polygonActions;
+    case CanvasWidget::Tool::Star:
+        return &m_starActions;
+    case CanvasWidget::Tool::Spiral:
+        return &m_spiralActions;
+    case CanvasWidget::Tool::GraphPaper:
+        return &m_graphActions;
+    case CanvasWidget::Tool::Eyedropper:
+        return &m_eyedropperActions;
+    default:
+        return nullptr;
+    }
+}
+
 QToolButton *PropertyBar::addButton(const QIcon &icon, const QString &toolTip, QList<QAction *> &group)
 {
     auto *button = new QToolButton(this);
@@ -205,12 +331,27 @@ void PropertyBar::setSelection(Shape *single, bool anySelected)
     updateMode();
 }
 
+// With a selection, the object's properties; otherwise the active tool's options, or the
+// page. The eyedropper's options show whatever is selected.
 void PropertyBar::updateMode()
 {
+    QList<QAction *> *tool = toolGroup();
+    const bool eyedropper = tool == &m_eyedropperActions;
+    const bool showTool = tool && (eyedropper || !m_anySelected);
+    const bool showObject = m_anySelected && !eyedropper;
+    const bool showPage = !m_anySelected && !showTool;
+    for (QList<QAction *> *group : {&m_rectangleToolActions, &m_polygonActions, &m_starActions, &m_spiralActions,
+                                    &m_graphActions, &m_eyedropperActions}) {
+        for (QAction *action : std::as_const(*group))
+            action->setVisible(showTool && group == tool);
+    }
     for (QAction *action : std::as_const(m_pageActions))
-        action->setVisible(!m_anySelected);
+        action->setVisible(showPage);
     for (QAction *action : std::as_const(m_objectActions))
-        action->setVisible(m_anySelected);
+        action->setVisible(showObject);
+    const bool rectangle = m_shape && m_shape->kind() == ShapeKind::Rectangle;
+    for (QAction *action : std::as_const(m_cornerActions))
+        action->setVisible(showObject && rectangle);
     refresh();
 }
 
@@ -219,10 +360,13 @@ void PropertyBar::updateUnits()
 {
     const QString suffix = QLatin1Char(' ') + units().suffix();
     for (QDoubleSpinBox *box : {m_pageWidth, m_pageHeight, m_nudge, m_duplicateX, m_duplicateY, m_x, m_y, m_width,
-                                m_height, m_outline}) {
+                                m_height, m_outline, m_cornerRadius, m_newCornerRadius}) {
         box->setSuffix(suffix);
         box->setDecimals(units().decimals());
     }
+    m_updatingToolFields = true;
+    m_newCornerRadius->setValue(units().toDisplay(m_toolSettings.cornerRadius));
+    m_updatingToolFields = false;
     for (QDoubleSpinBox *box : {m_nudge, m_duplicateX, m_duplicateY})
         setValueQuietly(box, units().toDisplay(box->property("units").toDouble()));
     const QSignalBlocker blocker(m_unit);
@@ -287,6 +431,8 @@ void PropertyBar::refresh()
     setValueQuietly(m_height, units().toDisplay(r.height()));
     setValueQuietly(m_outline, m_shape->style().hasStroke() ? units().toDisplay(m_shape->style().strokeWidth) : 0.0);
     setValueQuietly(m_opacity, opacity * 100.0);
+    if (m_shape->kind() == ShapeKind::Rectangle)
+        setValueQuietly(m_cornerRadius, units().toDisplay(m_shape->cornerRadius()));
 }
 
 void PropertyBar::applyPageSize(const QSizeF &size)

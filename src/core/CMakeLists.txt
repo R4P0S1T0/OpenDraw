@@ -7,6 +7,8 @@ add_library(opendraw_core STATIC
     Document.h
     Export.cpp
     Export.h
+    Generators.cpp
+    Generators.h
     PathOps.cpp
     PathOps.h
     Render.cpp

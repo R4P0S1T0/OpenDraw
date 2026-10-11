@@ -6,7 +6,9 @@
 #include "MainWindow.h"
 #include "PageBar.h"
 #include "PropertyBar.h"
+#include "Theme.h"
 #include "Units.h"
+#include "core/Generators.h"
 #include "core/Commands.h"
 #include "core/Document.h"
 #include "core/Export.h"
@@ -112,6 +114,11 @@ private slots:
     void zoomAndPanTools();
     void mainWindowWorkspace();
     void portugueseTranslation();
+    void objectToolsWithModifiers();
+    void lineToolSnapsAngles();
+    void eyedropperPicksAndApplies();
+    void guidelinesFromRulersAndSnapping();
+    void spaceTogglesThePickTool();
     void screenshot();
 
 private:
@@ -743,6 +750,28 @@ void CanvasTests::mainWindowWorkspace()
         canvas->setSelectedShape(rect);
         QTest::qWait(50); // let the toolbars lay out again
         QVERIFY(window.grab().save(dir + QStringLiteral("/window-selection.png")));
+
+        // Object tools, guidelines and the grid, in the dark scheme.
+        theme::apply(ColorScheme::Dark);
+        style.fill = QColor(0xfd, 0xd8, 0x35);
+        doc->insertShape(-1, std::make_unique<Shape>(generators::star(QRectF(500, 200, 220, 220), 5, 53), style));
+        style.fill = QColor(0x43, 0xa0, 0x47);
+        doc->insertShape(-1, std::make_unique<Shape>(generators::polygon(QRectF(150, 500, 220, 220), 6), style));
+        Style line;
+        line.fill = Qt::transparent;
+        line.stroke = QColor(0x1e, 0x88, 0xe5);
+        line.strokeWidth = 3;
+        doc->insertShape(-1, std::make_unique<Shape>(generators::spiral(QRectF(500, 500, 220, 220), 4), line));
+        doc->insertGuide(-1, Guide{Qt::Vertical, 150});
+        doc->insertGuide(-1, Guide{Qt::Horizontal, 200});
+        GridSettings grid;
+        grid.visible = true;
+        canvas->setGridSettings(grid);
+        canvas->setSelection({});
+        canvas->setTool(CanvasWidget::Tool::Star);
+        QTest::qWait(50);
+        QVERIFY(window.grab().save(dir + QStringLiteral("/window-tools.png")));
+        theme::apply(ColorScheme::Light);
     }
 }
 
@@ -764,6 +793,150 @@ void CanvasTests::portugueseTranslation()
     QCOMPARE(document.currentPage()->name, QStringLiteral("Página 1"));
     QCOMPARE(document.activeLayer()->name, QStringLiteral("Camada 1"));
     QCoreApplication::removeTranslator(&translator);
+}
+
+void CanvasTests::objectToolsWithModifiers()
+{
+    m_canvas->setZoom(1.0);
+    auto dragWith = [this](const QPointF &from, const QPointF &to, Qt::KeyboardModifiers modifiers) {
+        sendMouse(m_canvas, QEvent::MouseButtonPress, from, Qt::LeftButton, Qt::LeftButton, modifiers);
+        for (int i = 1; i <= 5; ++i)
+            sendMouse(m_canvas, QEvent::MouseMove, from + (to - from) * (i / 5.0), Qt::NoButton, Qt::LeftButton,
+                      modifiers);
+        sendMouse(m_canvas, QEvent::MouseButtonRelease, to, Qt::LeftButton, Qt::NoButton, modifiers);
+    };
+
+    // Ctrl: regular (as wide as high).
+    ToolSettings settings;
+    settings.polygonSides = 6;
+    m_canvas->setToolSettings(settings);
+    m_canvas->setTool(CanvasWidget::Tool::Polygon);
+    dragWith({200, 200}, {300, 260}, Qt::ControlModifier);
+    QCOMPARE(m_doc->count(), 1);
+    const Shape *polygon = m_doc->shapes().back().get();
+    QCOMPARE(polygon->kind(), ShapeKind::Path);
+    QCOMPARE(polygon->pathData().front().nodes.size(), std::size_t(6));
+
+    // Shift: from the centre outwards.
+    m_canvas->setTool(CanvasWidget::Tool::Ellipse);
+    dragWith({400, 400}, {450, 420}, Qt::ShiftModifier);
+    const QRectF ellipse = m_canvas->viewTransform().mapRect(m_doc->shapes().back()->bounds());
+    QVERIFY(std::abs(ellipse.center().x() - 400) < 1 && std::abs(ellipse.center().y() - 400) < 1);
+    QVERIFY(std::abs(ellipse.width() - 100) < 1 && std::abs(ellipse.height() - 40) < 1);
+
+    m_canvas->setTool(CanvasWidget::Tool::Star);
+    dragWith({100, 100}, {160, 160}, Qt::NoModifier);
+    QCOMPARE(m_doc->shapes().back()->pathData().front().nodes.size(), std::size_t(10));
+    m_canvas->setTool(CanvasWidget::Tool::Spiral);
+    dragWith({500, 100}, {600, 200}, Qt::NoModifier);
+    QVERIFY(!m_doc->shapes().back()->pathData().front().closed);
+    m_canvas->setTool(CanvasWidget::Tool::GraphPaper);
+    dragWith({100, 500}, {300, 600}, Qt::NoModifier);
+    QCOMPARE(m_doc->shapes().back()->children().size(), std::size_t(12));
+
+    // New rectangles get the corner radius from the tool options.
+    settings.cornerRadius = 8;
+    m_canvas->setToolSettings(settings);
+    m_canvas->setTool(CanvasWidget::Tool::Rectangle);
+    dragWith({600, 400}, {700, 500}, Qt::NoModifier);
+    QCOMPARE(m_doc->shapes().back()->cornerRadius(), 8.0);
+    QCOMPARE(m_doc->count(), 6);
+}
+
+void CanvasTests::lineToolSnapsAngles()
+{
+    m_canvas->setZoom(1.0);
+    m_canvas->setTool(CanvasWidget::Tool::Line);
+    const QPointF from(200, 200), to(300, 207); // about 4°: Ctrl makes it horizontal
+    sendMouse(m_canvas, QEvent::MouseButtonPress, from, Qt::LeftButton, Qt::LeftButton, Qt::ControlModifier);
+    sendMouse(m_canvas, QEvent::MouseMove, to, Qt::NoButton, Qt::LeftButton, Qt::ControlModifier);
+    sendMouse(m_canvas, QEvent::MouseButtonRelease, to, Qt::LeftButton, Qt::NoButton, Qt::ControlModifier);
+    QCOMPARE(m_doc->count(), 1);
+    const auto &nodes = m_doc->shapes().front()->pathData().front().nodes;
+    QCOMPARE(nodes.size(), std::size_t(2));
+    QVERIFY(std::abs(nodes[0].point.y() - nodes[1].point.y()) < 1e-6);
+    QVERIFY(!m_doc->shapes().front()->style().hasFill());
+}
+
+void CanvasTests::eyedropperPicksAndApplies()
+{
+    Style red;
+    red.fill = QColor(255, 0, 0);
+    red.stroke = Qt::transparent;
+    m_doc->insertShape(-1, std::make_unique<Shape>(ShapeKind::Rectangle, QRectF(0, 0, 100, 100), red));
+    Shape *target = m_doc->insertShape(-1, std::make_unique<Shape>(ShapeKind::Rectangle, QRectF(200, 0, 100, 100)));
+    QSignalSpy picked(m_canvas, &CanvasWidget::eyedropperColorChanged);
+
+    m_canvas->setTool(CanvasWidget::Tool::Eyedropper);
+    click(m_canvas, m_canvas->documentToWidget({50, 50}));
+    QCOMPARE(picked.count(), 1);
+    QVERIFY(m_canvas->eyedropperColor());
+    QCOMPARE(m_canvas->eyedropperColor()->rgb(), QColor(255, 0, 0).rgb());
+
+    click(m_canvas, m_canvas->documentToWidget({250, 50})); // inside: fill
+    QCOMPARE(target->style().fill.rgb(), QColor(255, 0, 0).rgb());
+    m_undo->undo();
+    QVERIFY(target->style().fill.rgb() != QColor(255, 0, 0).rgb());
+
+    QTest::keyClick(m_canvas, Qt::Key_Escape); // pick again
+    QVERIFY(!m_canvas->eyedropperColor());
+}
+
+void CanvasTests::guidelinesFromRulersAndSnapping()
+{
+    m_canvas->setZoom(1.0);
+    // Pull a vertical guide out of the left ruler (starting outside the canvas).
+    const double x = 300;
+    m_canvas->beginGuideDrag(Qt::Vertical, {-10, 300});
+    m_canvas->updateGuideDrag({x, 300});
+    m_canvas->endGuideDrag({x, 300});
+    QCOMPARE(m_doc->guides().size(), std::size_t(1));
+    const double guideX = m_doc->guides().front().position;
+    QVERIFY(std::abs(m_canvas->documentToWidget({guideX, 0}).x() - x) < 1e-6);
+
+    // Objects dragged near the guide snap their edge onto it.
+    SnapSettings snap;
+    snap.guides = true;
+    m_canvas->setSnapSettings(snap);
+    const QPointF topLeft = m_canvas->viewTransform().inverted().map(QPointF(100, 400));
+    Shape *rect = m_doc->insertShape(-1, std::make_unique<Shape>(ShapeKind::Rectangle, QRectF(topLeft, QSizeF(50, 50))));
+    m_canvas->setTool(CanvasWidget::Tool::Select);
+    dragFromTo(m_canvas, {120, 420}, {316, 420}); // left edge lands 4 px past the guide
+    QVERIFY(std::abs(rect->bounds().left() - guideX) < 1e-6);
+    m_undo->undo();
+
+    // Drag the guide with the pick tool, then drop it on the ruler to delete it.
+    dragFromTo(m_canvas, {x, 200}, {x + 50, 200});
+    QVERIFY(std::abs(m_canvas->documentToWidget({m_doc->guides().front().position, 0}).x() - (x + 50)) < 1e-6);
+    dragFromTo(m_canvas, {x + 50, 200}, {-5, 200});
+    QVERIFY(m_doc->guides().empty());
+    m_undo->undo();
+    QCOMPARE(m_doc->guides().size(), std::size_t(1));
+
+    // Ctrl keeps a move horizontal.
+    m_canvas->setSnapSettings(SnapSettings{false, false, false, false});
+    const QPointF before = rect->bounds().topLeft();
+    press(m_canvas, {120, 420});
+    sendMouse(m_canvas, QEvent::MouseMove, {200, 460}, Qt::NoButton, Qt::LeftButton, Qt::ControlModifier);
+    sendMouse(m_canvas, QEvent::MouseButtonRelease, {200, 460}, Qt::LeftButton, Qt::NoButton, Qt::ControlModifier);
+    QCOMPARE(rect->bounds().top(), before.y());
+    QVERIFY(rect->bounds().left() > before.x());
+}
+
+void CanvasTests::spaceTogglesThePickTool()
+{
+    m_canvas->setTool(CanvasWidget::Tool::Rectangle);
+    m_canvas->setFocus();
+    QTest::keyClick(m_canvas, Qt::Key_Space);
+    QCOMPARE(m_canvas->tool(), CanvasWidget::Tool::Select);
+    QTest::keyClick(m_canvas, Qt::Key_Space);
+    QCOMPARE(m_canvas->tool(), CanvasWidget::Tool::Rectangle);
+
+    // Holding Space to pan keeps the tool.
+    QTest::keyPress(m_canvas, Qt::Key_Space);
+    dragFromTo(m_canvas, {300, 300}, {350, 300});
+    QTest::keyRelease(m_canvas, Qt::Key_Space);
+    QCOMPARE(m_canvas->tool(), CanvasWidget::Tool::Rectangle);
 }
 
 // Not an assertion: saves a picture of the canvas for manual review when

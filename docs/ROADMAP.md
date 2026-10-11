@@ -20,7 +20,10 @@ Rough order of work. Items move as contributors pick them up.
 - [x] Format version in every file; newer files open with a report instead of being refused
 - [x] Familiar workspace layout: standard toolbar, context-sensitive property bar (page or object), toolbox with flyouts, document tab, rulers with selectable units, scroll bars, page navigator, document palette, fill/outline indicators in the status bar, dark and light schemes, Window menu
 - [x] Zoom and pan tools, clipboard (copy/cut/paste as SVG), duplicate, nudge with arrow keys, mirroring, paper sizes and orientation
-- [ ] Guidelines (dragged from the rulers), grid and snapping
+- [x] Guidelines dragged from the rulers (saved in Inkscape's format), grid, snapping to grid, guidelines, objects and page
+- [x] Polygon, star, spiral, graph paper and 2-point line tools; rounded rectangle corners; colour eyedropper; Ctrl/Shift constraints and Space to switch to the pick tool
+- [ ] Rotating and skewing (second click on a selection), drop shadow and transparency tools, smart fill
+- [ ] Objects docker (pages, layers and objects as a tree) and Properties docker
 - [ ] Several documents open at once (one tab each)
 - [x] Translatable interface; Brazilian Portuguese translation, chosen from the system language or View › Language
 - [ ] More languages (see CONTRIBUTING.md › Translations)

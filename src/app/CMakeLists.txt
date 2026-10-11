@@ -41,7 +41,7 @@ qt_add_resources(opendraw_ui "branding"
 
 # Interface translations, compiled into the program as ":/i18n/opendraw_<lang>.qm".
 # To refresh translations/*.ts after changing user-visible strings, run from the source folder:
-#   lupdate -locations none -extensions cpp,h -recursive src -ts translations/opendraw_pt_BR.ts
+#   lupdate -locations none -no-obsolete -extensions cpp,h -recursive src -ts translations/opendraw_pt_BR.ts
 option(OPENDRAW_REQUIRE_TRANSLATIONS "Fail the configuration when Qt's LinguistTools are missing" OFF)
 find_package(Qt6 QUIET COMPONENTS LinguistTools)
 if(Qt6LinguistTools_FOUND)

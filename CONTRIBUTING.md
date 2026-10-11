@@ -18,7 +18,7 @@ See the [README](README.md#building). Run the tests with `ctest --test-dir build
 Interface translations live in `translations/opendraw_<language>.ts` (Qt Linguist format) and are compiled into the program. User-visible strings go through `tr()` in classes with `Q_OBJECT`, or `QCoreApplication::translate("Context", "text")` elsewhere, so `lupdate` can find them.
 
 - After adding or changing strings, refresh the files from the source folder (needs Qt's Linguist tools):
-  `lupdate -locations none -extensions cpp,h -recursive src -ts translations/opendraw_pt_BR.ts`
+  `lupdate -locations none -no-obsolete -extensions cpp,h -recursive src -ts translations/opendraw_pt_BR.ts`
 - Translate with Qt Linguist (`linguist translations/opendraw_pt_BR.ts`) or any editor that understands `.ts` files. Keep `%1`, `%n`, `&` mnemonics and keyboard shortcuts in the text.
 - For a new language, run the same `lupdate` command with a new file name, e.g. `translations/opendraw_es.ts`; the build picks it up automatically and it appears in View › Language.
 

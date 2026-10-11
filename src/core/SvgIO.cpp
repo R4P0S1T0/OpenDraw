@@ -151,6 +151,11 @@ void writeShape(QXmlStreamWriter &w, const Shape &shape, int &gradientCount)
         w.writeAttribute(QStringLiteral("y"), number(r.y()));
         w.writeAttribute(QStringLiteral("width"), number(r.width()));
         w.writeAttribute(QStringLiteral("height"), number(r.height()));
+        if (shape.cornerRadius() > 0.0) {
+            const double radius = std::min({shape.cornerRadius(), r.width() / 2.0, r.height() / 2.0});
+            w.writeAttribute(QStringLiteral("rx"), number(radius));
+            w.writeAttribute(QStringLiteral("ry"), number(radius));
+        }
         break;
     }
     case ShapeKind::Ellipse: {
@@ -914,7 +919,24 @@ bool write(const Document &document, QIODevice *device)
     w.writeStartDocument();
 
     writeRootStart(w, document.pageSize());
+    w.writeNamespace(QString::fromLatin1(kSodipodiNamespace), QStringLiteral("sodipodi"));
     w.writeAttribute(QString::fromLatin1(kNamespace), QStringLiteral("page-name"), document.pages().front()->name);
+
+    // Guidelines the way Inkscape stores them, so they show up there too: a point on the
+    // guide with y measured upwards, and the guide's normal.
+    if (!document.guides().empty()) {
+        const QString sodipodi = QString::fromLatin1(kSodipodiNamespace);
+        const double height = document.pageSize().height();
+        w.writeStartElement(sodipodi, QStringLiteral("namedview"));
+        for (const Guide &guide : document.guides()) {
+            w.writeEmptyElement(sodipodi, QStringLiteral("guide"));
+            const bool vertical = guide.orientation == Qt::Vertical;
+            const QPointF point = vertical ? QPointF(guide.position, height) : QPointF(0, height - guide.position);
+            w.writeAttribute(QStringLiteral("position"), number(point.x()) + QLatin1Char(',') + number(point.y()));
+            w.writeAttribute(QStringLiteral("orientation"), vertical ? QStringLiteral("1,0") : QStringLiteral("0,1"));
+        }
+        w.writeEndElement();
+    }
 
     // Layers use Inkscape's layer markup too, so other editors show them as layers.
     int gradientCount = 0;
@@ -966,6 +988,9 @@ bool read(QIODevice *device, Document &document, QString *errorMessage, ReadRepo
     // pages[0] is the first page, whose layers sit at the top level of the file.
     std::vector<std::unique_ptr<Page>> pages;
     pages.push_back(std::make_unique<Page>());
+    std::vector<Guide> guides;
+    double userTop = 0.0;    // root viewBox, for guide positions
+    double userHeight = pageSize.height();
 
     while (!r.atEnd()) {
         r.readNext();
@@ -1071,9 +1096,25 @@ bool read(QIODevice *device, Document &document, QString *errorMessage, ReadRepo
                 pageSize = {viewBox[2] * sx, viewBox[3] * sy};
                 context.transform = context.transform * QTransform::fromTranslate(-viewBox[0], -viewBox[1])
                                     * QTransform::fromScale(sx, sy);
+                userTop = viewBox[1];
+                userHeight = viewBox[3];
             } else {
                 pageSize = {props.length(QStringLiteral("width"), pageSize.width()),
                             props.length(QStringLiteral("height"), pageSize.height())};
+                userHeight = pageSize.height();
+            }
+        } else if (name == u"guide" && r.namespaceUri() == QString::fromLatin1(kSodipodiNamespace)) {
+            // Inkscape's guidelines: a point on the guide, measured with y going up, and the
+            // direction of the guide's normal.
+            const std::vector<double> position = parseNumberList(attributes.value(QStringLiteral("position")));
+            const std::vector<double> normal = parseNumberList(attributes.value(QStringLiteral("orientation")));
+            if (position.size() == 2 && normal.size() == 2 && (normal[0] != 0.0 || normal[1] != 0.0)
+                && (normal[0] == 0.0 || normal[1] == 0.0)) {
+                const QPointF point = parent.transform.map(QPointF(position[0], userTop + userHeight - position[1]));
+                if (normal[0] != 0.0)
+                    guides.push_back({Qt::Vertical, point.x()});
+                else
+                    guides.push_back({Qt::Horizontal, point.y()});
             }
         } else if (name == u"text" && context.rendering) {
             if (auto text = readText(r, props, context, localReport)) {
@@ -1097,7 +1138,13 @@ bool read(QIODevice *device, Document &document, QString *errorMessage, ReadRepo
                     ry = rx;
                 if (rect.width() > 0.0 && rect.height() > 0.0) {
                     const Style style = props.style(strokeScale, localReport);
-                    if (rx > 0.0) {
+                    const double scale = std::abs(t.m11());
+                    if (rx > 0.0 && std::abs(rx - ry) < 1e-9 && t.type() <= QTransform::TxScale
+                        && std::abs(std::abs(t.m22()) - scale) < 1e-9) {
+                        // Equal radii stay an editable rounded rectangle.
+                        shape = makeBoxShape(ShapeKind::Rectangle, rect, t, style);
+                        shape->setCornerRadius(rx * scale);
+                    } else if (rx > 0.0) {
                         QPainterPath rounded;
                         rounded.addRoundedRect(rect, std::min(rx, rect.width() / 2), std::min(ry, rect.height() / 2));
                         shape = makePathShape(pathops::fromPainterPath(rounded), t, style);
@@ -1189,6 +1236,7 @@ bool read(QIODevice *device, Document &document, QString *errorMessage, ReadRepo
 
     document.setPages(std::move(pages));
     document.setPageSize(pageSize);
+    document.setGuides(std::move(guides));
     if (report)
         *report = localReport;
     return true;

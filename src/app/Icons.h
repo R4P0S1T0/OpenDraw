@@ -14,6 +14,7 @@ enum class Icon {
     LockRatio, MirrorHorizontal, MirrorVertical,
     AlignLeft, AlignCenter, AlignRight,
     ScrollUp, ScrollDown, ScrollLeft, ScrollRight,
+    Line, Polygon, Star, Spiral, GraphPaper, Eyedropper, Grid, Guidelines, Snap, CornerRadius,
 };
 
 QIcon icon(Icon id);

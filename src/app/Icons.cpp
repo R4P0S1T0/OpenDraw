@@ -5,6 +5,10 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <QPalette>
+#include <QPolygonF>
+
+#include <cmath>
+#include <numbers>
 
 namespace opendraw {
 
@@ -262,6 +266,94 @@ void draw(QPainter &p, Icon id, const QColor &ink, const QColor &accent, const Q
                 x = 20 - length;
             p.drawLine(QPointF(x, y), QPointF(x + length, y));
         }
+        break;
+    }
+    case Icon::Line:
+        p.drawLine(QPointF(4, 20), QPointF(20, 4));
+        p.setPen(Qt::NoPen);
+        p.setBrush(accent);
+        p.drawRect(QRectF(2, 18, 4, 4));
+        p.drawRect(QRectF(18, 2, 4, 4));
+        break;
+    case Icon::Polygon: {
+        QPolygonF pentagon;
+        for (int i = 0; i < 5; ++i) {
+            const double a = -std::numbers::pi / 2 + 2 * std::numbers::pi * i / 5;
+            pentagon << QPointF(12 + 9 * std::cos(a), 13 + 9 * std::sin(a));
+        }
+        p.drawPolygon(pentagon);
+        break;
+    }
+    case Icon::Star: {
+        QPolygonF star;
+        for (int i = 0; i < 10; ++i) {
+            const double a = -std::numbers::pi / 2 + std::numbers::pi * i / 5;
+            const double r = i % 2 ? 4.0 : 9.5;
+            star << QPointF(12 + r * std::cos(a), 13 + r * std::sin(a));
+        }
+        p.drawPolygon(star);
+        break;
+    }
+    case Icon::Spiral: {
+        QPainterPath spiral;
+        for (int i = 0; i <= 90; ++i) {
+            const double t = i / 90.0;
+            const double a = t * 3 * 2 * std::numbers::pi;
+            const QPointF point(12 + 9 * t * std::cos(a), 12 + 9 * t * std::sin(a));
+            if (i == 0)
+                spiral.moveTo(point);
+            else
+                spiral.lineTo(point);
+        }
+        p.setPen(QPen(ink, 1.3, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        p.drawPath(spiral);
+        break;
+    }
+    case Icon::GraphPaper:
+    case Icon::Grid:
+        p.setPen(QPen(ink, id == Icon::Grid ? 1.0 : 1.3));
+        for (double x : {4.0, 9.33, 14.67, 20.0})
+            p.drawLine(QPointF(x, 4), QPointF(x, 20));
+        for (double y : {4.0, 9.33, 14.67, 20.0})
+            p.drawLine(QPointF(4, y), QPointF(20, y));
+        break;
+    case Icon::Eyedropper: {
+        // Pipette: bulb at the top right, tip at the bottom left.
+        p.save();
+        p.translate(12, 12);
+        p.rotate(45);
+        p.drawRoundedRect(QRectF(-2.5, -10, 5, 6), 2, 2); // bulb
+        p.drawLine(QPointF(-4.5, -4), QPointF(4.5, -4));   // collar
+        p.drawPolygon(QPolygonF({QPointF(-2, -4), QPointF(2, -4), QPointF(1, 7), QPointF(0, 10), QPointF(-1, 7)}));
+        p.restore();
+        break;
+    }
+    case Icon::Guidelines:
+        p.setPen(QPen(accent, 1.4, Qt::DashLine));
+        p.drawLine(QPointF(8, 2), QPointF(8, 22));
+        p.drawLine(QPointF(2, 15), QPointF(22, 15));
+        break;
+    case Icon::Snap: {
+        // Magnet.
+        QPainterPath magnet;
+        magnet.moveTo(6, 4);
+        magnet.lineTo(6, 13);
+        magnet.arcTo(QRectF(6, 7, 12, 12), 180, 180);
+        magnet.lineTo(18, 4);
+        p.setPen(QPen(ink, 3.0, Qt::SolidLine, Qt::FlatCap));
+        p.drawPath(magnet);
+        p.setPen(QPen(accent, 3.0, Qt::SolidLine, Qt::FlatCap));
+        p.drawLine(QPointF(6, 4), QPointF(6, 7));
+        p.drawLine(QPointF(18, 4), QPointF(18, 7));
+        break;
+    }
+    case Icon::CornerRadius: {
+        QPainterPath corner;
+        corner.moveTo(5, 20);
+        corner.lineTo(5, 12);
+        corner.arcTo(QRectF(5, 5, 14, 14), 180, -90);
+        corner.lineTo(20, 5);
+        p.drawPath(corner);
         break;
     }
     case Icon::ScrollUp:

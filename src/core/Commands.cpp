@@ -502,6 +502,63 @@ void TransformShapeCommand::undo()
     m_document->notifyShapeChanged(m_shape);
 }
 
+SetCornerRadiusCommand::SetCornerRadiusCommand(Document *document, Shape *shape, double radius, QUndoCommand *parent)
+    : QUndoCommand(QCoreApplication::translate("Commands", "Corner radius"), parent)
+    , m_document(document)
+    , m_shape(shape)
+    , m_oldRadius(shape->cornerRadius())
+    , m_newRadius(radius)
+{
+}
+
+void SetCornerRadiusCommand::redo()
+{
+    m_shape->setCornerRadius(m_newRadius);
+    m_document->notifyShapeChanged(m_shape);
+}
+
+void SetCornerRadiusCommand::undo()
+{
+    m_shape->setCornerRadius(m_oldRadius);
+    m_document->notifyShapeChanged(m_shape);
+}
+
+GuideCommand::GuideCommand(Document *document, int index, std::optional<Guide> before, std::optional<Guide> after,
+                           QUndoCommand *parent)
+    : QUndoCommand(parent)
+    , m_document(document)
+    , m_index(index)
+    , m_before(before)
+    , m_after(after)
+{
+    if (!before)
+        setText(QCoreApplication::translate("Commands", "Add guideline"));
+    else if (!after)
+        setText(QCoreApplication::translate("Commands", "Delete guideline"));
+    else
+        setText(QCoreApplication::translate("Commands", "Move guideline"));
+}
+
+void GuideCommand::apply(const std::optional<Guide> &from, const std::optional<Guide> &to)
+{
+    if (from && to)
+        m_document->setGuide(m_index, *to);
+    else if (to)
+        m_document->insertGuide(m_index, *to);
+    else if (from)
+        m_document->takeGuide(m_index);
+}
+
+void GuideCommand::redo()
+{
+    apply(m_before, m_after);
+}
+
+void GuideCommand::undo()
+{
+    apply(m_after, m_before);
+}
+
 SetPageSizeCommand::SetPageSizeCommand(Document *document, const QSizeF &size, QUndoCommand *parent)
     : QUndoCommand(QCoreApplication::translate("Commands", "Page size"), parent)
     , m_document(document)

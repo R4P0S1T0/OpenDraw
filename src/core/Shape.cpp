@@ -152,6 +152,7 @@ void Shape::transform(const QTransform &t)
     case ShapeKind::Rectangle:
     case ShapeKind::Ellipse:
         m_bounds = t.mapRect(m_bounds);
+        m_cornerRadius *= std::min(std::hypot(t.m11(), t.m12()), std::hypot(t.m21(), t.m22()));
         break;
     case ShapeKind::Path:
         pathops::transform(m_path, t);
@@ -176,7 +177,12 @@ QPainterPath Shape::path() const
     QPainterPath path;
     switch (m_kind) {
     case ShapeKind::Rectangle:
-        path.addRect(m_bounds);
+        if (m_cornerRadius > 0.0) {
+            const double r = std::min({m_cornerRadius, m_bounds.width() / 2.0, m_bounds.height() / 2.0});
+            path.addRoundedRect(m_bounds, r, r);
+        } else {
+            path.addRect(m_bounds);
+        }
         break;
     case ShapeKind::Ellipse:
         path.addEllipse(m_bounds);

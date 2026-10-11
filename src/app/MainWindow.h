@@ -64,6 +64,7 @@ private:
     void createActions();
     void createStandardBar();
     void createToolbox(QMenu *toolsMenu);
+    void createSnapActions(QMenu *viewMenu);
     void createTextBar();
     void createStatusBar();
     QWidget *createDocumentTabs();

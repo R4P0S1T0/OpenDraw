@@ -22,11 +22,18 @@ public:
 
 protected:
     void paintEvent(QPaintEvent *event) override;
+    // Dragging from a ruler pulls out a guideline.
+    void mousePressEvent(QMouseEvent *event) override;
+    void mouseMoveEvent(QMouseEvent *event) override;
+    void mouseReleaseEvent(QMouseEvent *event) override;
 
 private:
+    QPointF onCanvas(const QMouseEvent *event) const;
+
     Qt::Orientation m_orientation;
     CanvasWidget *m_canvas;
     double m_cursor = qQNaN();
+    bool m_dragging = false;
 };
 
 // The canvas framed by rulers and scroll bars.

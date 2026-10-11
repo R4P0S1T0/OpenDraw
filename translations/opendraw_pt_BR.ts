@@ -103,6 +103,22 @@
         <translation>Renomear página</translation>
     </message>
     <message>
+        <source>Corner radius</source>
+        <translation>Raio do canto</translation>
+    </message>
+    <message>
+        <source>Add guideline</source>
+        <translation>Adicionar linha-guia</translation>
+    </message>
+    <message>
+        <source>Delete guideline</source>
+        <translation>Excluir linha-guia</translation>
+    </message>
+    <message>
+        <source>Move guideline</source>
+        <translation>Mover linha-guia</translation>
+    </message>
+    <message>
         <source>Page size</source>
         <translation>Tamanho da página</translation>
     </message>
@@ -192,6 +208,14 @@
 </context>
 <context>
     <name>opendraw::CanvasWidget</name>
+    <message>
+        <source>Apply outline colour</source>
+        <translation>Aplicar cor do contorno</translation>
+    </message>
+    <message>
+        <source>Apply fill colour</source>
+        <translation>Aplicar cor de preenchimento</translation>
+    </message>
     <message>
         <source>Text format</source>
         <translation>Formato do texto</translation>
@@ -914,6 +938,10 @@ Clique esquerdo: preenchimento · Clique direito: contorno</translation>
         <translation>Mão livre</translation>
     </message>
     <message>
+        <source>2-Point Line</source>
+        <translation>Linha de 2 pontos</translation>
+    </message>
+    <message>
         <source>Bézier</source>
         <translation>Bézier</translation>
     </message>
@@ -926,8 +954,76 @@ Clique esquerdo: preenchimento · Clique direito: contorno</translation>
         <translation>Elipse</translation>
     </message>
     <message>
+        <source>Polygon</source>
+        <translation>Polígono</translation>
+    </message>
+    <message>
+        <source>Star</source>
+        <translation>Estrela</translation>
+    </message>
+    <message>
+        <source>Spiral</source>
+        <translation>Espiral</translation>
+    </message>
+    <message>
+        <source>Graph Paper</source>
+        <translation>Papel milimetrado</translation>
+    </message>
+    <message>
         <source>Text</source>
         <translation>Texto</translation>
+    </message>
+    <message>
+        <source>Color Eyedropper</source>
+        <translation>Conta-gotas de cor</translation>
+    </message>
+    <message>
+        <source>&amp;Grid</source>
+        <translation>&amp;Grade</translation>
+    </message>
+    <message>
+        <source>Grid &amp;Spacing…</source>
+        <translation>&amp;Espaçamento da grade…</translation>
+    </message>
+    <message>
+        <source>Grid Spacing</source>
+        <translation>Espaçamento da grade</translation>
+    </message>
+    <message>
+        <source>Distance between grid lines (%1):</source>
+        <translation>Distância entre as linhas da grade (%1):</translation>
+    </message>
+    <message>
+        <source>G&amp;uidelines</source>
+        <translation>&amp;Linhas-guia</translation>
+    </message>
+    <message>
+        <source>&amp;Delete All Guidelines</source>
+        <translation>E&amp;xcluir todas as linhas-guia</translation>
+    </message>
+    <message>
+        <source>Delete all guidelines</source>
+        <translation>Excluir todas as linhas-guia</translation>
+    </message>
+    <message>
+        <source>S&amp;nap To</source>
+        <translation>Ali&amp;nhar a</translation>
+    </message>
+    <message>
+        <source>&amp;Objects</source>
+        <translation>&amp;Objetos</translation>
+    </message>
+    <message>
+        <source>&amp;Page</source>
+        <translation>&amp;Página</translation>
+    </message>
+    <message>
+        <source>Snap To</source>
+        <translation>Alinhar a</translation>
+    </message>
+    <message>
+        <source>Snap to grid, guidelines, objects or page</source>
+        <translation>Alinhar à grade, às linhas-guia, aos objetos ou à página</translation>
     </message>
     <message>
         <source>Outline colour (Shift+F12)</source>
@@ -962,16 +1058,44 @@ Clique esquerdo: preenchimento · Clique direito: contorno</translation>
         <translation>Clique para um nó de canto, arraste para um nó suave; clique no primeiro nó para fechar, Enter para terminar</translation>
     </message>
     <message>
-        <source>Drag to draw a rectangle; hold Shift for a square</source>
-        <translation>Arraste para desenhar um retângulo; segure Shift para um quadrado</translation>
+        <source>Drag to draw a straight line; hold Ctrl for 15° steps</source>
+        <translation>Arraste para desenhar uma linha reta; segure Ctrl para passos de 15°</translation>
     </message>
     <message>
-        <source>Drag to draw an ellipse; hold Shift for a circle</source>
-        <translation>Arraste para desenhar uma elipse; segure Shift para um círculo</translation>
+        <source>Drag to draw a rectangle; Ctrl for a square, Shift to draw from the centre</source>
+        <translation>Arraste para desenhar um retângulo; Ctrl para um quadrado, Shift para desenhar a partir do centro</translation>
+    </message>
+    <message>
+        <source>Drag to draw an ellipse; Ctrl for a circle, Shift to draw from the centre</source>
+        <translation>Arraste para desenhar uma elipse; Ctrl para um círculo, Shift para desenhar a partir do centro</translation>
+    </message>
+    <message>
+        <source>Drag to draw a polygon; Ctrl keeps it regular, Shift draws from the centre</source>
+        <translation>Arraste para desenhar um polígono; Ctrl o mantém regular, Shift desenha a partir do centro</translation>
+    </message>
+    <message>
+        <source>Drag to draw a star; Ctrl keeps it regular, Shift draws from the centre</source>
+        <translation>Arraste para desenhar uma estrela; Ctrl a mantém regular, Shift desenha a partir do centro</translation>
+    </message>
+    <message>
+        <source>Drag to draw a spiral; Ctrl keeps it round, Shift draws from the centre</source>
+        <translation>Arraste para desenhar uma espiral; Ctrl a mantém redonda, Shift desenha a partir do centro</translation>
+    </message>
+    <message>
+        <source>Drag to draw a grid of rectangles; Ctrl keeps it square</source>
+        <translation>Arraste para desenhar uma grade de retângulos; Ctrl a mantém quadrada</translation>
     </message>
     <message>
         <source>Click to place text and type; Esc finishes</source>
         <translation>Clique para posicionar o texto e digite; Esc termina</translation>
+    </message>
+    <message>
+        <source>Click inside an object to fill it, on its outline to colour the outline; Shift+click or Esc picks another colour</source>
+        <translation>Clique dentro de um objeto para preenchê-lo, no contorno para colorir o contorno; Shift+clique ou Esc pega outra cor</translation>
+    </message>
+    <message>
+        <source>Click anywhere to pick up a colour</source>
+        <translation>Clique em qualquer lugar para pegar uma cor</translation>
     </message>
     <message>
         <source>All supported files (*.svg *.cdr *.cdt)</source>
@@ -1352,6 +1476,14 @@ Clique esquerdo: preenchimento · Clique direito: contorno</translation>
         <translation>Travar proporção: largura e altura mudam juntas</translation>
     </message>
     <message>
+        <source>Corners</source>
+        <translation>Cantos</translation>
+    </message>
+    <message>
+        <source>Corner radius of the rectangle</source>
+        <translation>Raio dos cantos do retângulo</translation>
+    </message>
+    <message>
         <source>Mirror horizontally</source>
         <translation>Espelhar horizontalmente</translation>
     </message>
@@ -1374,6 +1506,77 @@ Clique esquerdo: preenchimento · Clique direito: contorno</translation>
     <message>
         <source>Opacity of the whole object (100 = solid)</source>
         <translation>Opacidade do objeto inteiro (100 = sólido)</translation>
+    </message>
+    <message>
+        <source>Corner radius of new rectangles</source>
+        <translation>Raio dos cantos dos novos retângulos</translation>
+    </message>
+    <message>
+        <source>Sides</source>
+        <translation>Lados</translation>
+    </message>
+    <message>
+        <source>Number of sides of new polygons</source>
+        <translation>Número de lados dos novos polígonos</translation>
+    </message>
+    <message>
+        <source>Points</source>
+        <translation>Pontas</translation>
+    </message>
+    <message>
+        <source>Number of points of new stars</source>
+        <translation>Número de pontas das novas estrelas</translation>
+    </message>
+    <message>
+        <source>Sharpness</source>
+        <translation>Nitidez</translation>
+    </message>
+    <message>
+        <source>How deep the notches between the points go</source>
+        <translation>Profundidade dos recortes entre as pontas</translation>
+    </message>
+    <message>
+        <source>Revolutions</source>
+        <translation>Voltas</translation>
+    </message>
+    <message>
+        <source>Turns of new spirals</source>
+        <translation>Voltas das novas espirais</translation>
+    </message>
+    <message>
+        <source>Columns</source>
+        <translation>Colunas</translation>
+    </message>
+    <message>
+        <source>Columns of new graph paper</source>
+        <translation>Colunas do novo papel milimetrado</translation>
+    </message>
+    <message>
+        <source>Rows</source>
+        <translation>Linhas</translation>
+    </message>
+    <message>
+        <source>Rows of new graph paper</source>
+        <translation>Linhas do novo papel milimetrado</translation>
+    </message>
+    <message>
+        <source>Picked colour</source>
+        <translation>Cor capturada</translation>
+    </message>
+    <message>
+        <source>Pick a colour (or Shift+click)</source>
+        <translation>Pegar uma cor (ou Shift+clique)</translation>
+    </message>
+    <message>
+        <source>Click inside an object to fill it, on its outline to colour the outline</source>
+        <translation>Clique dentro de um objeto para preenchê-lo, no contorno para colorir o contorno</translation>
+    </message>
+</context>
+<context>
+    <name>opendraw::Ruler</name>
+    <message>
+        <source>Drag onto the drawing to add a guideline</source>
+        <translation>Arraste para o desenho para adicionar uma linha-guia</translation>
     </message>
 </context>
 <context>

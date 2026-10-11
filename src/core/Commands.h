@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/Document.h"
 #include "core/Shape.h"
 
 #include <QPointF>
@@ -353,6 +354,38 @@ private:
     Document *m_document;
     Shape *m_shape;
     QTransform m_transform;
+};
+
+class SetCornerRadiusCommand : public QUndoCommand {
+public:
+    SetCornerRadiusCommand(Document *document, Shape *shape, double radius, QUndoCommand *parent = nullptr);
+
+    void redo() override;
+    void undo() override;
+
+private:
+    Document *m_document;
+    Shape *m_shape;
+    double m_oldRadius;
+    double m_newRadius;
+};
+
+// Adds, moves or removes a guideline. `before` empty = add, `after` empty = remove.
+class GuideCommand : public QUndoCommand {
+public:
+    GuideCommand(Document *document, int index, std::optional<Guide> before, std::optional<Guide> after,
+                 QUndoCommand *parent = nullptr);
+
+    void redo() override;
+    void undo() override;
+
+private:
+    void apply(const std::optional<Guide> &from, const std::optional<Guide> &to);
+
+    Document *m_document;
+    int m_index;
+    std::optional<Guide> m_before;
+    std::optional<Guide> m_after;
 };
 
 // Changes the size of every page.

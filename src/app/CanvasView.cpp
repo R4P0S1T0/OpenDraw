@@ -8,6 +8,7 @@
 #include <QGridLayout>
 #include <QLocale>
 #include <QMenu>
+#include <QMouseEvent>
 #include <QPainter>
 #include <QScrollBar>
 #include <QToolButton>
@@ -53,6 +54,8 @@ Ruler::Ruler(Qt::Orientation orientation, CanvasWidget *canvas, QWidget *parent)
         setFixedHeight(kRulerThickness);
     else
         setFixedWidth(kRulerThickness);
+    setCursor(orientation == Qt::Horizontal ? Qt::SplitVCursor : Qt::SplitHCursor);
+    setToolTip(tr("Drag onto the drawing to add a guideline"));
     connect(canvas, &CanvasWidget::viewChanged, this, qOverload<>(&QWidget::update));
     connect(&Units::instance(), &Units::unitChanged, this, qOverload<>(&QWidget::update));
 }
@@ -60,6 +63,34 @@ Ruler::Ruler(Qt::Orientation orientation, CanvasWidget *canvas, QWidget *parent)
 QSize Ruler::sizeHint() const
 {
     return m_orientation == Qt::Horizontal ? QSize(200, kRulerThickness) : QSize(kRulerThickness, 200);
+}
+
+QPointF Ruler::onCanvas(const QMouseEvent *event) const
+{
+    return m_canvas->mapFromGlobal(event->globalPosition());
+}
+
+void Ruler::mousePressEvent(QMouseEvent *event)
+{
+    if (event->button() != Qt::LeftButton)
+        return;
+    m_dragging = true;
+    // The top ruler gives horizontal guides, the left one vertical guides.
+    m_canvas->beginGuideDrag(m_orientation, onCanvas(event));
+}
+
+void Ruler::mouseMoveEvent(QMouseEvent *event)
+{
+    if (m_dragging)
+        m_canvas->updateGuideDrag(onCanvas(event));
+}
+
+void Ruler::mouseReleaseEvent(QMouseEvent *event)
+{
+    if (!m_dragging || event->button() != Qt::LeftButton)
+        return;
+    m_dragging = false;
+    m_canvas->endGuideDrag(onCanvas(event));
 }
 
 void Ruler::setCursorPosition(double documentPosition)

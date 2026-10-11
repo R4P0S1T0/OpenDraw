@@ -1,7 +1,9 @@
 #include "CanvasWidget.h"
 
 #include "core/Commands.h"
+#include "Icons.h"
 #include "core/Document.h"
+#include "core/Generators.h"
 #include "core/PathOps.h"
 #include "core/Render.h"
 #include "core/SvgIO.h"
@@ -18,6 +20,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <numbers>
 
 namespace opendraw {
 
@@ -34,6 +37,7 @@ constexpr double kHandleSizePx = 7.0;
 constexpr double kNodeSizePx = 7.0;
 constexpr double kCloseDistancePx = 8.0;
 constexpr double kFreehandTolerancePx = 1.5;
+constexpr double kSnapPx = 6.0;
 
 double distance(const QPointF &a, const QPointF &b)
 {
@@ -96,10 +100,307 @@ void CanvasWidget::setTool(Tool tool)
     if (m_tool == Tool::Bezier)
         finishCurve();
     m_tool = tool;
+    m_toolBeforeSpace.reset();
     setActiveNode({});
     updateCursor();
     update();
     emit toolChanged(tool);
+}
+
+void CanvasWidget::setGridSettings(const GridSettings &settings)
+{
+    m_grid = settings;
+    update();
+}
+
+void CanvasWidget::setGuidesVisible(bool visible)
+{
+    m_guidesVisible = visible;
+    update();
+}
+
+void CanvasWidget::setEyedropperColor(const std::optional<QColor> &color)
+{
+    m_eyedropperColor = color;
+    updateCursor();
+    if (color)
+        emit eyedropperColorChanged(*color);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Guidelines
+
+int CanvasWidget::guideAt(const QPointF &widgetPosition) const
+{
+    if (!m_guidesVisible)
+        return -1;
+    const QPointF doc = toDocument(widgetPosition);
+    const double tolerance = kHitTolerancePx / m_zoom;
+    const auto &guides = m_document->guides();
+    for (int i = int(guides.size()) - 1; i >= 0; --i) {
+        const double along = guides[i].orientation == Qt::Vertical ? doc.x() : doc.y();
+        if (std::abs(along - guides[i].position) <= tolerance)
+            return i;
+    }
+    return -1;
+}
+
+void CanvasWidget::beginGuideDrag(Qt::Orientation orientation, const QPointF &widgetPosition)
+{
+    finishTextEdit();
+    m_guide = -1;
+    m_guideBefore.reset();
+    m_draggedGuide = Guide{orientation, 0.0};
+    m_drag = Drag::Guide;
+    updateGuideDrag(widgetPosition);
+}
+
+void CanvasWidget::updateGuideDrag(const QPointF &widgetPosition)
+{
+    if (!m_draggedGuide)
+        return;
+    QPointF doc = toDocument(widgetPosition);
+    if (m_snap.grid || m_snap.objects || m_snap.page) {
+        SnapSettings withoutGuides = m_snap;
+        withoutGuides.guides = false;
+        std::swap(m_snap, withoutGuides);
+        doc = snapPoint(doc); // a guide does not snap to itself
+        std::swap(m_snap, withoutGuides);
+    }
+    m_draggedGuide->position = m_draggedGuide->orientation == Qt::Vertical ? doc.x() : doc.y();
+    emit cursorMoved(toDocument(widgetPosition));
+    update();
+}
+
+// Dropping a guide back on the rulers (outside the drawing area) deletes it.
+void CanvasWidget::endGuideDrag(const QPointF &widgetPosition)
+{
+    if (!m_draggedGuide)
+        return;
+    updateGuideDrag(widgetPosition);
+    const bool inside = rect().contains(widgetPosition.toPoint());
+    const Guide guide = *m_draggedGuide;
+    if (m_guide < 0) {
+        if (inside)
+            m_undoStack->push(new GuideCommand(m_document, int(m_document->guides().size()), std::nullopt, guide));
+    } else if (!inside) {
+        m_undoStack->push(new GuideCommand(m_document, m_guide, m_guideBefore, std::nullopt));
+    } else if (m_guideBefore && !(guide == *m_guideBefore)) {
+        m_undoStack->push(new GuideCommand(m_document, m_guide, m_guideBefore, guide));
+    }
+    m_draggedGuide.reset();
+    m_guideBefore.reset();
+    m_guide = -1;
+    m_drag = Drag::None;
+    update();
+}
+
+// ---------------------------------------------------------------------------------------------
+// Snapping
+
+std::vector<double> CanvasWidget::snapTargets(Qt::Orientation axis) const
+{
+    const bool x = axis == Qt::Horizontal;
+    std::vector<double> targets;
+    if (m_snap.guides && m_guidesVisible) {
+        for (const Guide &guide : m_document->guides()) {
+            if ((guide.orientation == Qt::Vertical) == x)
+                targets.push_back(guide.position);
+        }
+    }
+    if (m_snap.page) {
+        const double size = x ? m_document->pageSize().width() : m_document->pageSize().height();
+        targets.insert(targets.end(), {0.0, size / 2.0, size});
+    }
+    if (m_snap.objects) {
+        for (const Shape *shape : m_document->editableShapes()) {
+            if (isSelected(shape))
+                continue;
+            const QRectF b = shape->bounds();
+            if (x)
+                targets.insert(targets.end(), {b.left(), b.center().x(), b.right()});
+            else
+                targets.insert(targets.end(), {b.top(), b.center().y(), b.bottom()});
+        }
+    }
+    return targets;
+}
+
+namespace {
+// Smallest correction (within `reach`) that puts one of `values` on a target or a grid line.
+std::optional<double> nearestSnap(std::initializer_list<double> values, const std::vector<double> &targets,
+                                  double gridSpacing, double reach)
+{
+    std::optional<double> best;
+    auto consider = [&](double correction) {
+        if (std::abs(correction) <= reach && (!best || std::abs(correction) < std::abs(*best)))
+            best = correction;
+    };
+    for (double value : values) {
+        for (double target : targets)
+            consider(target - value);
+        if (gridSpacing > 0.0)
+            consider(std::round(value / gridSpacing) * gridSpacing - value);
+    }
+    return best;
+}
+} // namespace
+
+QPointF CanvasWidget::snapPoint(const QPointF &point) const
+{
+    const double reach = kSnapPx / m_zoom;
+    const double grid = m_snap.grid ? m_grid.spacing : 0.0;
+    QPointF snapped = point;
+    if (auto dx = nearestSnap({point.x()}, snapTargets(Qt::Horizontal), grid, reach))
+        snapped.rx() += *dx;
+    if (auto dy = nearestSnap({point.y()}, snapTargets(Qt::Vertical), grid, reach))
+        snapped.ry() += *dy;
+    return snapped;
+}
+
+QPointF CanvasWidget::snapBox(const QRectF &box) const
+{
+    const double reach = kSnapPx / m_zoom;
+    const double grid = m_snap.grid ? m_grid.spacing : 0.0;
+    QPointF offset;
+    if (auto dx = nearestSnap({box.left(), box.center().x(), box.right()}, snapTargets(Qt::Horizontal), grid, reach))
+        offset.rx() = *dx;
+    if (auto dy = nearestSnap({box.top(), box.center().y(), box.bottom()}, snapTargets(Qt::Vertical), grid, reach))
+        offset.ry() = *dy;
+    return offset;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Object tools and the eyedropper
+
+QPainterPath CanvasWidget::toolShapePreview(const QRectF &box) const
+{
+    QPainterPath path;
+    switch (m_tool) {
+    case Tool::Ellipse:
+        path.addEllipse(box);
+        break;
+    case Tool::Rectangle: {
+        const double r = std::min({m_toolSettings.cornerRadius, box.width() / 2, box.height() / 2});
+        path.addRoundedRect(box, r, r);
+        break;
+    }
+    default:
+        if (auto shape = createToolShape(box))
+            path = shape->path();
+        break;
+    }
+    return path;
+}
+
+std::unique_ptr<Shape> CanvasWidget::createToolShape(const QRectF &box) const
+{
+    switch (m_tool) {
+    case Tool::Rectangle: {
+        auto shape = std::make_unique<Shape>(ShapeKind::Rectangle, box, m_defaultStyle);
+        shape->setCornerRadius(m_toolSettings.cornerRadius);
+        return shape;
+    }
+    case Tool::Ellipse:
+        return std::make_unique<Shape>(ShapeKind::Ellipse, box, m_defaultStyle);
+    case Tool::Polygon:
+        return std::make_unique<Shape>(generators::polygon(box, m_toolSettings.polygonSides), m_defaultStyle);
+    case Tool::Star:
+        return std::make_unique<Shape>(
+            generators::star(box, m_toolSettings.starPoints, m_toolSettings.starSharpness), m_defaultStyle);
+    case Tool::Spiral:
+        return std::make_unique<Shape>(generators::spiral(box, m_toolSettings.spiralRevolutions), curveStyle(false));
+    case Tool::GraphPaper:
+        return generators::graphPaper(box, m_toolSettings.graphColumns, m_toolSettings.graphRows, m_defaultStyle);
+    default:
+        return nullptr;
+    }
+}
+
+// The colour on screen at a point, drawing only the page and the objects (no handles).
+QColor CanvasWidget::colorAt(const QPointF &widgetPosition) const
+{
+    QImage pixel(1, 1, QImage::Format_ARGB32_Premultiplied);
+    pixel.fill(palette().color(QPalette::Mid));
+    QPainter painter(&pixel);
+    painter.setRenderHint(QPainter::Antialiasing);
+    painter.translate(-widgetPosition.x(), -widgetPosition.y());
+    painter.setTransform(viewTransform(), true);
+    painter.fillRect(QRectF(QPointF(0, 0), m_document->pageSize()), Qt::white);
+    render::paintPage(painter, *m_document->currentPage());
+    painter.end();
+    return pixel.pixelColor(0, 0);
+}
+
+// Clicking inside an object gives it the picked colour as fill; clicking its outline, as outline.
+void CanvasWidget::applyEyedropper(const QPointF &documentPosition)
+{
+    if (!m_eyedropperColor)
+        return;
+    Shape *hit = m_document->shapeAt(documentPosition, kHitTolerancePx / m_zoom);
+    if (!hit)
+        return;
+    const QColor color = *m_eyedropperColor;
+    const bool outline = !hit->path().contains(documentPosition);
+    m_undoStack->beginMacro(outline ? tr("Apply outline colour") : tr("Apply fill colour"));
+    hit->forEachLeaf([&](Shape &leaf) {
+        Style style = leaf.style();
+        if (outline) {
+            style.stroke = color;
+            if (style.strokeWidth <= 0.0)
+                style.strokeWidth = 1.0;
+        } else {
+            style.fill = color;
+            style.gradient.reset();
+            style.pattern.reset();
+        }
+        m_undoStack->push(new SetStyleCommand(m_document, &leaf, style));
+    });
+    m_undoStack->endMacro();
+}
+
+void CanvasWidget::paintGrid(QPainter &painter)
+{
+    if (!m_grid.visible || m_grid.spacing <= 0.0)
+        return;
+    double spacing = m_grid.spacing;
+    while (spacing * m_zoom < 8.0)
+        spacing *= 2.0; // too dense to see: show every other line
+    const QRectF visible = visibleDocumentRect();
+    QColor color = palette().color(QPalette::Highlight);
+    color.setAlpha(45);
+    QPen pen(color, 0);
+    pen.setCosmetic(true);
+    painter.setPen(pen);
+    for (double x = std::floor(visible.left() / spacing) * spacing; x <= visible.right(); x += spacing)
+        painter.drawLine(QPointF(x, visible.top()), QPointF(x, visible.bottom()));
+    for (double y = std::floor(visible.top() / spacing) * spacing; y <= visible.bottom(); y += spacing)
+        painter.drawLine(QPointF(visible.left(), y), QPointF(visible.right(), y));
+}
+
+void CanvasWidget::paintGuides(QPainter &painter)
+{
+    if (!m_guidesVisible && !m_draggedGuide)
+        return;
+    const QRectF visible = visibleDocumentRect();
+    auto draw = [&](const Guide &guide, const QColor &color) {
+        QPen pen(color, 1, Qt::DashLine);
+        pen.setCosmetic(true);
+        painter.setPen(pen);
+        if (guide.orientation == Qt::Vertical)
+            painter.drawLine(QPointF(guide.position, visible.top()), QPointF(guide.position, visible.bottom()));
+        else
+            painter.drawLine(QPointF(visible.left(), guide.position), QPointF(visible.right(), guide.position));
+    };
+    const auto &guides = m_document->guides();
+    if (m_guidesVisible) {
+        for (int i = 0; i < int(guides.size()); ++i) {
+            if (i != m_guide || !m_draggedGuide)
+                draw(guides[i], QColor(0x2a, 0x7f, 0xff));
+        }
+    }
+    if (m_draggedGuide)
+        draw(*m_draggedGuide, QColor(0xe5, 0x39, 0x35));
 }
 
 void CanvasWidget::setSelectedShape(Shape *shape)
@@ -246,8 +547,17 @@ void CanvasWidget::fitPage()
 
 void CanvasWidget::updateCursor()
 {
+    // Cursor drawn from one of OpenDraw's icons, with its hot spot on the 24 × 24 grid.
+    auto iconCursor = [](Icon id, QPoint hotSpot) {
+        const QPixmap pixmap = icon(id).pixmap(QSize(24, 24));
+        return QCursor(pixmap, hotSpot.x(), hotSpot.y());
+    };
     if (m_spaceHeld || m_tool == Tool::Pan)
         setCursor(Qt::OpenHandCursor);
+    else if (m_tool == Tool::Zoom)
+        setCursor(iconCursor(Icon::Zoom, {10, 10}));
+    else if (m_tool == Tool::Eyedropper)
+        setCursor(m_eyedropperColor ? iconCursor(Icon::FillBucket, {20, 19}) : iconCursor(Icon::Eyedropper, {3, 21}));
     else if (m_tool == Tool::Select || m_tool == Tool::Node)
         unsetCursor();
     else if (m_tool == Tool::Text)
@@ -997,6 +1307,8 @@ void CanvasWidget::setHoverCursor(const QPointF &widgetPosition)
         setCursor(shapes[handle]);
     else if (m_tool == Tool::Node && !m_spaceHeld && (nodeAt(widgetPosition).isValid() || nodeHandleAt(widgetPosition)))
         setCursor(Qt::SizeAllCursor);
+    else if (const int guide = m_tool == Tool::Select && !m_spaceHeld ? guideAt(widgetPosition) : -1; guide >= 0)
+        setCursor(m_document->guides()[guide].orientation == Qt::Vertical ? Qt::SplitHCursor : Qt::SplitVCursor);
     else
         updateCursor();
 }
@@ -1033,16 +1345,18 @@ void CanvasWidget::paintEvent(QPaintEvent *)
     }
     if (m_pendingText)
         paintShape(painter, *m_pendingText);
+    paintGrid(painter);
+    paintGuides(painter);
 
     QPen preview(palette().color(QPalette::Highlight), 0, Qt::DashLine);
     preview.setCosmetic(true);
-    if (m_drag == Drag::Create && !m_creating.isEmpty()) {
+    if (m_drag == Drag::Create) {
         painter.setPen(preview);
         painter.setBrush(Qt::NoBrush);
-        if (m_tool == Tool::Ellipse)
-            painter.drawEllipse(m_creating);
-        else
-            painter.drawRect(m_creating);
+        if (m_tool == Tool::Line)
+            painter.drawLine(m_dragStart, m_lineEnd);
+        else if (!m_creating.isEmpty())
+            painter.drawPath(toolShapePreview(m_creating));
     }
     if (m_drag == Drag::Freehand && m_freehand.size() > 1) {
         const Style style = curveStyle(false);
@@ -1209,6 +1523,7 @@ void CanvasWidget::mousePressEvent(QMouseEvent *event)
         || (event->button() == Qt::LeftButton && (m_spaceHeld || m_tool == Tool::Pan))) {
         m_drag = Drag::Pan;
         m_panLast = pos;
+        m_spacePanned = m_spaceHeld;
         setCursor(Qt::ClosedHandCursor);
         return;
     }
@@ -1263,6 +1578,14 @@ void CanvasWidget::mousePressEvent(QMouseEvent *event)
                 m_resizeOriginals.push_back(shape->bounds());
             break;
         }
+        if (const int guide = guideAt(pos); guide >= 0) {
+            // Drag a guideline; dropping it on a ruler deletes it.
+            m_guide = guide;
+            m_guideBefore = m_document->guides()[guide];
+            m_draggedGuide = m_guideBefore;
+            m_drag = Drag::Guide;
+            break;
+        }
         Shape *hit = m_document->shapeAt(docPos, tolerance);
         if (!hit) {
             // Empty space: start a rubber band. Shift keeps the current selection.
@@ -1283,6 +1606,7 @@ void CanvasWidget::mousePressEvent(QMouseEvent *event)
         if (!isSelected(hit))
             setSelectedShape(hit);
         m_drag = Drag::Move; // moves everything selected
+        m_moveOriginal = selectionBounds();
         break;
     }
 
@@ -1317,7 +1641,7 @@ void CanvasWidget::mousePressEvent(QMouseEvent *event)
             finishCurve();
             return;
         }
-        m_bezier.nodes.push_back(PathNode::corner(docPos));
+        m_bezier.nodes.push_back(PathNode::corner(snapPoint(docPos)));
         m_drag = Drag::BezierHandle;
         update();
         break;
@@ -1327,10 +1651,25 @@ void CanvasWidget::mousePressEvent(QMouseEvent *event)
         m_drag = Drag::Freehand;
         break;
 
+    case Tool::Line:
     case Tool::Rectangle:
     case Tool::Ellipse:
+    case Tool::Polygon:
+    case Tool::Star:
+    case Tool::Spiral:
+    case Tool::GraphPaper:
         m_drag = Drag::Create;
-        m_creating = QRectF(docPos, docPos);
+        m_dragStart = m_dragLast = snapPoint(docPos);
+        m_creating = QRectF(m_dragStart, m_dragStart);
+        m_lineEnd = m_dragStart;
+        break;
+
+    case Tool::Eyedropper:
+        // The first click picks up a colour; later clicks apply it. Shift+click picks again.
+        if (!m_eyedropperColor || shift)
+            setEyedropperColor(colorAt(pos));
+        else
+            applyEyedropper(docPos);
         break;
     }
 }
@@ -1361,28 +1700,50 @@ void CanvasWidget::mouseMoveEvent(QMouseEvent *event)
         break;
 
     case Drag::Move: {
-        const QPointF delta = docPos - m_dragLast;
+        // Ctrl keeps the move horizontal or vertical; the moved box snaps as a whole.
+        const bool constrain = event->modifiers() & Qt::ControlModifier;
+        QPointF total = docPos - m_dragStart;
+        if (constrain) {
+            if (std::abs(total.x()) >= std::abs(total.y()))
+                total.ry() = 0;
+            else
+                total.rx() = 0;
+        }
+        QPointF snap = snapBox(m_moveOriginal.translated(total));
+        if (constrain) {
+            if (total.y() == 0)
+                snap.ry() = 0;
+            else
+                snap.rx() = 0;
+        }
+        total += snap;
+        const QPointF delta = m_dragStart + total - m_dragLast;
         for (Shape *shape : m_selection)
             shape->moveBy(delta);
-        m_dragLast = docPos;
+        m_dragLast = m_dragStart + total;
         if (!m_selection.empty())
             m_document->notifyShapeChanged(m_selection.front());
         break;
     }
 
+    case Drag::Guide:
+        updateGuideDrag(pos);
+        break;
+
     case Drag::Resize: {
         // Handles 0-7 go clockwise from top-left; each moves the edges it sits on.
         const int h = m_resizeHandle;
+        const QPointF to = snapPoint(docPos);
         double left = m_resizeOriginal.left(), right = m_resizeOriginal.right();
         double top = m_resizeOriginal.top(), bottom = m_resizeOriginal.bottom();
         if (h == 0 || h == 6 || h == 7)
-            left = docPos.x();
+            left = to.x();
         if (h == 2 || h == 3 || h == 4)
-            right = docPos.x();
+            right = to.x();
         if (h == 0 || h == 1 || h == 2)
-            top = docPos.y();
+            top = to.y();
         if (h == 4 || h == 5 || h == 6)
-            bottom = docPos.y();
+            bottom = to.y();
         QRectF bounds = QRectF(QPointF(left, top), QPointF(right, bottom)).normalized();
         const double minimum = 1.0 / m_zoom;
         bounds.setWidth(std::max(bounds.width(), minimum));
@@ -1409,14 +1770,29 @@ void CanvasWidget::mouseMoveEvent(QMouseEvent *event)
         break;
 
     case Drag::Create: {
-        QPointF end = docPos;
-        if (event->modifiers() & Qt::ShiftModifier) {
-            // Constrain to a square / circle.
-            const QPointF d = docPos - m_dragStart;
-            const double side = std::max(std::abs(d.x()), std::abs(d.y()));
-            end = m_dragStart + QPointF(std::copysign(side, d.x()), std::copysign(side, d.y()));
+        // As in other desktop editors: Ctrl constrains (square, circle, regular shape, line
+        // angles in 15° steps), Shift draws from the centre.
+        const bool constrain = event->modifiers() & Qt::ControlModifier;
+        const bool fromCenter = event->modifiers() & Qt::ShiftModifier;
+        const QPointF end = snapPoint(docPos);
+        QPointF d = end - m_dragStart;
+        if (m_tool == Tool::Line) {
+            if (constrain && !d.isNull()) {
+                const double step = std::numbers::pi / 12.0;
+                const double angle = std::round(std::atan2(d.y(), d.x()) / step) * step;
+                const double length = std::hypot(d.x(), d.y());
+                d = QPointF(std::cos(angle), std::sin(angle)) * length;
+            }
+            m_lineEnd = m_dragStart + d;
+            update();
+            break;
         }
-        m_creating = QRectF(m_dragStart, end).normalized();
+        if (constrain) {
+            const double side = std::max(std::abs(d.x()), std::abs(d.y()));
+            d = QPointF(std::copysign(side, d.x()), std::copysign(side, d.y()));
+        }
+        m_creating = (fromCenter ? QRectF(m_dragStart - d, m_dragStart + d) : QRectF(m_dragStart, m_dragStart + d))
+                         .normalized();
         update();
         break;
     }
@@ -1425,11 +1801,12 @@ void CanvasWidget::mouseMoveEvent(QMouseEvent *event)
         Shape *path = selectedPath();
         PathData data = path->pathData();
         PathNode &node = data[m_activeNode.subpath].nodes[m_activeNode.node];
-        const QPointF delta = docPos - m_dragLast;
+        const QPointF to = snapPoint(docPos);
+        const QPointF delta = to - m_dragLast;
         node.point += delta;
         node.in += delta;
         node.out += delta;
-        m_dragLast = docPos;
+        m_dragLast = to;
         path->setPathData(std::move(data));
         m_document->notifyShapeChanged(path);
         break;
@@ -1552,13 +1929,22 @@ void CanvasWidget::mouseReleaseEvent(QMouseEvent *event)
     case Drag::Create: {
         const QRectF bounds = m_creating;
         m_creating = QRectF();
-        if (bounds.width() * m_zoom >= kMinCreateSizePx && bounds.height() * m_zoom >= kMinCreateSizePx) {
-            const ShapeKind kind = m_tool == Tool::Ellipse ? ShapeKind::Ellipse : ShapeKind::Rectangle;
-            addNewShape(std::make_unique<Shape>(kind, bounds, m_defaultStyle));
+        if (m_tool == Tool::Line) {
+            if (distance(toWidget(m_dragStart), toWidget(m_lineEnd)) >= kMinCreateSizePx)
+                addNewShape(std::make_unique<Shape>(generators::line(m_dragStart, m_lineEnd), curveStyle(false)));
+        } else if (bounds.width() * m_zoom >= kMinCreateSizePx && bounds.height() * m_zoom >= kMinCreateSizePx) {
+            if (auto shape = createToolShape(bounds))
+                addNewShape(std::move(shape));
         }
         update();
         break;
     }
+
+    case Drag::Guide:
+        m_drag = Drag::Guide; // endGuideDrag finishes it
+        endGuideDrag(event->position());
+        setHoverCursor(event->position());
+        break;
 
     case Drag::NodeMove:
         commitPathEdit(m_pathBeforeEdit, tr("Move node"));
@@ -1640,9 +2026,16 @@ void CanvasWidget::keyPressEvent(QKeyEvent *event)
 {
     if (m_editText && handleTextKey(event))
         return;
-    if (event->key() == Qt::Key_Space && !event->isAutoRepeat()) {
-        m_spaceHeld = true;
-        updateCursor();
+    if (event->key() == Qt::Key_Space) {
+        if (!event->isAutoRepeat()) {
+            m_spaceHeld = true;
+            m_spacePanned = false;
+            updateCursor();
+        }
+        return;
+    }
+    if (m_tool == Tool::Eyedropper && m_eyedropperColor && event->key() == Qt::Key_Escape) {
+        setEyedropperColor(std::nullopt); // back to picking a colour
         return;
     }
     if (!m_bezier.nodes.empty()
@@ -1681,6 +2074,18 @@ void CanvasWidget::keyReleaseEvent(QKeyEvent *event)
 {
     if (event->key() == Qt::Key_Space && !event->isAutoRepeat()) {
         m_spaceHeld = false;
+        // A tap (no panning) switches to the pick tool, and the next tap back.
+        if (!m_spacePanned && m_drag == Drag::None) {
+            if (m_tool != Tool::Select) {
+                const Tool previous = m_tool;
+                setTool(Tool::Select);
+                m_toolBeforeSpace = previous;
+            } else if (m_toolBeforeSpace) {
+                const Tool previous = *m_toolBeforeSpace;
+                m_toolBeforeSpace.reset();
+                setTool(previous);
+            }
+        }
         updateCursor();
         return;
     }
