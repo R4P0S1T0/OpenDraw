@@ -48,10 +48,17 @@ PropertyBar::PropertyBar(Document *document, QUndoStack *undoStack, QWidget *par
     addSeparator();
     m_outline = addField(tr("Outline"), tr("Outline width (0 = no outline)"), 0.0);
     m_outline->setMaximum(100.0);
+    addSeparator();
+    m_opacity = addField(tr("Opacity"), tr("Opacity of the whole object (100 = solid)"), 0.0);
+    m_opacity->setRange(0.0, 100.0);
+    m_opacity->setDecimals(0);
+    m_opacity->setSuffix(QStringLiteral(" %"));
+    m_opacity->setMinimumWidth(70);
 
     for (QDoubleSpinBox *box : {m_x, m_y, m_width, m_height})
         connect(box, &QDoubleSpinBox::editingFinished, this, &PropertyBar::applyGeometry);
     connect(m_outline, &QDoubleSpinBox::editingFinished, this, &PropertyBar::applyOutlineWidth);
+    connect(m_opacity, &QDoubleSpinBox::editingFinished, this, &PropertyBar::applyOpacity);
     connect(m_document, &Document::changed, this, &PropertyBar::refresh);
 
     refresh();
@@ -83,7 +90,7 @@ void PropertyBar::setShape(Shape *shape)
 void PropertyBar::refresh()
 {
     const bool enabled = m_shape != nullptr;
-    for (QDoubleSpinBox *box : {m_x, m_y, m_width, m_height, m_outline}) {
+    for (QDoubleSpinBox *box : {m_x, m_y, m_width, m_height, m_outline, m_opacity}) {
         box->setEnabled(enabled);
         if (!enabled) {
             const QSignalBlocker blocker(box);
@@ -96,17 +103,49 @@ void PropertyBar::refresh()
     // A group has no outline of its own; colours and widths are set on its members.
     m_outline->setEnabled(m_shape->kind() != ShapeKind::Group);
 
+    // For a group, the opacity shown is that of its first member.
+    double opacity = 1.0;
+    bool found = false;
+    m_shape->forEachLeaf([&](Shape &leaf) {
+        if (!found) {
+            opacity = leaf.style().opacity;
+            found = true;
+        }
+    });
+
     const QRectF r = m_shape->bounds();
     const std::pair<QDoubleSpinBox *, double> values[] = {
         {m_x, toMm(r.x())},           {m_y, toMm(r.y())},
         {m_width, toMm(r.width())},   {m_height, toMm(r.height())},
         {m_outline, m_shape->style().hasStroke() ? toMm(m_shape->style().strokeWidth) : 0.0},
+        {m_opacity, opacity * 100.0},
     };
     for (const auto &[box, value] : values) {
         const QSignalBlocker blocker(box);
         box->setSpecialValueText(QString());
         box->setValue(value);
     }
+}
+
+void PropertyBar::applyOpacity()
+{
+    if (!m_shape)
+        return;
+    const double opacity = m_opacity->value() / 100.0;
+    std::vector<Shape *> changed;
+    m_shape->forEachLeaf([&](Shape &leaf) {
+        if (std::abs(leaf.style().opacity - opacity) > 0.001)
+            changed.push_back(&leaf);
+    });
+    if (changed.empty())
+        return;
+    m_undoStack->beginMacro(tr("Opacity"));
+    for (Shape *leaf : changed) {
+        Style style = leaf->style();
+        style.opacity = opacity;
+        m_undoStack->push(new SetStyleCommand(m_document, leaf, style));
+    }
+    m_undoStack->endMacro();
 }
 
 void PropertyBar::applyGeometry()

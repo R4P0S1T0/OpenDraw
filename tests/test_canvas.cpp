@@ -1,9 +1,12 @@
 #include "CanvasWidget.h"
+#include "FillDialog.h"
 #include "LayersPanel.h"
+#include "PropertyBar.h"
 #include "core/Commands.h"
 #include "core/Document.h"
 #include "core/Export.h"
 
+#include <QDoubleSpinBox>
 #include <QMouseEvent>
 #include <QToolButton>
 #include <QTreeWidget>
@@ -93,6 +96,8 @@ private slots:
     void textConvertsToCurves();
     void hiddenLayersAndPagesLimitSelection();
     void layersPanelEditsLayers();
+    void fillDialogBuildsGradients();
+    void propertyBarSetsOpacity();
     void screenshot();
 
 private:
@@ -540,6 +545,50 @@ void CanvasTests::layersPanelEditsLayers()
     QCOMPARE(m_doc->currentPage()->layers.size(), std::size_t(2));
 }
 
+void CanvasTests::fillDialogBuildsGradients()
+{
+    // A three-colour gradient (e.g. from an imported file) survives OK without changes.
+    Style imported;
+    imported.gradient = Gradient::linear(Qt::red, Qt::blue, 0);
+    imported.gradient->stops.insert(imported.gradient->stops.begin() + 1, {0.5, QColor(Qt::green)});
+    FillDialog untouched(imported);
+    QCOMPARE(untouched.applyTo(imported).gradient->stops.size(), std::size_t(3));
+
+    FillDialog dialog(Style{});
+    dialog.setFillType(FillDialog::FillType::Linear);
+    dialog.setColors(QColor(255, 0, 0), QColor(0, 0, 255));
+    dialog.setAngle(90);
+    const Style linear = dialog.applyTo(Style{});
+    QVERIFY(linear.gradient);
+    QCOMPARE(linear.gradient->type, Gradient::Type::Linear);
+    QVERIFY(qAbs(linear.gradient->angle() - 90) < 1e-6);
+    QCOMPARE(linear.gradient->stops.front().color, QColor(255, 0, 0));
+
+    dialog.setFillType(FillDialog::FillType::None);
+    const Style none = dialog.applyTo(linear);
+    QVERIFY(!none.hasFill());
+}
+
+void CanvasTests::propertyBarSetsOpacity()
+{
+    PropertyBar bar(m_doc, m_undo);
+    Shape *shape = m_doc->insertShape(-1, std::make_unique<Shape>(ShapeKind::Rectangle, QRectF(0, 0, 10, 10)));
+    bar.setShape(shape);
+
+    QDoubleSpinBox *opacity = nullptr;
+    for (QDoubleSpinBox *box : bar.findChildren<QDoubleSpinBox *>()) {
+        if (box->suffix() == QStringLiteral(" %"))
+            opacity = box;
+    }
+    QVERIFY(opacity);
+    QCOMPARE(opacity->value(), 100.0);
+    opacity->setValue(40);
+    emit opacity->editingFinished();
+    QCOMPARE(shape->style().opacity, 0.4);
+    m_undo->undo();
+    QCOMPARE(shape->style().opacity, 1.0);
+}
+
 // Not an assertion: saves a picture of the canvas for manual review when
 // OPENDRAW_SCREENSHOT_DIR is set.
 void CanvasTests::screenshot()
@@ -579,8 +628,18 @@ void CanvasTests::screenshot()
     QTest::keyClicks(m_canvas, QStringLiteral("text tool"));
     QVERIFY(m_canvas->grab().save(dir + QStringLiteral("/canvas-text.png")));
 
-    // The same drawing exported, to compare with what the canvas shows.
+    // Gradients and transparency.
     m_canvas->finishTextEdit();
+    Style linear;
+    linear.gradient = Gradient::linear(QColor(0xe5, 0x39, 0x35), QColor(0x1e, 0x88, 0xe5), 30);
+    m_doc->insertShape(-1, std::make_unique<Shape>(ShapeKind::Rectangle, QRectF(40, 900, 300, 150), linear));
+    Style radial;
+    radial.gradient = Gradient::radial(QColor(0xff, 0xf5, 0x9d), QColor(0xfb, 0x8c, 0x00));
+    radial.opacity = 0.7;
+    m_doc->insertShape(-1, std::make_unique<Shape>(ShapeKind::Ellipse, QRectF(250, 850, 250, 250), radial));
+    QVERIFY(m_canvas->grab().save(dir + QStringLiteral("/canvas-gradients.png")));
+
+    // The same drawing exported, to compare with what the canvas shows.
     exporter::ImageOptions options;
     options.dpi = 72;
     QVERIFY(exporter::renderImage(*m_doc, options).save(dir + QStringLiteral("/export.png")));

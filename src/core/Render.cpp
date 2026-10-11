@@ -5,7 +5,31 @@
 
 #include <QPainter>
 
+#include <algorithm>
+
 namespace opendraw::render {
+
+QBrush fillBrush(const Style &style)
+{
+    if (style.gradient) {
+        const Gradient &g = *style.gradient;
+        // Object-bounding mode: 0..1 spans the bounding box of the path being drawn.
+        auto setUp = [&g](QGradient &qg) {
+            qg.setCoordinateMode(QGradient::ObjectBoundingMode);
+            for (const GradientStop &stop : g.stops)
+                qg.setColorAt(std::clamp(stop.offset, 0.0, 1.0), stop.color);
+        };
+        if (g.type == Gradient::Type::Radial) {
+            QRadialGradient radial(g.center, g.radius);
+            setUp(radial);
+            return QBrush(radial);
+        }
+        QLinearGradient linear(g.start, g.end);
+        setUp(linear);
+        return QBrush(linear);
+    }
+    return style.fill.alpha() > 0 ? QBrush(style.fill) : QBrush(Qt::NoBrush);
+}
 
 void paintShape(QPainter &painter, const Shape &shape)
 {
@@ -15,9 +39,12 @@ void paintShape(QPainter &painter, const Shape &shape)
         return;
     }
     const Style &style = shape.style();
-    painter.setBrush(style.hasFill() ? QBrush(style.fill) : QBrush(Qt::NoBrush));
+    painter.save();
+    painter.setOpacity(painter.opacity() * std::clamp(style.opacity, 0.0, 1.0));
+    painter.setBrush(fillBrush(style));
     painter.setPen(style.hasStroke() ? QPen(style.stroke, style.strokeWidth) : QPen(Qt::NoPen));
     painter.drawPath(shape.path());
+    painter.restore();
 }
 
 void paintPage(QPainter &painter, const Page &page)

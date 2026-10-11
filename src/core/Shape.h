@@ -8,16 +8,47 @@
 #include <QTransform>
 
 #include <memory>
+#include <optional>
 #include <vector>
 
 namespace opendraw {
+
+struct GradientStop {
+    double offset = 0.0; // 0..1 along the gradient
+    QColor color;
+
+    bool operator==(const GradientStop &) const = default;
+};
+
+// Gradient fill. Positions are fractions of the object's bounding box (0,0 top-left,
+// 1,1 bottom-right), so the gradient moves and scales with the object.
+struct Gradient {
+    enum class Type { Linear, Radial };
+
+    Type type = Type::Linear;
+    std::vector<GradientStop> stops;
+    QPointF start{0.0, 0.5}; // linear
+    QPointF end{1.0, 0.5};   // linear
+    QPointF center{0.5, 0.5}; // radial
+    double radius = 0.5;      // radial
+
+    // Two-colour gradients across the box; 0 degrees runs left to right, 90 top to bottom.
+    static Gradient linear(const QColor &from, const QColor &to, double angleDegrees);
+    static Gradient radial(const QColor &inner, const QColor &outer);
+    // Direction of a linear gradient in degrees.
+    double angle() const;
+
+    bool operator==(const Gradient &) const = default;
+};
 
 struct Style {
     QColor fill = QColor(0x4a, 0x90, 0xd9);
     QColor stroke = QColor(0x1d, 0x2b, 0x3a);
     double strokeWidth = 1.0;
+    std::optional<Gradient> gradient; // when set, used instead of `fill`
+    double opacity = 1.0;             // of the whole object, fill and outline together
 
-    bool hasFill() const { return fill.alpha() > 0; }
+    bool hasFill() const { return gradient.has_value() || fill.alpha() > 0; }
     bool hasStroke() const { return stroke.alpha() > 0 && strokeWidth > 0.0; }
 };
 

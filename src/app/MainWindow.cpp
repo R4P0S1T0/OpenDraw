@@ -3,7 +3,9 @@
 #include "CanvasWidget.h"
 #include "ColorPalette.h"
 #include "ExportImageDialog.h"
+#include "FillDialog.h"
 #include "LayersPanel.h"
+#include "core/Render.h"
 #include "PropertyBar.h"
 #include "core/Export.h"
 #include "core/Commands.h"
@@ -139,6 +141,31 @@ QIcon swatchIcon(const QColor &color, bool outline)
 QString describeColor(const QColor &color)
 {
     return color.alpha() == 0 ? QCoreApplication::translate("MainWindow", "none") : color.name().toUpper();
+}
+
+QString describeFill(const Style &style)
+{
+    if (style.gradient) {
+        return style.gradient->type == Gradient::Type::Radial
+                   ? QCoreApplication::translate("MainWindow", "radial gradient")
+                   : QCoreApplication::translate("MainWindow", "linear gradient");
+    }
+    return describeColor(style.fill);
+}
+
+// Fill swatch that also shows gradients.
+QIcon fillSwatchIcon(const Style &style)
+{
+    if (!style.gradient)
+        return swatchIcon(style.fill, false);
+    QPixmap pixmap(32, 32);
+    pixmap.fill(Qt::transparent);
+    QPainter p(&pixmap);
+    p.setRenderHint(QPainter::Antialiasing);
+    p.setPen(QPen(QColor(0, 0, 0, 120), 1));
+    p.setBrush(render::fillBrush(style));
+    p.drawRoundedRect(QRectF(5.5, 5.5, 21, 21), 3, 3);
+    return QIcon(pixmap);
 }
 
 const QString kSvgFilter = QStringLiteral("SVG (*.svg)");
@@ -424,7 +451,8 @@ void MainWindow::createActions()
     }
 
     toolBar->addSeparator();
-    m_fillAction = toolBar->addAction(tr("Fill Color…"), this, &MainWindow::chooseFillColor);
+    m_fillAction = toolBar->addAction(tr("Fill…"), this, &MainWindow::chooseFillColor);
+    m_fillAction->setToolTip(tr("Fill: colour or gradient (Shift+F11)"));
     m_fillAction->setShortcut(QKeySequence(Qt::SHIFT | Qt::Key_F11));
     m_outlineAction = toolBar->addAction(tr("Outline Color…"), this, &MainWindow::chooseOutlineColor);
     m_outlineAction->setShortcut(QKeySequence(Qt::SHIFT | Qt::Key_F12));
@@ -649,10 +677,16 @@ const Style &MainWindow::displayedStyle() const
 
 void MainWindow::chooseFillColor()
 {
-    const QColor color =
-        QColorDialog::getColor(displayedStyle().fill, this, tr("Fill Color"), QColorDialog::ShowAlphaChannel);
-    if (color.isValid())
-        applyFill(color);
+    FillDialog dialog(displayedStyle(), this);
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+    if (!m_canvas->selection().empty()) {
+        restyleSelection(tr("Fill"), [&dialog](Style &style) { style = dialog.applyTo(style); });
+    } else {
+        m_canvas->setDefaultStyle(dialog.applyTo(m_canvas->defaultStyle()));
+        statusBar()->showMessage(tr("Default fill for new shapes changed"), 3000);
+    }
+    updateStyleIndicators();
 }
 
 void MainWindow::chooseOutlineColor()
@@ -681,10 +715,14 @@ void MainWindow::restyleSelection(const QString &text, const std::function<void(
 void MainWindow::applyFill(const QColor &color)
 {
     if (!m_canvas->selection().empty()) {
-        restyleSelection(tr("Fill"), [&color](Style &style) { style.fill = color; });
+        restyleSelection(tr("Fill"), [&color](Style &style) {
+            style.fill = color;
+            style.gradient.reset(); // a palette colour replaces a gradient
+        });
     } else {
         Style defaults = m_canvas->defaultStyle();
         defaults.fill = color;
+        defaults.gradient.reset();
         m_canvas->setDefaultStyle(defaults);
         statusBar()->showMessage(tr("Default fill for new shapes: %1").arg(describeColor(color)), 3000);
     }
@@ -817,7 +855,7 @@ void MainWindow::updateStyleIndicators()
 {
     Shape *selected = m_canvas->selectedShape();
     const Style &style = displayedStyle();
-    m_fillAction->setIcon(swatchIcon(style.fill, false));
+    m_fillAction->setIcon(fillSwatchIcon(style));
     m_outlineAction->setIcon(swatchIcon(style.hasStroke() ? style.stroke : QColor(Qt::transparent), true));
 
     const QString outline = style.hasStroke()
@@ -852,7 +890,10 @@ void MainWindow::updateStyleIndicators()
         }
         }
     }
-    m_styleLabel->setText(tr("%1 — Fill: %2   Outline: %3").arg(prefix, describeColor(style.fill), outline));
+    QString text = tr("%1 — Fill: %2   Outline: %3").arg(prefix, describeFill(style), outline);
+    if (style.opacity < 1.0)
+        text += tr("   Opacity: %1%").arg(qRound(style.opacity * 100));
+    m_styleLabel->setText(text);
 }
 
 void MainWindow::about()

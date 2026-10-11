@@ -24,6 +24,7 @@ private:
     void refresh();
     void applyGeometry();
     void applyOutlineWidth();
+    void applyOpacity();
 
     Document *m_document;
     QUndoStack *m_undoStack;
@@ -34,6 +35,7 @@ private:
     QDoubleSpinBox *m_width;
     QDoubleSpinBox *m_height;
     QDoubleSpinBox *m_outline;
+    QDoubleSpinBox *m_opacity;
 };
 
 } // namespace opendraw

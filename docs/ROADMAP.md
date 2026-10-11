@@ -43,7 +43,8 @@ Rough order of work. Items move as contributors pick them up.
 
 ## Later
 
-- Gradients, patterns and transparency
+- [x] Linear and radial gradients, object opacity (SVG import/export, including Inkscape-style `xlink:href` gradients)
+- Interactive gradient handles on the canvas, editing more than two colours, patterns
 - Effects (shadow, blend, contour)
 - Colour management (CMYK, ICC profiles)
 - Plugin / scripting API

@@ -13,6 +13,36 @@ namespace opendraw {
 
 namespace {
 std::atomic<quint64> nextShapeId{1};
+constexpr double kPi = 3.14159265358979323846;
+}
+
+Gradient Gradient::linear(const QColor &from, const QColor &to, double angleDegrees)
+{
+    Gradient g;
+    g.type = Type::Linear;
+    g.stops = {{0.0, from}, {1.0, to}};
+    const double a = angleDegrees * kPi / 180.0;
+    const QPointF half(0.5 * std::cos(a), 0.5 * std::sin(a));
+    g.start = QPointF(0.5, 0.5) - half;
+    g.end = QPointF(0.5, 0.5) + half;
+    return g;
+}
+
+Gradient Gradient::radial(const QColor &inner, const QColor &outer)
+{
+    Gradient g;
+    g.type = Type::Radial;
+    g.stops = {{0.0, inner}, {1.0, outer}};
+    return g;
+}
+
+double Gradient::angle() const
+{
+    const QPointF d = end - start;
+    double degrees = std::atan2(d.y(), d.x()) * 180.0 / kPi;
+    if (degrees < 0)
+        degrees += 360.0;
+    return degrees;
 }
 
 Shape::Shape(ShapeKind kind, const QRectF &bounds, const Style &style)

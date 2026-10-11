@@ -43,16 +43,56 @@ void writePaint(QXmlStreamWriter &w, const QString &name, const QColor &color, b
         w.writeAttribute(name + QStringLiteral("-opacity"), number(color.alphaF()));
 }
 
-void writeStyle(QXmlStreamWriter &w, const Style &style)
+// Gradients are stored in bounding-box units, which is exactly the model's representation.
+void writeGradient(QXmlStreamWriter &w, const Gradient &g, const QString &id)
 {
-    writePaint(w, QStringLiteral("fill"), style.fill, style.hasFill());
+    if (g.type == Gradient::Type::Radial) {
+        w.writeStartElement(QStringLiteral("radialGradient"));
+        w.writeAttribute(QStringLiteral("id"), id);
+        w.writeAttribute(QStringLiteral("cx"), number(g.center.x()));
+        w.writeAttribute(QStringLiteral("cy"), number(g.center.y()));
+        w.writeAttribute(QStringLiteral("r"), number(g.radius));
+    } else {
+        w.writeStartElement(QStringLiteral("linearGradient"));
+        w.writeAttribute(QStringLiteral("id"), id);
+        w.writeAttribute(QStringLiteral("x1"), number(g.start.x()));
+        w.writeAttribute(QStringLiteral("y1"), number(g.start.y()));
+        w.writeAttribute(QStringLiteral("x2"), number(g.end.x()));
+        w.writeAttribute(QStringLiteral("y2"), number(g.end.y()));
+    }
+    w.writeAttribute(QStringLiteral("gradientUnits"), QStringLiteral("objectBoundingBox"));
+    for (const GradientStop &stop : g.stops) {
+        w.writeEmptyElement(QStringLiteral("stop"));
+        w.writeAttribute(QStringLiteral("offset"), number(stop.offset));
+        w.writeAttribute(QStringLiteral("stop-color"), stop.color.name(QColor::HexRgb));
+        if (stop.color.alpha() < 255)
+            w.writeAttribute(QStringLiteral("stop-opacity"), number(stop.color.alphaF()));
+    }
+    w.writeEndElement();
+}
+
+void writeStyle(QXmlStreamWriter &w, const Style &style, const QString &gradientId)
+{
+    if (!gradientId.isEmpty())
+        w.writeAttribute(QStringLiteral("fill"), QStringLiteral("url(#%1)").arg(gradientId));
+    else
+        writePaint(w, QStringLiteral("fill"), style.fill, style.hasFill());
     writePaint(w, QStringLiteral("stroke"), style.stroke, style.hasStroke());
     if (style.hasStroke())
         w.writeAttribute(QStringLiteral("stroke-width"), number(style.strokeWidth));
+    if (style.opacity < 1.0)
+        w.writeAttribute(QStringLiteral("opacity"), number(std::clamp(style.opacity, 0.0, 1.0)));
 }
 
-void writeShape(QXmlStreamWriter &w, const Shape &shape)
+void writeShape(QXmlStreamWriter &w, const Shape &shape, int &gradientCount)
 {
+    // A gradient is written right before the element that uses it.
+    QString gradientId;
+    if (shape.kind() != ShapeKind::Group && shape.style().gradient) {
+        gradientId = QStringLiteral("gradient%1").arg(++gradientCount);
+        writeGradient(w, *shape.style().gradient, gradientId);
+    }
+
     switch (shape.kind()) {
     case ShapeKind::Rectangle: {
         const QRectF r = shape.bounds();
@@ -79,7 +119,7 @@ void writeShape(QXmlStreamWriter &w, const Shape &shape)
     case ShapeKind::Group:
         w.writeStartElement(QStringLiteral("g"));
         for (const auto &child : shape.children())
-            writeShape(w, *child);
+            writeShape(w, *child, gradientCount);
         w.writeEndElement();
         return;
     case ShapeKind::Text: {
@@ -98,7 +138,7 @@ void writeShape(QXmlStreamWriter &w, const Shape &shape)
         if (f.align != TextAlign::Left)
             w.writeAttribute(QStringLiteral("text-anchor"),
                              f.align == TextAlign::Center ? QStringLiteral("middle") : QStringLiteral("end"));
-        writeStyle(w, shape.style());
+        writeStyle(w, shape.style(), gradientId);
         // One tspan per line, each on its own baseline.
         const QStringList lines = shape.textData().text.split(QLatin1Char('\n'));
         for (int i = 0; i < lines.size(); ++i) {
@@ -112,7 +152,7 @@ void writeShape(QXmlStreamWriter &w, const Shape &shape)
         return;
     }
     }
-    writeStyle(w, shape.style());
+    writeStyle(w, shape.style(), gradientId);
     w.writeEndElement();
 }
 
@@ -300,19 +340,30 @@ public:
         return parseLength(value(name)).value_or(fallback);
     }
 
+    // A gradient fill is not resolved here (it needs the shape's bounds); see fillReference().
     Style style(double strokeScale, ReadReport &report) const
     {
         // SVG defaults: black fill, no stroke, width 1.
         Style style;
-        style.fill = paint(QStringLiteral("fill"), QColor(Qt::black), report);
+        style.fill = fillReference().isEmpty() ? paint(QStringLiteral("fill"), QColor(Qt::black), report)
+                                               : QColor(Qt::transparent);
         style.stroke = paint(QStringLiteral("stroke"), QColor(Qt::transparent), report);
         style.strokeWidth = length(QStringLiteral("stroke-width"), 1.0) * strokeScale;
         applyOpacity(style.fill, value(QStringLiteral("fill-opacity")));
         applyOpacity(style.stroke, value(QStringLiteral("stroke-opacity")));
-        const QString opacity = own(QStringLiteral("opacity"));
-        applyOpacity(style.fill, opacity);
-        applyOpacity(style.stroke, opacity);
+        bool ok = false;
+        const double opacity = own(QStringLiteral("opacity")).toDouble(&ok);
+        if (ok)
+            style.opacity = std::clamp(opacity, 0.0, 1.0);
         return style;
+    }
+
+    // Id of the paint server in fill="url(#id)", or empty.
+    QString fillReference() const
+    {
+        static const QRegularExpression url(QStringLiteral(R"(^\s*url\(\s*['"]?#([^)'"\s]+))"));
+        const QRegularExpressionMatch match = url.match(value(QStringLiteral("fill")));
+        return match.hasMatch() ? match.captured(1) : QString();
     }
 
 private:
@@ -322,7 +373,7 @@ private:
         if (v.isEmpty())
             return fallback;
         if (v.startsWith(u"url(")) {
-            ++report.skippedElements[tr("gradient or pattern paint (replaced with gray)")];
+            ++report.skippedElements[tr("gradient or pattern outline (replaced with gray)")];
             return QColor(0x80, 0x80, 0x80);
         }
         if (v == u"currentColor")
@@ -395,6 +446,158 @@ TextFormat textFormat(const Properties &props)
 
 // Reads a whole <text> element (the reader sits on its start tag) into a text object.
 // Each <tspan> with its own y or dy starts a new line.
+// ---------------------------------------------------------------------------------------------
+// Gradients
+
+// A <linearGradient> or <radialGradient> as written in the file; unset attributes may come
+// from the gradient it references with xlink:href.
+struct GradientDef {
+    Gradient::Type type = Gradient::Type::Linear;
+    QString href;
+    QHash<QString, QString> attributes; // x1, y1, x2, y2, cx, cy, r, gradientUnits, gradientTransform
+    std::vector<GradientStop> stops;
+};
+using GradientDefs = QHash<QString, GradientDef>;
+
+double parseOffset(QStringView text)
+{
+    text = text.trimmed();
+    const bool percent = text.endsWith(u'%');
+    if (percent)
+        text.chop(1);
+    return std::clamp(text.toDouble() / (percent ? 100.0 : 1.0), 0.0, 1.0);
+}
+
+// Gradients can be defined anywhere, also after the shapes using them, so they are
+// collected in a separate pass over the file.
+GradientDefs collectGradients(const QByteArray &data)
+{
+    GradientDefs defs;
+    QXmlStreamReader r(data);
+    QString current;
+    while (!r.atEnd()) {
+        r.readNext();
+        if (r.isEndElement() && (r.name() == u"linearGradient" || r.name() == u"radialGradient")) {
+            current.clear();
+            continue;
+        }
+        if (!r.isStartElement())
+            continue;
+        const QXmlStreamAttributes a = r.attributes();
+        if (r.name() == u"linearGradient" || r.name() == u"radialGradient") {
+            current = a.value(QStringLiteral("id")).toString();
+            GradientDef def;
+            def.type = r.name() == u"radialGradient" ? Gradient::Type::Radial : Gradient::Type::Linear;
+            QString href = a.value(QStringLiteral("http://www.w3.org/1999/xlink"), QStringLiteral("href")).toString();
+            if (href.isEmpty())
+                href = a.value(QStringLiteral("href")).toString();
+            def.href = href.startsWith(u'#') ? href.mid(1) : QString();
+            for (const QString &name : {QStringLiteral("x1"), QStringLiteral("y1"), QStringLiteral("x2"),
+                                        QStringLiteral("y2"), QStringLiteral("cx"), QStringLiteral("cy"),
+                                        QStringLiteral("r"), QStringLiteral("gradientUnits"),
+                                        QStringLiteral("gradientTransform")}) {
+                if (a.hasAttribute(name))
+                    def.attributes.insert(name, a.value(name).toString());
+            }
+            if (!current.isEmpty())
+                defs.insert(current, def);
+        } else if (r.name() == u"stop" && !current.isEmpty() && defs.contains(current)) {
+            const Properties props(a, {});
+            QColor color = parseColor(props.value(QStringLiteral("stop-color"))).value_or(QColor(Qt::black));
+            bool ok = false;
+            const double opacity = props.value(QStringLiteral("stop-opacity")).toDouble(&ok);
+            if (ok)
+                color.setAlphaF(color.alphaF() * std::clamp(opacity, 0.0, 1.0));
+            defs[current].stops.push_back({parseOffset(a.value(QStringLiteral("offset"))), color});
+        }
+    }
+    return defs;
+}
+
+// Follows xlink:href so inherited stops and attributes are filled in.
+GradientDef resolveGradient(const GradientDefs &defs, const QString &id, int depth = 0)
+{
+    GradientDef def = defs.value(id);
+    if (def.href.isEmpty() || depth > 8 || !defs.contains(def.href))
+        return def;
+    const GradientDef base = resolveGradient(defs, def.href, depth + 1);
+    if (def.stops.empty())
+        def.stops = base.stops;
+    for (auto it = base.attributes.cbegin(); it != base.attributes.cend(); ++it) {
+        if (!def.attributes.contains(it.key()))
+            def.attributes.insert(it.key(), it.value());
+    }
+    return def;
+}
+
+// Converts a file gradient to bounding-box fractions of the shape it fills.
+std::optional<Gradient> toGradient(const GradientDef &def, const QRectF &bounds, const QTransform &context)
+{
+    if (def.stops.empty())
+        return std::nullopt;
+    const bool userSpace = def.attributes.value(QStringLiteral("gradientUnits")) == u"userSpaceOnUse";
+    const QTransform gradientTransform = parseTransform(def.attributes.value(QStringLiteral("gradientTransform")));
+
+    // Percentages are fractions of the box; plain numbers are fractions (bounding-box units)
+    // or user units (userSpaceOnUse).
+    auto coordinate = [&def](const QString &name, double fallback) {
+        const QString text = def.attributes.value(name).trimmed();
+        if (text.isEmpty())
+            return fallback;
+        if (text.endsWith(u'%'))
+            return QStringView(text).chopped(1).toDouble() / 100.0;
+        return parseLength(text).value_or(fallback);
+    };
+    const double width = std::max(bounds.width(), 1e-9);
+    const double height = std::max(bounds.height(), 1e-9);
+    auto toFraction = [&](const QPointF &p) {
+        if (!userSpace)
+            return gradientTransform.map(p);
+        const QPointF mapped = (gradientTransform * context).map(p);
+        return QPointF((mapped.x() - bounds.left()) / width, (mapped.y() - bounds.top()) / height);
+    };
+
+    Gradient g;
+    g.type = def.type;
+    g.stops = def.stops;
+    if (g.stops.size() == 1)
+        g.stops.push_back({1.0, g.stops.front().color});
+    if (def.type == Gradient::Type::Linear) {
+        g.start = toFraction({coordinate(QStringLiteral("x1"), 0.0), coordinate(QStringLiteral("y1"), 0.0)});
+        g.end = toFraction({coordinate(QStringLiteral("x2"), 1.0), coordinate(QStringLiteral("y2"), 0.0)});
+    } else {
+        g.center = toFraction({coordinate(QStringLiteral("cx"), 0.5), coordinate(QStringLiteral("cy"), 0.5)});
+        double radius = coordinate(QStringLiteral("r"), 0.5);
+        if (userSpace) // a circle in user units, approximated against the box's average side
+            radius = radius * std::sqrt(std::abs((gradientTransform * context).determinant())) / ((width + height) / 2.0);
+        g.radius = radius;
+    }
+    return g;
+}
+
+void applyFillGradient(Shape &shape, const Properties &props, const QTransform &context, const GradientDefs &defs,
+                       ReadReport &report)
+{
+    const QString id = props.fillReference();
+    if (id.isEmpty())
+        return;
+    Style style = shape.style();
+    if (const auto gradient = toGradient(resolveGradient(defs, id), shape.bounds(), context)) {
+        style.gradient = *gradient;
+        // fill-opacity applies to every stop.
+        bool ok = false;
+        const double opacity = props.value(QStringLiteral("fill-opacity")).toDouble(&ok);
+        if (ok) {
+            for (GradientStop &stop : style.gradient->stops)
+                stop.color.setAlphaF(stop.color.alphaF() * std::clamp(opacity, 0.0, 1.0));
+        }
+    } else {
+        style.fill = QColor(0x80, 0x80, 0x80);
+        ++report.skippedElements[QCoreApplication::translate("SvgIO", "pattern fill (replaced with gray)")];
+    }
+    shape.setStyle(style);
+}
+
 std::unique_ptr<Shape> readText(QXmlStreamReader &r, const Properties &props, const Context &context,
                                 ReadReport &report)
 {
@@ -505,7 +708,8 @@ bool write(const Document &document, QIODevice *device)
     w.writeAttribute(QString::fromLatin1(kNamespace), QStringLiteral("page-name"), document.pages().front()->name);
 
     // Layers use Inkscape's layer markup too, so other editors show them as layers.
-    auto writeLayer = [&w](const Layer &layer) {
+    int gradientCount = 0;
+    auto writeLayer = [&w, &gradientCount](const Layer &layer) {
         w.writeStartElement(QStringLiteral("g"));
         w.writeAttribute(QString::fromLatin1(kNamespace), QStringLiteral("layer"), layer.name);
         w.writeAttribute(QString::fromLatin1(kInkscapeNamespace), QStringLiteral("groupmode"), QStringLiteral("layer"));
@@ -515,7 +719,7 @@ bool write(const Document &document, QIODevice *device)
         if (layer.locked)
             w.writeAttribute(QString::fromLatin1(kNamespace), QStringLiteral("locked"), QStringLiteral("true"));
         for (const auto &shape : layer.shapes)
-            writeShape(w, *shape);
+            writeShape(w, *shape, gradientCount);
         w.writeEndElement();
     };
 
@@ -539,7 +743,9 @@ bool write(const Document &document, QIODevice *device)
 
 bool read(QIODevice *device, Document &document, QString *errorMessage, ReadReport *report)
 {
-    QXmlStreamReader r(device);
+    const QByteArray data = device->readAll();
+    const GradientDefs gradients = collectGradients(data);
+    QXmlStreamReader r(data);
     QSizeF pageSize = Document::defaultPageSize();
     bool foundSvg = false;
     ReadReport localReport;
@@ -654,8 +860,10 @@ bool read(QIODevice *device, Document &document, QString *errorMessage, ReadRepo
                             props.length(QStringLiteral("height"), pageSize.height())};
             }
         } else if (name == u"text" && context.rendering) {
-            if (auto text = readText(r, props, context, localReport))
+            if (auto text = readText(r, props, context, localReport)) {
+                applyFillGradient(*text, props, context.transform, gradients, localReport);
                 containers.back().push_back(std::move(text));
+            }
             continue; // readText consumed the whole element, end tag included
         } else if (context.rendering) {
             const QTransform &t = context.transform;
@@ -707,8 +915,10 @@ bool read(QIODevice *device, Document &document, QString *errorMessage, ReadRepo
                 ++localReport.skippedElements[QStringLiteral("<%1>").arg(name)];
             }
 
-            if (shape)
+            if (shape) {
+                applyFillGradient(*shape, props, t, gradients, localReport);
                 containers.back().push_back(std::move(shape));
+            }
 
             if (name == u"g") {
                 context.role = Role::Group;
