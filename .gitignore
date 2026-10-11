@@ -1,5 +1,6 @@
 /build*/
 /out/
+/dist/
 CMakeUserPresets.json
 CMakeLists.txt.user*
 .vs/

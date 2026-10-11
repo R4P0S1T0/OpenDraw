@@ -1,8 +1,14 @@
 name: build
 
+# Every push builds, tests and packages OpenDraw for Linux and Windows; the packages are kept as
+# workflow artifacts. Pushing a tag like v0.4.0 also publishes them as a GitHub release
+# (marked as a pre-release while the version is 0.x).
 on:
   push:
   pull_request:
+
+permissions:
+  contents: read
 
 jobs:
   linux:
@@ -10,19 +16,51 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then v="${GITHUB_REF_NAME#v}"; else v="dev-${GITHUB_SHA::7}"; fi
+          echo "VERSION=$v" >> "$GITHUB_ENV"
+
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build qt6-base-dev libgl-dev libxkbcommon-dev
+          sudo apt-get install -y cmake ninja-build qt6-base-dev qmake6 libgl-dev libxkbcommon-dev \
+              libfuse2 file 2>&1 | tail -n 3
 
       - name: Configure
-        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr 2>&1 | tee -a ci.log
 
       - name: Build
-        run: cmake --build build
+        run: cmake --build build 2>&1 | tee -a ci.log
 
       - name: Test
-        run: ctest --test-dir build --output-on-failure
+        run: ctest --test-dir build --output-on-failure 2>&1 | tee -a ci.log
+
+      - name: Package AppImage
+        run: |
+          DESTDIR="$PWD/AppDir" cmake --install build 2>&1 | tee -a ci.log
+          base=https://github.com/linuxdeploy
+          wget -q "$base/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage"
+          wget -q "$base/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage"
+          chmod +x linuxdeploy*.AppImage
+          export QMAKE=/usr/bin/qmake6 APPIMAGE_EXTRACT_AND_RUN=1 LINUXDEPLOY_OUTPUT_VERSION="$VERSION"
+          ./linuxdeploy-x86_64.AppImage --appdir AppDir --plugin qt --output appimage \
+              --desktop-file AppDir/usr/share/applications/opendraw.desktop \
+              --icon-file AppDir/usr/share/icons/hicolor/256x256/apps/opendraw.png 2>&1 | tee -a ci.log
+          mv OpenDraw-*.AppImage "OpenDraw-$VERSION-linux-x86_64.AppImage"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OpenDraw-linux
+          path: OpenDraw-*.AppImage
+          if-no-files-found: error
+
+      # Full logs need a GitHub login; this puts the end of the log in a public annotation.
+      - name: Report failure
+        if: failure()
+        run: |
+          tail -c 3500 ci.log | sed -e 's/%/%25/g' -e 's/\r/%0D/g' | sed -e ':a;N;$!ba;s/\n/%0A/g' > tail.txt || true
+          echo "::error title=Linux build log (tail)::$(cat tail.txt)"
 
   windows:
     runs-on: windows-latest
@@ -41,12 +79,62 @@ jobs:
             mingw-w64-ucrt-x86_64-cmake
             mingw-w64-ucrt-x86_64-ninja
             mingw-w64-ucrt-x86_64-qt6-base
+            mingw-w64-ucrt-x86_64-qt6-tools
+            zip
+
+      - name: Version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then v="${GITHUB_REF_NAME#v}"; else v="dev-${GITHUB_SHA::7}"; fi
+          echo "VERSION=$v" >> "$GITHUB_ENV"
 
       - name: Configure
-        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+        run: |
+          set -o pipefail
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release 2>&1 | tee -a ci.log
 
       - name: Build
-        run: cmake --build build
+        run: |
+          set -o pipefail
+          cmake --build build 2>&1 | tee -a ci.log
 
       - name: Test
-        run: ctest --test-dir build --output-on-failure
+        run: |
+          set -o pipefail
+          ctest --test-dir build --output-on-failure 2>&1 | tee -a ci.log
+
+      - name: Package
+        run: |
+          set -o pipefail
+          bash packaging/windows/deploy.sh build "dist/OpenDraw-$VERSION" 2>&1 | tee -a ci.log
+          (cd dist && zip -qr "../OpenDraw-$VERSION-windows-x64.zip" "OpenDraw-$VERSION")
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OpenDraw-windows
+          path: OpenDraw-*.zip
+          if-no-files-found: error
+
+      - name: Report failure
+        if: failure()
+        run: |
+          tail -c 3500 ci.log | sed -e 's/%/%25/g' -e 's/\r/%0D/g' | sed -e ':a;N;$!ba;s/\n/%0A/g' > tail.txt || true
+          echo "::error title=Windows build log (tail)::$(cat tail.txt)"
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [linux, windows]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            OpenDraw-*.AppImage
+            OpenDraw-*.zip
+          prerelease: ${{ startsWith(github.ref_name, 'v0.') }}
+          generate_release_notes: true

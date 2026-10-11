@@ -24,6 +24,11 @@ OpenDraw is a free, open-source, cross-platform vector graphics editor for Linux
 
 See [docs/ROADMAP.md](docs/ROADMAP.md) for what is planned next.
 
+## Download
+
+- **Releases:** tested builds for Windows (`.zip`, unzip and run `opendraw.exe`) and Linux (`.AppImage`, make it executable and run) are published on the [Releases page](https://github.com/R4P0S1T0/OpenDraw/releases) when a version is tagged. Versions before 1.0 are alpha quality.
+- **Development builds:** every commit is built by [GitHub Actions](https://github.com/R4P0S1T0/OpenDraw/actions/workflows/build.yml); open a run and download the `OpenDraw-windows` or `OpenDraw-linux` artifact (requires a GitHub login).
+
 ## Using it
 
 | Action | How |
