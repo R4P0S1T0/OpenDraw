@@ -6,6 +6,7 @@
 #include "core/Generators.h"
 #include "core/PathOps.h"
 #include "core/Render.h"
+#include "core/RichText.h"
 #include "core/SvgIO.h"
 #include "core/TextLayout.h"
 
@@ -721,29 +722,72 @@ void CanvasWidget::updateCursor()
 // ---------------------------------------------------------------------------------------------
 // Text tool
 
+std::pair<int, int> CanvasWidget::textSelection() const
+{
+    if (!m_editText || m_textAnchor < 0 || m_textAnchor == m_textCursor)
+        return {m_textCursor, m_textCursor};
+    return {std::min(m_textAnchor, m_textCursor), std::max(m_textAnchor, m_textCursor)};
+}
+
+void CanvasWidget::setTextCursor(int position, bool extendSelection)
+{
+    if (!m_editText)
+        return;
+    position = std::clamp(position, 0, int(m_editText->textData().text.size()));
+    if (extendSelection) {
+        if (m_textAnchor < 0)
+            m_textAnchor = m_textCursor;
+    } else {
+        m_textAnchor = -1;
+    }
+    m_textCursor = position;
+    update();
+    emit textEditingChanged();
+}
+
 TextFormat CanvasWidget::currentTextFormat() const
 {
-    if (m_editText)
-        return m_editText->textData().format;
+    if (m_editText) {
+        // The format typing continues: the selected part's start, or the letter before the caret.
+        const TextData &data = m_editText->textData();
+        const auto [start, end] = textSelection();
+        const int index = start < end ? start : std::max(m_textCursor - 1, 0);
+        return data.text.isEmpty() ? data.format : richtext::effectiveFormat(data, index);
+    }
     if (const Shape *shape = selectedShape(); shape && shape->kind() == ShapeKind::Text)
-        return shape->textData().format;
+        return richtext::effectiveFormat(shape->textData(), 0);
     return m_defaultTextFormat;
 }
 
 void CanvasWidget::setTextFormat(const TextFormat &format)
 {
+    const TextFormat current = currentTextFormat();
+    CharFormat change;
+    if (format.family != current.family)
+        change.family = format.family;
+    if (std::abs(format.size - current.size) > 1e-9)
+        change.size = format.size;
+    if (format.bold != current.bold)
+        change.bold = format.bold;
+    if (format.italic != current.italic)
+        change.italic = format.italic;
+    if (!change.isEmpty())
+        applyCharFormat(change);
+
+    // Alignment and line spacing belong to whole texts.
+    if (format.align == current.align && format.lineSpacing == current.lineSpacing)
+        return;
+    auto paragraphFormat = [&format](TextData &data) {
+        data.format.align = format.align;
+        data.format.lineSpacing = format.lineSpacing;
+    };
     if (m_editText) {
         TextData data = m_editText->textData();
-        data.format = format;
-        m_editText->setTextData(std::move(data));
-        m_defaultTextFormat = format;
-        if (m_pendingText)
-            update();
-        else
-            m_document->notifyShapeChanged(m_editText);
+        paragraphFormat(data);
+        setEditedData(std::move(data), m_textCursor);
+        m_defaultTextFormat.align = format.align;
         return;
     }
-
     std::vector<Shape *> texts;
     for (Shape *shape : m_selection) {
         shape->forEachLeaf([&texts](Shape &leaf) {
@@ -752,13 +796,67 @@ void CanvasWidget::setTextFormat(const TextFormat &format)
         });
     }
     if (texts.empty()) {
-        m_defaultTextFormat = format;
+        m_defaultTextFormat.align = format.align;
+        m_defaultTextFormat.lineSpacing = format.lineSpacing;
         return;
     }
     m_undoStack->beginMacro(tr("Text format"));
     for (Shape *text : texts) {
         TextData data = text->textData();
-        data.format = format;
+        paragraphFormat(data);
+        if (data != text->textData())
+            m_undoStack->push(new SetTextCommand(m_document, text, text->textData(), data, tr("Text format")));
+    }
+    m_undoStack->endMacro();
+}
+
+void CanvasWidget::applyCharFormat(const CharFormat &change)
+{
+    auto merge = [&change](CharFormat &c) {
+        if (change.family)
+            c.family = change.family;
+        if (change.size)
+            c.size = change.size;
+        if (change.bold)
+            c.bold = change.bold;
+        if (change.italic)
+            c.italic = change.italic;
+        if (change.color)
+            c.color = change.color;
+    };
+    if (m_editText) {
+        TextData data = m_editText->textData();
+        const auto [start, end] = textSelection();
+        if (start < end)
+            richtext::apply(data, start, end, merge);
+        else
+            richtext::applyToAll(data, change);
+        setEditedData(std::move(data), m_textCursor);
+        return;
+    }
+    std::vector<Shape *> texts;
+    for (Shape *shape : m_selection) {
+        shape->forEachLeaf([&texts](Shape &leaf) {
+            if (leaf.kind() == ShapeKind::Text)
+                texts.push_back(&leaf);
+        });
+    }
+    if (texts.empty()) {
+        // The format new text starts with.
+        if (change.family)
+            m_defaultTextFormat.family = *change.family;
+        if (change.size)
+            m_defaultTextFormat.size = *change.size;
+        if (change.bold)
+            m_defaultTextFormat.bold = *change.bold;
+        if (change.italic)
+            m_defaultTextFormat.italic = *change.italic;
+        return;
+    }
+    m_undoStack->beginMacro(tr("Text format"));
+    for (Shape *text : texts) {
+        TextData data = text->textData();
+        richtext::applyToAll(data, change);
         if (data != text->textData())
             m_undoStack->push(new SetTextCommand(m_document, text, text->textData(), data, tr("Text format")));
     }
@@ -772,6 +870,7 @@ void CanvasWidget::beginTextEdit(Shape *text)
     m_editText = text;
     m_textBeforeEdit = text->textData();
     m_textCursor = int(text->textData().text.size());
+    m_textAnchor = -1;
     update();
     emit textEditingChanged();
 }
@@ -785,6 +884,7 @@ void CanvasWidget::beginNewText(const QPointF &origin, const QSizeF &frame)
     m_editText = m_pendingText.get();
     m_textBeforeEdit = {};
     m_textCursor = 0;
+    m_textAnchor = -1;
     update();
     emit textEditingChanged();
 }
@@ -795,6 +895,7 @@ void CanvasWidget::finishTextEdit()
         return;
     Shape *text = m_editText;
     m_editText = nullptr;
+    m_textAnchor = -1;
 
     if (m_pendingText) {
         std::unique_ptr<Shape> pending = std::move(m_pendingText);
@@ -814,16 +915,37 @@ void CanvasWidget::finishTextEdit()
     emit textEditingChanged();
 }
 
-void CanvasWidget::setEditedText(const QString &text, int cursor)
+void CanvasWidget::setEditedData(TextData data, int cursor)
 {
-    TextData data = m_editText->textData();
-    data.text = text;
+    m_textCursor = std::clamp(cursor, 0, int(data.text.size()));
+    if (m_textAnchor > int(data.text.size()))
+        m_textAnchor = -1;
     m_editText->setTextData(std::move(data));
-    m_textCursor = std::clamp(cursor, 0, int(text.size()));
     if (m_pendingText)
         update();
     else
         m_document->notifyShapeChanged(m_editText);
+    emit textEditingChanged();
+}
+
+void CanvasWidget::replaceTextSelection(const QString &inserted)
+{
+    TextData data = m_editText->textData();
+    const auto [start, end] = textSelection();
+    // Typing over a selected part takes on its format.
+    const CharFormat replaced = start < end ? richtext::formatAt(data, start) : CharFormat();
+    richtext::remove(data, start, end);
+    richtext::insert(data, start, inserted);
+    if (start < end)
+        richtext::apply(data, start, start + int(inserted.size()), [&replaced](CharFormat &c) { c = replaced; });
+    m_textAnchor = -1;
+    setEditedData(std::move(data), start + int(inserted.size()));
+}
+
+int CanvasWidget::textIndexAt(const QPointF &widgetPosition) const
+{
+    const QPointF local = m_editText->shapeTransform().inverted().map(toDocument(widgetPosition));
+    return textlayout::indexAt(m_editText->textData(), m_editText->textOrigin(), local);
 }
 
 bool CanvasWidget::isTextEditingKey(const QKeyEvent *event)
@@ -835,6 +957,8 @@ bool CanvasWidget::isTextEditingKey(const QKeyEvent *event)
     case Qt::Key_Enter:
     case Qt::Key_Left:
     case Qt::Key_Right:
+    case Qt::Key_Up:
+    case Qt::Key_Down:
     case Qt::Key_Home:
     case Qt::Key_End:
     case Qt::Key_Escape:
@@ -842,6 +966,9 @@ bool CanvasWidget::isTextEditingKey(const QKeyEvent *event)
     default:
         break;
     }
+    if (event->matches(QKeySequence::SelectAll) || event->matches(QKeySequence::Bold)
+        || event->matches(QKeySequence::Italic))
+        return true;
     if (event->modifiers() & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier))
         return false;
     const QString text = event->text();
@@ -850,40 +977,89 @@ bool CanvasWidget::isTextEditingKey(const QKeyEvent *event)
 
 bool CanvasWidget::handleTextKey(QKeyEvent *event)
 {
-    const QString text = m_editText->textData().text;
+    const TextData &data = m_editText->textData();
+    const int size = int(data.text.size());
     const int cursor = m_textCursor;
+    const bool extend = event->modifiers() & Qt::ShiftModifier;
+    const auto [start, end] = textSelection();
+
+    if (event->matches(QKeySequence::SelectAll)) {
+        m_textAnchor = 0;
+        m_textCursor = size;
+        update();
+        emit textEditingChanged();
+        return true;
+    }
+    if (event->matches(QKeySequence::Bold) || event->matches(QKeySequence::Italic)) {
+        const TextFormat format = currentTextFormat();
+        CharFormat change;
+        if (event->matches(QKeySequence::Bold))
+            change.bold = !format.bold;
+        else
+            change.italic = !format.italic;
+        applyCharFormat(change);
+        return true;
+    }
+
+    // Visual lines, for Home, End, Up and Down in wrapped text.
+    const textlayout::Layout layout = textlayout::layout(data, m_editText->textOrigin());
+    const std::size_t lineIndex = textlayout::lineOf(layout, cursor);
+    const textlayout::Line &line = layout.lines[lineIndex];
+    auto moveTo = [this, extend, start, end](int position, bool collapseTo) {
+        // Without Shift, Left/Right on a selection just go to its edge.
+        if (!extend && start < end && collapseTo)
+            position = position < m_textCursor ? start : end;
+        setTextCursor(position, extend);
+    };
+
     switch (event->key()) {
     case Qt::Key_Escape:
         finishTextEdit();
         return true;
     case Qt::Key_Return:
     case Qt::Key_Enter:
-        setEditedText(text.left(cursor) + QLatin1Char('\n') + text.mid(cursor), cursor + 1);
+        replaceTextSelection(QStringLiteral("\n"));
         return true;
     case Qt::Key_Backspace:
-        if (cursor > 0)
-            setEditedText(text.left(cursor - 1) + text.mid(cursor), cursor - 1);
+        if (start < end) {
+            replaceTextSelection(QString());
+        } else if (cursor > 0) {
+            TextData edited = data;
+            richtext::remove(edited, cursor - 1, cursor);
+            setEditedData(std::move(edited), cursor - 1);
+        }
         return true;
     case Qt::Key_Delete:
-        if (cursor < text.size())
-            setEditedText(text.left(cursor) + text.mid(cursor + 1), cursor);
+        if (start < end) {
+            replaceTextSelection(QString());
+        } else if (cursor < size) {
+            TextData edited = data;
+            richtext::remove(edited, cursor, cursor + 1);
+            setEditedData(std::move(edited), cursor);
+        }
         return true;
     case Qt::Key_Left:
-        m_textCursor = std::max(0, cursor - 1);
-        update();
+        moveTo(std::max(0, cursor - 1), true);
         return true;
     case Qt::Key_Right:
-        m_textCursor = std::min(int(text.size()), cursor + 1);
-        update();
+        moveTo(std::min(size, cursor + 1), true);
         return true;
     case Qt::Key_Home:
-        m_textCursor = int(text.lastIndexOf(QLatin1Char('\n'), cursor - 1)) + 1;
-        update();
+        moveTo(line.start, false);
         return true;
-    case Qt::Key_End: {
-        const int end = int(text.indexOf(QLatin1Char('\n'), cursor));
-        m_textCursor = end < 0 ? int(text.size()) : end;
-        update();
+    case Qt::Key_End:
+        moveTo(line.start + int(line.text.size()), false);
+        return true;
+    case Qt::Key_Up:
+    case Qt::Key_Down: {
+        const bool up = event->key() == Qt::Key_Up;
+        if ((up && lineIndex == 0) || (!up && lineIndex + 1 >= layout.lines.size())) {
+            moveTo(up ? 0 : size, false);
+            return true;
+        }
+        const textlayout::Line &target = layout.lines[up ? lineIndex - 1 : lineIndex + 1];
+        const double x = textlayout::caret(data, m_editText->textOrigin(), cursor).x1();
+        moveTo(textlayout::indexAt(data, m_editText->textOrigin(), QPointF(x, target.baselineStart.y())), false);
         return true;
     }
     default:
@@ -891,8 +1067,7 @@ bool CanvasWidget::handleTextKey(QKeyEvent *event)
     }
     if (!isTextEditingKey(event))
         return false;
-    const QString typed = event->text();
-    setEditedText(text.left(cursor) + typed + text.mid(cursor), cursor + int(typed.size()));
+    replaceTextSelection(event->text());
     return true;
 }
 
@@ -902,6 +1077,18 @@ bool CanvasWidget::event(QEvent *event)
     // Delete removes the object...). Other shortcuts end the editing and then run.
     if (event->type() == QEvent::ShortcutOverride && m_editText) {
         auto *key = static_cast<QKeyEvent *>(event);
+        // Shift, Ctrl and the like alone are no shortcut (Shift selects and types capitals).
+        switch (key->key()) {
+        case Qt::Key_Shift:
+        case Qt::Key_Control:
+        case Qt::Key_Alt:
+        case Qt::Key_AltGr:
+        case Qt::Key_Meta:
+        case Qt::Key_CapsLock:
+            return QWidget::event(event);
+        default:
+            break;
+        }
         if (isTextEditingKey(key)) {
             event->accept();
             return true;
@@ -920,7 +1107,16 @@ void CanvasWidget::paintTextEdit(QPainter &painter)
     painter.setBrush(Qt::NoBrush);
     painter.drawRect(viewTransform().mapRect(m_editText->bounds()).adjusted(-3, -3, 3, 3));
 
-    // The caret turns with rotated text.
+    // The selected part, then the caret; both turn with rotated text.
+    const auto [selectionStart, selectionEnd] = textSelection();
+    QColor selectionColor = highlight;
+    selectionColor.setAlpha(90);
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(selectionColor);
+    for (const QRectF &r : textlayout::selectionRects(m_editText->textData(), m_editText->textOrigin(), selectionStart,
+                                                      selectionEnd))
+        painter.drawPolygon(viewTransform().map(m_editText->shapeTransform().map(QPolygonF(r))));
+    painter.setBrush(Qt::NoBrush);
     const QLineF caret = m_editText->shapeTransform().map(
         textlayout::caret(m_editText->textData(), m_editText->textOrigin(), m_textCursor));
     painter.setPen(QPen(Qt::black, 1.5));
@@ -1770,10 +1966,17 @@ void CanvasWidget::mousePressEvent(QMouseEvent *event)
         return;
 
     if (m_editText) {
-        // Clicking inside the text being edited keeps editing; anywhere else ends it.
-        if (m_editText->bounds().contains(docPos)) {
-            m_textCursor = int(m_editText->textData().text.size());
-            update();
+        // Clicking inside the text being edited places the caret (Shift: extends the selected
+        // part) and dragging selects; clicking anywhere else ends the editing.
+        if (m_editText->contains(docPos, kHitTolerancePx / m_zoom)) {
+            const int index = textIndexAt(pos);
+            if (shift) {
+                setTextCursor(index, true);
+            } else {
+                setTextCursor(index);
+                m_textAnchor = index;
+            }
+            m_drag = Drag::TextSelect;
             return;
         }
         finishTextEdit();
@@ -2022,6 +2225,14 @@ void CanvasWidget::mouseMoveEvent(QMouseEvent *event)
         update();
         break;
 
+    case Drag::TextSelect:
+        if (m_editText) {
+            m_textCursor = textIndexAt(pos);
+            update();
+            emit textEditingChanged();
+        }
+        break;
+
     case Drag::Resize: {
         // Handles 0-7 go clockwise from top-left; each moves the edges it sits on.
         const int h = m_resizeHandle;
@@ -2201,6 +2412,11 @@ void CanvasWidget::mouseReleaseEvent(QMouseEvent *event)
     case Drag::RotationCenter:
         break;
 
+    case Drag::TextSelect:
+        if (m_textAnchor == m_textCursor)
+            m_textAnchor = -1;
+        break;
+
     case Drag::TextFrame: {
         const QRectF frame = m_creating;
         m_creating = QRectF();
@@ -2298,6 +2514,22 @@ void CanvasWidget::mouseDoubleClickEvent(QMouseEvent *event)
 
     if (m_tool == Tool::Bezier) {
         finishCurve();
+        return;
+    }
+
+    // Double-click in the text being edited selects a word.
+    if (m_editText && m_editText->contains(toDocument(event->position()), kHitTolerancePx / m_zoom)) {
+        const QString &text = m_editText->textData().text;
+        const int index = textIndexAt(event->position());
+        int from = index, to = index;
+        while (from > 0 && text[from - 1].isLetterOrNumber())
+            --from;
+        while (to < text.size() && text[to].isLetterOrNumber())
+            ++to;
+        m_textAnchor = from;
+        setTextCursor(to, true);
+        m_textAnchor = from;
+        update();
         return;
     }
 

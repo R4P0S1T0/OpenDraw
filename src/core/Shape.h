@@ -121,6 +121,27 @@ struct TextFormat {
     bool operator==(const TextFormat &) const = default;
 };
 
+// Formatting of part of a text. Fields left unset come from the text's TextFormat (and the
+// colour from its fill).
+struct CharFormat {
+    std::optional<QString> family;
+    std::optional<double> size;
+    std::optional<bool> bold;
+    std::optional<bool> italic;
+    std::optional<QColor> color;
+
+    bool isEmpty() const { return !family && !size && !bold && !italic && !color; }
+    bool operator==(const CharFormat &) const = default;
+};
+
+// A stretch of characters [start, start + length) with its own formatting.
+struct TextRun {
+    int start = 0;
+    int length = 0;
+    CharFormat format;
+    bool operator==(const TextRun &) const = default;
+};
+
 // Content of a text object.
 struct TextData {
     QString text; // paragraphs (artistic text: lines) separated by '\n'
@@ -128,6 +149,8 @@ struct TextData {
     // Paragraph text flows inside a frame this size, wrapping at its width; lines that do not
     // fit its height are hidden. Empty for artistic text, which only breaks at '\n'.
     QSizeF frame;
+    // Formatting of parts of the text, sorted and not overlapping (see core/RichText.h).
+    std::vector<TextRun> runs;
 
     bool isParagraph() const { return frame.width() > 0.0; }
     bool operator==(const TextData &) const = default;

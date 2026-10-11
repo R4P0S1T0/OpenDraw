@@ -2,6 +2,7 @@
 
 #include "core/Document.h"
 #include "core/PathOps.h"
+#include "core/RichText.h"
 #include "core/TextLayout.h"
 
 #include <QBuffer>
@@ -213,8 +214,10 @@ void writeShape(QXmlStreamWriter &w, const Shape &shape, int &gradientCount)
         w.writeEndElement();
         return;
     case ShapeKind::Text: {
-        const TextFormat &f = shape.textData().format;
+        const TextData &data = shape.textData();
+        const TextFormat &f = data.format;
         const QPointF origin = shape.textOrigin();
+        const QString ns = QString::fromLatin1(kNamespace);
         w.writeStartElement(QStringLiteral("text"));
         writeLabel(w, shape.name());
         w.writeAttribute(QStringLiteral("xml:space"), QStringLiteral("preserve"));
@@ -229,44 +232,62 @@ void writeShape(QXmlStreamWriter &w, const Shape &shape, int &gradientCount)
         if (f.align != TextAlign::Left)
             w.writeAttribute(QStringLiteral("text-anchor"),
                              f.align == TextAlign::Center ? QStringLiteral("middle") : QStringLiteral("end"));
+        w.writeAttribute(ns, QStringLiteral("line-spacing"), number(f.lineSpacing));
         writeShapeTransform(w, shape);
         writeStyle(w, shape.style(), gradientId);
-        if (shape.textData().isParagraph()) {
-            // Paragraph text: the frame, then every laid-out line as it is wrapped now, so any
-            // viewer shows the same lines. Wrapped lines are marked, to rebuild the paragraphs.
-            const TextData &data = shape.textData();
-            const QString ns = QString::fromLatin1(kNamespace);
+
+        // Every laid-out line on its own baseline, so any viewer shows the same lines. Paragraph
+        // text also records its frame and marks wrapped lines, to rebuild the paragraphs.
+        double anchorX = origin.x();
+        if (data.isParagraph()) {
             w.writeAttribute(ns, QStringLiteral("frame"),
                              QStringLiteral("%1 %2 %3 %4").arg(number(origin.x()), number(origin.y()),
                                                                number(data.frame.width()), number(data.frame.height())));
-            double anchorX = origin.x();
             if (f.align == TextAlign::Center)
                 anchorX += data.frame.width() / 2.0;
             else if (f.align == TextAlign::Right)
                 anchorX += data.frame.width();
-            for (const textlayout::Line &line : textlayout::layout(data, origin).lines) {
-                w.writeStartElement(QStringLiteral("tspan"));
-                w.writeAttribute(QStringLiteral("x"), number(anchorX));
-                w.writeAttribute(QStringLiteral("y"), number(line.baselineStart.y()));
-                if (line.softBreak) {
-                    w.writeAttribute(ns, QStringLiteral("soft"), QStringLiteral("true"));
-                    w.writeCharacters(data.text.mid(line.start, line.next - line.start)); // with its spaces
+        }
+        const std::vector<CharFormat> formats = richtext::perCharacter(data);
+        const bool autoFormatting = w.autoFormatting();
+        for (const textlayout::Line &line : textlayout::layout(data, origin).lines) {
+            w.writeStartElement(QStringLiteral("tspan"));
+            w.writeAttribute(QStringLiteral("x"), number(anchorX));
+            w.writeAttribute(QStringLiteral("y"), number(line.baselineStart.y()));
+            if (line.softBreak)
+                w.writeAttribute(ns, QStringLiteral("soft"), QStringLiteral("true"));
+            // No indenting inside a line: with xml:space="preserve" it would become text.
+            w.setAutoFormatting(false);
+            // A wrapped line keeps its trailing spaces, so the paragraph can be put back together.
+            const int end = line.softBreak ? line.next : line.start + int(line.text.size());
+            for (int i = line.start; i < end;) {
+                int j = i + 1;
+                while (j < end && formats[j] == formats[i])
+                    ++j;
+                const QString chars = data.text.mid(i, j - i);
+                const CharFormat &c = formats[i];
+                if (c.isEmpty()) {
+                    w.writeCharacters(chars);
                 } else {
-                    w.writeCharacters(line.text);
+                    // Parts of the text in their own format.
+                    w.writeStartElement(QStringLiteral("tspan"));
+                    if (c.family)
+                        w.writeAttribute(QStringLiteral("font-family"), *c.family);
+                    if (c.size)
+                        w.writeAttribute(QStringLiteral("font-size"), number(*c.size));
+                    if (c.bold)
+                        w.writeAttribute(QStringLiteral("font-weight"), *c.bold ? QStringLiteral("bold") : QStringLiteral("normal"));
+                    if (c.italic)
+                        w.writeAttribute(QStringLiteral("font-style"), *c.italic ? QStringLiteral("italic") : QStringLiteral("normal"));
+                    if (c.color)
+                        writePaint(w, QStringLiteral("fill"), *c.color, true);
+                    w.writeCharacters(chars);
+                    w.writeEndElement();
                 }
-                w.writeEndElement();
+                i = j;
             }
             w.writeEndElement();
-            return;
-        }
-        // One tspan per line, each on its own baseline.
-        const QStringList lines = shape.textData().text.split(QLatin1Char('\n'));
-        for (int i = 0; i < lines.size(); ++i) {
-            w.writeStartElement(QStringLiteral("tspan"));
-            w.writeAttribute(QStringLiteral("x"), number(origin.x()));
-            w.writeAttribute(QStringLiteral("y"), number(origin.y() + i * f.size * f.lineSpacing));
-            w.writeCharacters(lines[i]);
-            w.writeEndElement();
+            w.setAutoFormatting(autoFormatting);
         }
         w.writeEndElement();
         return;
@@ -594,8 +615,6 @@ TextFormat textFormat(const Properties &props)
     return format;
 }
 
-// Reads a whole <text> element (the reader sits on its start tag) into a text object.
-// Each <tspan> with its own y or dy starts a new line.
 // ---------------------------------------------------------------------------------------------
 // Gradients
 
@@ -869,6 +888,108 @@ void applyFillPaint(Shape &shape, const Properties &props, const QTransform &con
     shape.setStyle(style);
 }
 
+// Text with the formatting of each character, while a <text> element is being read.
+struct RichString {
+    QString text;
+    std::vector<CharFormat> formats;
+
+    void append(const QString &s, const CharFormat &f)
+    {
+        text += s;
+        formats.insert(formats.end(), s.size(), f);
+    }
+    void append(const RichString &other)
+    {
+        text += other.text;
+        formats.insert(formats.end(), other.formats.begin(), other.formats.end());
+    }
+    void appendChar(QChar c, const CharFormat &f)
+    {
+        text += c;
+        formats.push_back(f);
+    }
+    bool isBlank() const { return text.trimmed().isEmpty(); }
+
+    // Runs of whitespace become one space; none at the ends.
+    RichString collapsed() const
+    {
+        RichString result;
+        for (int i = 0; i < text.size(); ++i) {
+            if (text[i].isSpace()) {
+                if (!result.text.isEmpty() && !result.text.endsWith(QLatin1Char(' ')))
+                    result.appendChar(QLatin1Char(' '), formats[i]);
+            } else {
+                result.appendChar(text[i], formats[i]);
+            }
+        }
+        return result.trimmed();
+    }
+    RichString trimmed() const
+    {
+        int from = 0, to = int(text.size());
+        while (from < to && text[from].isSpace())
+            ++from;
+        while (to > from && text[to - 1].isSpace())
+            --to;
+        return mid(from, to - from);
+    }
+    RichString mid(int from, int count) const
+    {
+        RichString result;
+        result.text = text.mid(from, count);
+        result.formats.assign(formats.begin() + from, formats.begin() + from + count);
+        return result;
+    }
+    std::vector<RichString> split(QChar separator) const
+    {
+        std::vector<RichString> parts;
+        int start = 0;
+        for (int i = 0; i <= int(text.size()); ++i) {
+            if (i == int(text.size()) || text[i] == separator) {
+                parts.push_back(mid(start, i - start));
+                start = i + 1;
+            }
+        }
+        return parts;
+    }
+};
+
+// The absolute formatting given by a <text> or <tspan> (font, size, weight, slant, colour).
+struct SpanValues {
+    QHash<QString, QString> values;
+
+    // `attributes` override what the parent gave.
+    SpanValues with(const QXmlStreamAttributes &attributes) const
+    {
+        SpanValues result = *this;
+        const Properties own(attributes, {});
+        for (const QString &key : {QStringLiteral("font-family"), QStringLiteral("font-size"), QStringLiteral("font-weight"),
+                                   QStringLiteral("font-style"), QStringLiteral("fill")}) {
+            const QString v = own.own(key);
+            if (!v.isEmpty() && v != u"inherit")
+                result.values.insert(key, v);
+        }
+        return result;
+    }
+
+    CharFormat format() const
+    {
+        const Properties props(QXmlStreamAttributes(), values);
+        const TextFormat f = textFormat(props);
+        CharFormat c;
+        c.family = f.family;
+        c.size = f.size;
+        c.bold = f.bold;
+        c.italic = f.italic;
+        if (const auto color = parseColor(values.value(QStringLiteral("fill"))))
+            c.color = *color;
+        return c;
+    }
+};
+
+// Reads a whole <text> element (the reader sits on its start tag) into a text object.
+// Each <tspan> with its own y or dy starts a new line (unless OpenDraw marked the line before
+// as wrapped); nested <tspan>s give parts of the text their own font, size and colour.
 std::unique_ptr<Shape> readText(QXmlStreamReader &r, const Properties &props, const Context &context,
                                 ReadReport &report)
 {
@@ -883,18 +1004,26 @@ std::unique_ptr<Shape> readText(QXmlStreamReader &r, const Properties &props, co
     const std::vector<double> frame = parseNumberList(attributes.value(ns, QStringLiteral("frame")));
     const bool paragraph = frame.size() == 4 && frame[2] > 0.0;
 
-    QStringList lines;
-    QString current;
+    SpanValues textValues;
+    for (const QString &key : {QStringLiteral("font-family"), QStringLiteral("font-size"), QStringLiteral("font-weight"),
+                               QStringLiteral("font-style"), QStringLiteral("fill")}) {
+        const QString v = props.value(key);
+        if (!v.isEmpty())
+            textValues.values.insert(key, v);
+    }
+    std::vector<SpanValues> spans{textValues}; // one per open element inside <text>
+
+    std::vector<RichString> lines;
+    RichString current;
     std::vector<double> lineBaselines;
     bool previousSoft = false; // the previous line was wrapped: the next one continues it
-    int depth = 1;
-    while (depth > 0 && !r.atEnd()) {
+    while (!spans.empty() && !r.atEnd()) {
         r.readNext();
         if (r.isStartElement()) {
-            ++depth;
+            const QXmlStreamAttributes a = r.attributes();
+            spans.push_back(spans.back().with(a));
             if (r.name() != u"tspan")
                 continue;
-            const QXmlStreamAttributes a = r.attributes();
             const auto tx = firstNumber(a.value(QStringLiteral("x")));
             const auto ty = firstNumber(a.value(QStringLiteral("y")));
             if (!x && tx)
@@ -902,52 +1031,82 @@ std::unique_ptr<Shape> readText(QXmlStreamReader &r, const Properties &props, co
             if (!y && ty)
                 y = ty;
             const bool newLine = ty || a.hasAttribute(QStringLiteral("dy"));
-            if (newLine && (!current.isEmpty() || !lines.isEmpty()) && !previousSoft) {
-                lines << current;
-                current.clear();
+            if (newLine && (!current.text.isEmpty() || !lines.empty()) && !previousSoft) {
+                lines.push_back(current);
+                current = {};
             }
             if (newLine)
                 previousSoft = a.value(ns, QStringLiteral("soft")) == u"true";
             if (ty)
                 lineBaselines.push_back(*ty);
         } else if (r.isEndElement()) {
-            --depth;
+            spans.pop_back();
         } else if (r.isCharacters()) {
             // Whitespace directly inside <text> is layout of the XML file, not content.
-            if (depth == 1 && r.isWhitespace())
+            if (spans.size() == 1 && r.isWhitespace())
                 continue;
-            current += r.text();
+            current.append(r.text().toString(), spans.back().format());
         }
     }
-    lines << current;
+    lines.push_back(current);
 
     if (!preserveSpace) {
-        static const QRegularExpression spaces(QStringLiteral("\\s+"));
-        for (QString &line : lines)
-            line = line.replace(spaces, QStringLiteral(" ")).trimmed();
+        for (RichString &line : lines)
+            line = line.collapsed();
     }
-    while (lines.size() > 1 && lines.back().isEmpty())
-        lines.removeLast();
-    if (lines.join(QString()).trimmed().isEmpty())
+    while (lines.size() > 1 && lines.back().text.isEmpty())
+        lines.pop_back();
+    RichString content;
+    for (std::size_t i = 0; i < lines.size(); ++i) {
+        if (i > 0)
+            content.appendChar(QLatin1Char('\n'), content.formats.empty() ? CharFormat() : content.formats.back());
+        content.append(lines[i]);
+    }
+    if (content.isBlank())
         return nullptr;
+    // The CorelDRAW import marks paragraph ends with U+E000 (a private-use character).
+    if (content.text.contains(kParagraphMark)) {
+        std::vector<RichString> paragraphs = content.split(kParagraphMark);
+        for (RichString &p : paragraphs)
+            p = p.trimmed();
+        while (paragraphs.size() > 1 && paragraphs.back().text.isEmpty())
+            paragraphs.pop_back();
+        content = {};
+        for (std::size_t i = 0; i < paragraphs.size(); ++i) {
+            if (i > 0)
+                content.appendChar(QLatin1Char('\n'), paragraphs[i - 1].formats.empty() ? CharFormat()
+                                                                                          : paragraphs[i - 1].formats.back());
+            content.append(paragraphs[i]);
+        }
+    }
 
-    if (lineBaselines.size() >= 2 && format.size > 0.0)
+    // The text's own format is that of its first letter (files often put the font on the spans
+    // only); the rest of the text differs from it where it must.
+    const CharFormat first = content.formats.empty() ? CharFormat() : content.formats.front();
+    auto unset = [&textValues](const char *key) { return !textValues.values.contains(QString::fromLatin1(key)); };
+    if (first.family && unset("font-family"))
+        format.family = *first.family;
+    if (first.size && unset("font-size"))
+        format.size = *first.size;
+    if (first.bold && unset("font-weight"))
+        format.bold = *first.bold;
+    if (first.italic && unset("font-style"))
+        format.italic = *first.italic;
+    bool ok = false;
+    const double spacing = attributes.value(ns, QStringLiteral("line-spacing")).toDouble(&ok);
+    if (ok && spacing > 0.0)
+        format.lineSpacing = spacing;
+    else if (lineBaselines.size() >= 2 && format.size > 0.0)
         format.lineSpacing = (lineBaselines[1] - lineBaselines[0]) / format.size;
 
     const QTransform &t = context.transform;
     QPointF position(x.value_or(0.0), y.value_or(0.0));
-    const Style style = props.style(strokeScaleOf(t, props), report);
-    QString content = lines.join(QLatin1Char('\n'));
-    // The CorelDRAW import marks paragraph ends with U+E000 (a private-use character).
-    if (content.contains(kParagraphMark)) {
-        QStringList paragraphs = content.split(kParagraphMark);
-        for (QString &p : paragraphs)
-            p = p.trimmed();
-        while (paragraphs.size() > 1 && paragraphs.back().isEmpty())
-            paragraphs.removeLast();
-        content = paragraphs.join(QLatin1Char('\n'));
-    }
-    TextData text{content, format};
+    Style style = props.style(strokeScaleOf(t, props), report);
+    if (props.value(QStringLiteral("fill")).isEmpty() && first.color)
+        style.fill = *first.color; // coloured on the spans only
+    TextData text{content.text, format};
+    richtext::setPerCharacter(text, content.formats);
+    richtext::normalize(text, style.fill);
     if (paragraph) {
         position = QPointF(frame[0], frame[1]);
         text.frame = QSizeF(frame[2], frame[3]);
@@ -958,7 +1117,12 @@ std::unique_ptr<Shape> readText(QXmlStreamReader &r, const Properties &props, co
         shape->setShapeTransform(t);
         return shape;
     }
-    text.format.size *= std::sqrt(std::abs(t.determinant()));
+    const double scale = std::sqrt(std::abs(t.determinant()));
+    text.format.size *= scale;
+    for (TextRun &run : text.runs) {
+        if (run.format.size)
+            *run.format.size *= scale;
+    }
     if (paragraph) {
         const QRectF box = t.mapRect(QRectF(position, text.frame));
         text.frame = box.size();

@@ -10,6 +10,7 @@
 #include "Theme.h"
 #include "Units.h"
 #include "core/Generators.h"
+#include "core/RichText.h"
 #include "core/TextLayout.h"
 #include "core/Commands.h"
 #include "core/Document.h"
@@ -126,6 +127,7 @@ private slots:
     void secondClickRotatesAndSkews();
     void propertiesDockerAppliesStyles();
     void textToolDrawsParagraphFrames();
+    void formatPartOfAText();
     void screenshot();
 
 private:
@@ -861,6 +863,28 @@ void CanvasTests::mainWindowWorkspace()
         canvas->zoomToSelection();
         QTest::qWait(200); // the Objects docker refreshes shortly after changes
         QVERIFY(window.grab().save(dir + QStringLiteral("/window-properties.png")));
+
+        // Mixed formats in one text, with part of it selected while typing.
+        canvas->fitPage();
+        canvas->setTool(CanvasWidget::Tool::Text);
+        click(canvas, canvas->documentToWidget({150, 900}));
+        QTest::keyClicks(canvas, QStringLiteral("Mixed formats in one text"));
+        for (int i = 0; i < 7; ++i)
+            QTest::keyClick(canvas, Qt::Key_Left, Qt::ShiftModifier);
+        TextFormat big = canvas->currentTextFormat();
+        big.size = 56;
+        big.bold = true;
+        canvas->setTextFormat(big);
+        CharFormat green;
+        green.color = QColor(0x2e, 0x7d, 0x32);
+        canvas->applyCharFormat(green);
+        for (int i = 0; i < 14; ++i)
+            QTest::keyClick(canvas, Qt::Key_Left);
+        for (int i = 0; i < 7; ++i)
+            QTest::keyClick(canvas, Qt::Key_Left, Qt::ShiftModifier);
+        QTest::qWait(150);
+        QVERIFY(window.grab().save(dir + QStringLiteral("/window-richtext.png")));
+        canvas->finishTextEdit();
         theme::apply(ColorScheme::Light);
     }
 }
@@ -1172,6 +1196,55 @@ void CanvasTests::textToolDrawsParagraphFrames()
     m_undo->undo();
     QCOMPARE(m_doc->shapes().front()->textData().text,
              QStringLiteral("Paragraph text wraps inside its frame when it gets too long"));
+}
+
+void CanvasTests::formatPartOfAText()
+{
+    m_canvas->setZoom(1.0);
+    m_canvas->setTool(CanvasWidget::Tool::Text);
+    click(m_canvas, {200, 200});
+    QTest::keyClicks(m_canvas, QStringLiteral("Hello world"));
+    // Shift+Left five times selects "world".
+    for (int i = 0; i < 5; ++i)
+        QTest::keyClick(m_canvas, Qt::Key_Left, Qt::ShiftModifier);
+    QCOMPARE(m_canvas->textSelection(), std::make_pair(6, 11));
+
+    // The text bar's change applies to the selected part only.
+    TextFormat format = m_canvas->currentTextFormat();
+    format.bold = true;
+    format.size = 60;
+    m_canvas->setTextFormat(format);
+    CharFormat red;
+    red.color = QColor(Qt::red);
+    m_canvas->applyCharFormat(red);
+    const TextData &data = m_canvas->editedText()->textData();
+    QVERIFY(!data.format.bold);
+    QCOMPARE(data.runs.size(), std::size_t(1));
+    QCOMPARE(data.runs.front().start, 6);
+    QVERIFY(*data.runs.front().format.bold);
+    QCOMPARE(*data.runs.front().format.size, 60.0);
+    QCOMPARE(*data.runs.front().format.color, QColor(Qt::red));
+    QVERIFY(m_canvas->currentTextFormat().bold);
+
+    // Typing over the selection replaces it, in its format.
+    QTest::keyClicks(m_canvas, QStringLiteral("there"));
+    QCOMPARE(m_canvas->editedText()->textData().text, QStringLiteral("Hello there"));
+    QVERIFY(richtext::effectiveFormat(m_canvas->editedText()->textData(), 8).bold);
+
+    // Clicking places the caret; Ctrl+A selects everything; Ctrl+B toggles bold on it.
+    const QLineF caret = m_canvas->viewTransform().map(
+        textlayout::caret(m_canvas->editedText()->textData(), m_canvas->editedText()->textOrigin(), 2));
+    click(m_canvas, caret.center());
+    QCOMPARE(m_canvas->textCursor(), 2);
+    QVERIFY(!m_canvas->hasTextSelection());
+    QTest::keyClick(m_canvas, Qt::Key_A, Qt::ControlModifier);
+    QCOMPARE(m_canvas->textSelection(), std::make_pair(0, 11));
+    QTest::keyClick(m_canvas, Qt::Key_B, Qt::ControlModifier);
+    QVERIFY(richtext::effectiveFormat(m_canvas->editedText()->textData(), 0).bold);
+
+    m_canvas->finishTextEdit();
+    QCOMPARE(m_doc->count(), 1);
+    QVERIFY(!m_doc->shapes().front()->textData().runs.empty());
 }
 
 // Not an assertion: saves a picture of the canvas for manual review when

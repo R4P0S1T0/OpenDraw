@@ -3,6 +3,7 @@
 #include "core/Generators.h"
 #include "core/PathOps.h"
 #include "core/Render.h"
+#include "core/RichText.h"
 #include "core/TextLayout.h"
 
 #include <QPen>
@@ -58,7 +59,89 @@ private slots:
     void outlineStyles();
     void paragraphTextWraps();
     void paragraphTextSvg();
+    void richTextEditing();
+    void richTextLayoutAndSvg();
 };
+
+void ToolTests::richTextEditing()
+{
+    TextFormat format;
+    format.size = 20;
+    TextData data{QStringLiteral("Hello world"), format};
+    CharFormat bold;
+    bold.bold = true;
+    richtext::apply(data, 6, 11, [&](CharFormat &c) { c.bold = true; });
+    QCOMPARE(data.runs.size(), std::size_t(1));
+    QCOMPARE(data.runs.front().start, 6);
+    QCOMPARE(data.runs.front().length, 5);
+    QVERIFY(richtext::effectiveFormat(data, 7).bold);
+    QVERIFY(!richtext::effectiveFormat(data, 2).bold);
+
+    // Typing continues the format of the letter before; deleting shifts the runs.
+    richtext::insert(data, 11, QStringLiteral("!!"));
+    QCOMPARE(data.runs.front().length, 7);
+    richtext::insert(data, 0, QStringLiteral(">"));
+    QCOMPARE(data.runs.front().start, 7);
+    richtext::remove(data, 0, 3);
+    QCOMPARE(data.text, QStringLiteral("llo world!!"));
+    QCOMPARE(data.runs.front().start, 4);
+
+    // Overlapping changes merge; setting the whole text drops what repeats it.
+    richtext::apply(data, 0, 6, [](CharFormat &c) { c.size = 30; });
+    QCOMPARE(richtext::effectiveFormat(data, 5).size, 30.0);
+    QVERIFY(richtext::effectiveFormat(data, 5).bold);
+    richtext::applyToAll(data, bold);
+    QVERIFY(data.format.bold);
+    for (const TextRun &run : data.runs)
+        QVERIFY(!run.format.bold);
+    richtext::apply(data, 0, int(data.text.size()), [](CharFormat &c) { c.size = 20; });
+    QVERIFY(data.runs.empty()); // everything back to the text's own format
+}
+
+void ToolTests::richTextLayoutAndSvg()
+{
+    TextFormat format;
+    format.size = 20;
+    TextData data{QStringLiteral("Big\nsmall red"), format};
+    richtext::apply(data, 0, 3, [](CharFormat &c) { c.size = 60; });
+    richtext::apply(data, 10, 13, [](CharFormat &c) { c.color = QColor(Qt::red); });
+    const auto layout = textlayout::layout(data, QPointF(0, 100));
+    QCOMPARE(layout.lines.size(), std::size_t(2));
+    QVERIFY(layout.lines[0].ascent > layout.lines[1].ascent * 2); // the big line is taller
+    QCOMPARE(layout.lines[1].pieces.size(), std::size_t(2));
+    QCOMPARE(layout.lines[1].pieces[1].color, std::optional<QColor>(QColor(Qt::red)));
+    QVERIFY(textlayout::selectionRects(data, QPointF(0, 100), 1, 6).size() == 2);
+    QCOMPARE(textlayout::coloredOutline(data, QPointF(0, 100)).size(), std::size_t(2));
+    // The caret goes where the mouse points.
+    const QLineF caret = textlayout::caret(data, QPointF(0, 100), 6);
+    QCOMPARE(textlayout::indexAt(data, QPointF(0, 100), caret.center()), 6);
+
+    Document doc;
+    Style style;
+    style.fill = Qt::black;
+    style.stroke = Qt::transparent;
+    doc.insertShape(-1, std::make_unique<Shape>(data, QPointF(0, 100), style));
+    const QByteArray svgData = writeSvg(doc);
+    QVERIFY(svgData.contains("font-size=\"60\""));
+    auto copy = readSvg(svgData);
+    const TextData &read = copy->shapes().front()->textData();
+    QCOMPARE(read.text, data.text);
+    QCOMPARE(read.format.size, 20.0); // not the first letter's 60: the text says 20
+    QCOMPARE(read.runs, data.runs);
+    QCOMPARE(read.format.lineSpacing, data.format.lineSpacing);
+
+    // Spans formatted by another program (fonts on the spans only, as the CorelDRAW import).
+    auto other = readSvg(QByteArrayLiteral(
+        R"svg(<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300">
+                <text x="10" y="50"><tspan font-family="Arial" font-size="14" fill="#373435">Title</tspan><tspan font-family="Arial" font-size="12" fill="#373435"> body</tspan></text>
+              </svg>)svg"));
+    const Shape &text = *other->shapes().front();
+    QCOMPARE(text.textData().format.size, 14.0);
+    QCOMPARE(text.style().fill, QColor(0x37, 0x34, 0x35));
+    QCOMPARE(text.textData().runs.size(), std::size_t(1)); // only " body" differs (its size)
+    QCOMPARE(*text.textData().runs.front().format.size, 12.0);
+    QVERIFY(!text.textData().runs.front().format.color);
+}
 
 void ToolTests::paragraphTextWraps()
 {

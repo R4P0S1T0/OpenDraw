@@ -43,7 +43,8 @@ Rough order of work. Items move as contributors pick them up.
 - [x] Groups (also imported from and saved as SVG `<g>`), ordering, alignment and distribution
 - [x] Text objects: font, size, bold, italic, alignment, multiple lines; SVG `<text>` import and export; convert to curves
 - [x] Paragraph text frames: wrapping, reflow on resize, hidden overflow, conversion to and from artistic text; frames and paragraph breaks recovered from CorelDRAW files
-- [ ] Text: selecting part of a text, per-character formatting (mixed fonts and sizes, as in imported CorelDRAW text), paragraph spacing and indents, justification, text on a path
+- [x] Per-character formatting: font, size, bold, italic and colour for selected parts of a text (selection with Shift+arrows, mouse, double-click, Ctrl+A), saved as nested tspans; mixed sizes and colours read from CorelDRAW files
+- [ ] Paragraph spacing and indents, justification, text on a path
 - [x] Layers (visible, locked, rename, reorder, move objects between layers) and multiple pages (tabs, Layout menu, PgUp/PgDn); Inkscape layers import; one PDF page per page
 
 ## 0.4 — No more locked files

@@ -1120,6 +1120,14 @@ void MainWindow::restyleSelection(const QString &text, const std::function<void(
 // without one, they become the default for new shapes.
 void MainWindow::applyFill(const QColor &color)
 {
+    // While typing, a colour picked for a selected part of the text colours just those letters.
+    if (m_canvas->editedText() && m_canvas->hasTextSelection() && color.alpha() > 0) {
+        CharFormat change;
+        change.color = color;
+        m_canvas->applyCharFormat(change);
+        m_canvas->setFocus(); // keep typing
+        return;
+    }
     if (!m_canvas->selection().empty()) {
         restyleSelection(tr("Fill"), [&color](Style &style) {
             style.fill = color;

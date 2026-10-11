@@ -74,8 +74,14 @@ public:
 
     // Text being typed into, if any (it may not be in the document yet).
     Shape *editedText() const { return m_editText; }
-    // Format of the text being edited or the selected text; otherwise the one new text gets.
+    // Format of the text being edited (at the caret or the start of the selected part) or the
+    // selected text; otherwise the one new text gets.
     TextFormat currentTextFormat() const;
+    // Part of the edited text selected with Shift+arrows or the mouse: [start, end), or empty.
+    std::pair<int, int> textSelection() const;
+    bool hasTextSelection() const { return textSelection().first < textSelection().second; }
+    int textCursor() const { return m_textCursor; }
+    void setTextCursor(int position, bool extendSelection = false);
 
     QPointF documentToWidget(const QPointF &documentPosition) const { return toWidget(documentPosition); }
 
@@ -152,8 +158,12 @@ public slots:
     void breakNode();
     void joinNodes();
 
-    // Applies to the text being edited, else to the selected texts, else to new text.
+    // Applies what differs from currentTextFormat(): font, size, weight and slant to the selected
+    // part of the edited text (or all of it), else to the selected texts, else to new text;
+    // alignment and line spacing to whole texts.
     void setTextFormat(const TextFormat &format);
+    // Changes the letters: the selected part of the edited text, or whole texts as above.
+    void applyCharFormat(const CharFormat &change);
     void finishTextEdit();
 
 signals:
@@ -186,7 +196,7 @@ protected:
 private:
     enum class Drag {
         None, Pan, Move, Resize, Marquee, Create, NodeMove, NodeHandle, BezierHandle, Freehand, ZoomBox, Guide,
-        Rotate, Skew, RotationCenter, TextFrame,
+        Rotate, Skew, RotationCenter, TextFrame, TextSelect,
     };
     enum class NodeHandle { In, Out };
 
@@ -258,7 +268,11 @@ private:
     // Artistic text with its first baseline through `origin`, or paragraph text in a frame
     // whose top-left corner is `origin`.
     void beginNewText(const QPointF &origin, const QSizeF &frame = QSizeF());
-    void setEditedText(const QString &text, int cursor);
+    void setEditedData(TextData data, int cursor);
+    // Replaces the selected part of the edited text (or inserts at the caret).
+    void replaceTextSelection(const QString &inserted);
+    // Character index in the edited text nearest to a widget position.
+    int textIndexAt(const QPointF &widgetPosition) const;
     bool handleTextKey(QKeyEvent *event);
     static bool isTextEditingKey(const QKeyEvent *event);
     void paintTextEdit(QPainter &painter);
@@ -326,6 +340,7 @@ private:
     std::unique_ptr<Shape> m_pendingText;  // new text, added to the document when editing ends
     TextData m_textBeforeEdit;
     int m_textCursor = 0;
+    int m_textAnchor = -1; // other end of the selected part of the edited text; -1: nothing selected
     TextFormat m_defaultTextFormat;
 };
 

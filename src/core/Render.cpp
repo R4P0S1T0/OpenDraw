@@ -2,6 +2,7 @@
 
 #include "core/Document.h"
 #include "core/Shape.h"
+#include "core/TextLayout.h"
 
 #include <QPainter>
 
@@ -86,6 +87,29 @@ void paintShape(QPainter &painter, const Shape &shape)
         return;
     }
     const QTransform own = shape.shapeTransform();
+    if (shape.kind() == ShapeKind::Text) {
+        const TextData &data = shape.textData();
+        const bool colored = std::any_of(data.runs.begin(), data.runs.end(),
+                                         [](const TextRun &run) { return run.format.color.has_value(); });
+        if (colored) {
+            // Letters with their own colour; the rest take the text's fill.
+            painter.save();
+            painter.setTransform(own, true);
+            painter.setPen(Qt::NoPen);
+            for (const textlayout::ColoredPath &part : textlayout::coloredOutline(data, shape.textOrigin())) {
+                painter.setBrush(part.color ? QBrush(*part.color) : fillBrush(style, shape.localBounds()));
+                painter.drawPath(part.path);
+            }
+            painter.restore();
+            if (style.hasStroke()) {
+                painter.setBrush(Qt::NoBrush);
+                painter.setPen(outlinePen(style));
+                painter.drawPath(shape.path());
+            }
+            painter.restore();
+            return;
+        }
+    }
     if (own.isIdentity()) {
         painter.setBrush(fillBrush(style, shape.bounds()));
         painter.setPen(outlinePen(style));

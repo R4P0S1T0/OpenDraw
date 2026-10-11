@@ -220,8 +220,13 @@ void Shape::transform(const QTransform &t)
         // Text keeps its proportions: the font size follows the overall scale. A paragraph
         // frame scales with the drawing (its origin stays its top-left corner).
         const double scale = std::sqrt(std::abs(t.determinant()));
-        if (scale > 0.0)
+        if (scale > 0.0) {
             m_text.format.size *= scale;
+            for (TextRun &run : m_text.runs) {
+                if (run.format.size)
+                    *run.format.size *= scale;
+            }
+        }
         if (m_text.isParagraph()) {
             const QRectF frame = t.mapRect(QRectF(m_textOrigin, m_text.frame));
             m_textOrigin = frame.topLeft();

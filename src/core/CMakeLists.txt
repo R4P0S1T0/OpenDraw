@@ -13,6 +13,8 @@ add_library(opendraw_core STATIC
     PathOps.h
     Render.cpp
     Render.h
+    RichText.cpp
+    RichText.h
     Shape.cpp
     Shape.h
     SvgIO.cpp
