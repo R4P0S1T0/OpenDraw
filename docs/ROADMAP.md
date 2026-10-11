@@ -27,7 +27,8 @@ Rough order of work. Items move as contributors pick them up.
 - [x] Paths: Bézier and freehand tools, node editing (move, add, delete, smooth/corner handles)
 - [x] Convert rectangles and ellipses to curves
 - [x] Full SVG path support on import and export, plus transforms, groups and inherited styles
-- [ ] Node type commands (make smooth / make corner / make line), break and join nodes
+- [x] Node commands: smooth, corner, to line, to curve, break, join
+- [x] Packaged builds: Windows .zip and Linux AppImage from CI, GitHub release on version tags
 - [ ] Groups, ordering (to front / to back), alignment and distribution
 - [ ] Text objects
 - [ ] Layers and multiple pages
