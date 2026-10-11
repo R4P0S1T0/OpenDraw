@@ -49,6 +49,15 @@ jobs:
               --icon-file AppDir/usr/share/icons/hicolor/256x256/apps/opendraw.png 2>&1 | tee -a ci.log
           mv OpenDraw-*.AppImage "OpenDraw-$VERSION-linux-x86_64.AppImage"
 
+      # The packaged app must start on its own: still running after 5 s means every library loaded.
+      - name: Smoke test AppImage
+        run: |
+          set +e
+          QT_QPA_PLATFORM=offscreen APPIMAGE_EXTRACT_AND_RUN=1 timeout 5 ./OpenDraw-*.AppImage 2>&1 | tee -a ci.log
+          status=${PIPESTATUS[0]}
+          set -e
+          if [ "$status" -ne 124 ]; then echo "AppImage exited early with status $status" | tee -a ci.log; exit 1; fi
+
       - uses: actions/upload-artifact@v4
         with:
           name: OpenDraw-linux
