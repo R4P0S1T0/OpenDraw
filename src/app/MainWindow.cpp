@@ -6,6 +6,7 @@
 #include "ExportImageDialog.h"
 #include "FillDialog.h"
 #include "Icons.h"
+#include "Language.h"
 #include "LayersPanel.h"
 #include "PageBar.h"
 #include "PropertyBar.h"
@@ -25,6 +26,7 @@
 #include <QColorDialog>
 #include <QComboBox>
 #include <QLineEdit>
+#include <QLocale>
 #include <QMenu>
 #include <QTimer>
 #include <QFileDialog>
@@ -189,9 +191,9 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_canvas, &CanvasWidget::cursorMoved, this, [this](const QPointF &pos) {
         const Units &units = Units::instance();
         m_positionLabel->setText(QStringLiteral("x %1  y %2 %3")
-                                     .arg(units.toDisplay(pos.x()), 0, 'f', units.decimals())
-                                     .arg(units.toDisplay(pos.y()), 0, 'f', units.decimals())
-                                     .arg(units.suffix()));
+                                     .arg(QLocale().toString(units.toDisplay(pos.x()), 'f', units.decimals()),
+                                          QLocale().toString(units.toDisplay(pos.y()), 'f', units.decimals()),
+                                          units.suffix()));
     });
     connect(m_canvas, &CanvasWidget::selectionChanged, this, [this] {
         m_propertyBar->setSelection(m_canvas->selectedShape(), !m_canvas->selection().empty());
@@ -328,6 +330,28 @@ void MainWindow::createActions()
         connect(action, &QAction::triggered, this, [this, s = scheme] {
             theme::set(s);
             updateStyleIndicators();
+        });
+    }
+
+    // Interface language; takes effect the next time OpenDraw starts.
+    QMenu *languageMenu = viewMenu->addMenu(tr("La&nguage"));
+    auto *languages = new QActionGroup(languageMenu);
+    QStringList names{QString()};
+    names << language::available();
+    for (const QString &name : std::as_const(names)) {
+        const QString text = name.isEmpty() ? tr("System Default")
+                                            : QLocale(name).nativeLanguageName()
+                                                  + (name.contains(u'_') ? QStringLiteral(" (%1)").arg(QLocale(name).nativeTerritoryName())
+                                                                         : QString());
+        QAction *action = languageMenu->addAction(text);
+        action->setCheckable(true);
+        action->setChecked(language::stored() == name);
+        languages->addAction(action);
+        connect(action, &QAction::triggered, this, [this, name] {
+            if (name == language::stored())
+                return;
+            language::store(name);
+            QMessageBox::information(this, tr("Language"), tr("Restart OpenDraw to use the new language."));
         });
     }
 
@@ -1111,7 +1135,8 @@ void MainWindow::updateStyleIndicators()
     const Units &units = Units::instance();
     m_outlineIndicator->setText(style.hasStroke() ? QStringLiteral("%1  %2 %3")
                                                         .arg(describeColor(style.stroke))
-                                                        .arg(units.toDisplay(style.strokeWidth), 0, 'f', units.decimals())
+                                                        .arg(QLocale().toString(units.toDisplay(style.strokeWidth), 'f',
+                                                                                units.decimals()))
                                                         .arg(units.suffix())
                                                   : tr("None"));
 
@@ -1140,7 +1165,7 @@ void MainWindow::updateStyleIndicators()
             break;
         case ShapeKind::Text: {
             const TextFormat &f = selected->textData().format;
-            prefix = tr("Text, %1 %2 pt").arg(f.family).arg(f.size * 72.0 / 96.0, 0, 'f', 1);
+            prefix = tr("Text, %1 %2 pt").arg(f.family, QLocale().toString(f.size * 72.0 / 96.0, 'f', 1));
             break;
         }
         case ShapeKind::Image:

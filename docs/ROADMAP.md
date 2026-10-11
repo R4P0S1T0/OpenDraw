@@ -22,7 +22,8 @@ Rough order of work. Items move as contributors pick them up.
 - [x] Zoom and pan tools, clipboard (copy/cut/paste as SVG), duplicate, nudge with arrow keys, mirroring, paper sizes and orientation
 - [ ] Guidelines (dragged from the rulers), grid and snapping
 - [ ] Several documents open at once (one tab each)
-- [ ] Portuguese and other translations of the interface
+- [x] Translatable interface; Brazilian Portuguese translation, chosen from the system language or View › Language
+- [ ] More languages (see CONTRIBUTING.md › Translations)
 - [ ] Keep unsupported SVG elements when saving, so round-tripping a newer file loses nothing
 
 ## 0.3 — Real drawings (current)

@@ -8,11 +8,6 @@ namespace opendraw {
 
 namespace {
 
-QString tr(const char *text)
-{
-    return QCoreApplication::translate("Document", text);
-}
-
 template<typename T>
 int indexIn(const std::vector<std::unique_ptr<T>> &items, const T *item)
 {
@@ -26,7 +21,7 @@ Document::Document(QObject *parent)
     : QObject(parent)
     , m_pageSize(defaultPageSize())
 {
-    m_pages.push_back(makePage(tr("Page 1")));
+    m_pages.push_back(makePage(QCoreApplication::translate("Document", "Page 1")));
 }
 
 Document::~Document() = default;
@@ -35,7 +30,7 @@ std::unique_ptr<Page> Document::makePage(const QString &name)
 {
     auto page = std::make_unique<Page>();
     page->name = name;
-    page->layers.push_back(makeLayer(tr("Layer 1")));
+    page->layers.push_back(makeLayer(QCoreApplication::translate("Document", "Layer 1")));
     page->activeLayer = page->layers.front().get();
     return page;
 }
@@ -114,10 +109,10 @@ void Document::renamePage(Page *page, const QString &name)
 void Document::setPages(std::vector<std::unique_ptr<Page>> pages)
 {
     if (pages.empty())
-        pages.push_back(makePage(tr("Page 1")));
+        pages.push_back(makePage(QCoreApplication::translate("Document", "Page 1")));
     for (auto &page : pages) {
         if (page->layers.empty())
-            page->layers.push_back(makeLayer(tr("Layer 1")));
+            page->layers.push_back(makeLayer(QCoreApplication::translate("Document", "Layer 1")));
         if (!page->activeLayer || indexIn(page->layers, page->activeLayer) < 0)
             page->activeLayer = page->layers.back().get();
     }
@@ -132,7 +127,7 @@ void Document::setPages(std::vector<std::unique_ptr<Page>> pages)
 std::vector<std::unique_ptr<Page>> Document::releasePages()
 {
     std::vector<std::unique_ptr<Page>> released;
-    released.push_back(makePage(tr("Page 1")));
+    released.push_back(makePage(QCoreApplication::translate("Document", "Page 1")));
     released.swap(m_pages);
     m_currentPage = 0;
     emit cleared();
@@ -145,7 +140,7 @@ std::vector<std::unique_ptr<Page>> Document::releasePages()
 QString Document::newPageName() const
 {
     for (int n = pageCount() + 1;; ++n) {
-        const QString name = tr("Page %1").arg(n);
+        const QString name = QCoreApplication::translate("Document", "Page %1").arg(n);
         if (std::none_of(m_pages.begin(), m_pages.end(), [&](const auto &p) { return p->name == name; }))
             return name;
     }
@@ -236,7 +231,7 @@ void Document::setLayerProperties(Layer *layer, const QString &name, bool visibl
 QString Document::newLayerName(const Page *page) const
 {
     for (int n = int(page->layers.size()) + 1;; ++n) {
-        const QString name = tr("Layer %1").arg(n);
+        const QString name = QCoreApplication::translate("Document", "Layer %1").arg(n);
         if (std::none_of(page->layers.begin(), page->layers.end(), [&](const auto &l) { return l->name == name; }))
             return name;
     }
@@ -345,7 +340,7 @@ Shape *Document::shapeAt(const QPointF &point, double tolerance) const
 void Document::clear()
 {
     std::vector<std::unique_ptr<Page>> pages;
-    pages.push_back(makePage(tr("Page 1")));
+    pages.push_back(makePage(QCoreApplication::translate("Document", "Page 1")));
     m_pageSize = defaultPageSize();
     setPages(std::move(pages));
 }

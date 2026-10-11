@@ -9,10 +9,6 @@
 namespace opendraw {
 
 namespace {
-QString tr(const char *text)
-{
-    return QCoreApplication::translate("Commands", text);
-}
 } // namespace
 
 // --- Shapes
@@ -26,22 +22,22 @@ AddShapeCommand::AddShapeCommand(Document *document, std::unique_ptr<Shape> shap
 {
     switch (m_shape->kind()) {
     case ShapeKind::Rectangle:
-        setText(tr("Add rectangle"));
+        setText(QCoreApplication::translate("Commands", "Add rectangle"));
         break;
     case ShapeKind::Ellipse:
-        setText(tr("Add ellipse"));
+        setText(QCoreApplication::translate("Commands", "Add ellipse"));
         break;
     case ShapeKind::Path:
-        setText(tr("Add curve"));
+        setText(QCoreApplication::translate("Commands", "Add curve"));
         break;
     case ShapeKind::Group:
-        setText(tr("Add group"));
+        setText(QCoreApplication::translate("Commands", "Add group"));
         break;
     case ShapeKind::Text:
-        setText(tr("Add text"));
+        setText(QCoreApplication::translate("Commands", "Add text"));
         break;
     case ShapeKind::Image:
-        setText(tr("Add bitmap"));
+        setText(QCoreApplication::translate("Commands", "Add bitmap"));
         break;
     }
 }
@@ -58,7 +54,7 @@ void AddShapeCommand::undo()
 }
 
 RemoveShapeCommand::RemoveShapeCommand(Document *document, Shape *shape, QUndoCommand *parent)
-    : QUndoCommand(tr("Delete"), parent)
+    : QUndoCommand(QCoreApplication::translate("Commands", "Delete"), parent)
     , m_document(document)
     , m_layer(document->layerOf(shape))
     , m_shape(shape)
@@ -78,7 +74,7 @@ void RemoveShapeCommand::undo()
 
 MoveShapeCommand::MoveShapeCommand(Document *document, Shape *shape, const QPointF &delta, bool alreadyApplied,
                                    QUndoCommand *parent)
-    : QUndoCommand(tr("Move"), parent)
+    : QUndoCommand(QCoreApplication::translate("Commands", "Move"), parent)
     , m_document(document)
     , m_shape(shape)
     , m_delta(delta)
@@ -104,7 +100,7 @@ void MoveShapeCommand::undo()
 
 SetBoundsCommand::SetBoundsCommand(Document *document, Shape *shape, const QRectF &oldBounds,
                                    const QRectF &newBounds, QUndoCommand *parent)
-    : QUndoCommand(tr("Resize"), parent)
+    : QUndoCommand(QCoreApplication::translate("Commands", "Resize"), parent)
     , m_document(document)
     , m_shape(shape)
     , m_oldBounds(oldBounds)
@@ -175,7 +171,7 @@ void ReplaceShapeCommand::undo()
 // --- Grouping and order
 
 GroupCommand::GroupCommand(Document *document, std::vector<Shape *> shapes, QUndoCommand *parent)
-    : QUndoCommand(tr("Group"), parent)
+    : QUndoCommand(QCoreApplication::translate("Commands", "Group"), parent)
     , m_document(document)
 {
     for (Shape *shape : shapes) {
@@ -212,7 +208,7 @@ void GroupCommand::undo()
 }
 
 UngroupCommand::UngroupCommand(Document *document, Shape *group, QUndoCommand *parent)
-    : QUndoCommand(tr("Ungroup"), parent)
+    : QUndoCommand(QCoreApplication::translate("Commands", "Ungroup"), parent)
     , m_document(document)
     , m_group(group)
 {
@@ -266,7 +262,7 @@ void ReorderCommand::undo()
 }
 
 MoveToLayerCommand::MoveToLayerCommand(Document *document, Shape *shape, Layer *target, QUndoCommand *parent)
-    : QUndoCommand(tr("Move to layer"), parent)
+    : QUndoCommand(QCoreApplication::translate("Commands", "Move to layer"), parent)
     , m_document(document)
     , m_shape(shape)
     , m_source(document->layerOf(shape))
@@ -310,7 +306,7 @@ void SetTextCommand::undo()
 }
 
 SetStyleCommand::SetStyleCommand(Document *document, Shape *shape, const Style &style, QUndoCommand *parent)
-    : QUndoCommand(tr("Change style"), parent)
+    : QUndoCommand(QCoreApplication::translate("Commands", "Change style"), parent)
     , m_document(document)
     , m_shape(shape)
     , m_newStyle(style)
@@ -333,7 +329,7 @@ void SetStyleCommand::undo()
 // --- Layers
 
 AddLayerCommand::AddLayerCommand(Document *document, Page *page, QUndoCommand *parent)
-    : QUndoCommand(tr("New layer"), parent)
+    : QUndoCommand(QCoreApplication::translate("Commands", "New layer"), parent)
     , m_document(document)
     , m_page(page)
     , m_previousActive(page->activeLayer)
@@ -356,7 +352,7 @@ void AddLayerCommand::undo()
 }
 
 RemoveLayerCommand::RemoveLayerCommand(Document *document, Layer *layer, QUndoCommand *parent)
-    : QUndoCommand(tr("Delete layer"), parent)
+    : QUndoCommand(QCoreApplication::translate("Commands", "Delete layer"), parent)
     , m_document(document)
     , m_page(document->pageOf(layer))
     , m_layer(layer)
@@ -378,7 +374,7 @@ void RemoveLayerCommand::undo()
 }
 
 MoveLayerCommand::MoveLayerCommand(Document *document, Layer *layer, int newIndex, QUndoCommand *parent)
-    : QUndoCommand(tr("Move layer"), parent)
+    : QUndoCommand(QCoreApplication::translate("Commands", "Move layer"), parent)
     , m_document(document)
     , m_layer(layer)
     , m_oldIndex(document->indexOfLayer(layer))
@@ -423,7 +419,7 @@ void LayerPropertiesCommand::undo()
 // --- Pages
 
 AddPageCommand::AddPageCommand(Document *document, int index, QUndoCommand *parent)
-    : QUndoCommand(tr("Insert page"), parent)
+    : QUndoCommand(QCoreApplication::translate("Commands", "Insert page"), parent)
     , m_document(document)
     , m_owned(Document::makePage(document->newPageName()))
     , m_index(index)
@@ -446,7 +442,7 @@ void AddPageCommand::undo()
 }
 
 RemovePageCommand::RemovePageCommand(Document *document, Page *page, QUndoCommand *parent)
-    : QUndoCommand(tr("Delete page"), parent)
+    : QUndoCommand(QCoreApplication::translate("Commands", "Delete page"), parent)
     , m_document(document)
     , m_page(page)
     , m_index(document->indexOfPage(page))
@@ -467,7 +463,7 @@ void RemovePageCommand::undo()
 }
 
 RenamePageCommand::RenamePageCommand(Document *document, Page *page, const QString &name, QUndoCommand *parent)
-    : QUndoCommand(tr("Rename page"), parent)
+    : QUndoCommand(QCoreApplication::translate("Commands", "Rename page"), parent)
     , m_document(document)
     , m_page(page)
     , m_oldName(page->name)
@@ -507,7 +503,7 @@ void TransformShapeCommand::undo()
 }
 
 SetPageSizeCommand::SetPageSizeCommand(Document *document, const QSizeF &size, QUndoCommand *parent)
-    : QUndoCommand(tr("Page size"), parent)
+    : QUndoCommand(QCoreApplication::translate("Commands", "Page size"), parent)
     , m_document(document)
     , m_oldSize(document->pageSize())
     , m_newSize(size)

@@ -15,10 +15,6 @@
 namespace opendraw::cdr {
 
 namespace {
-QString tr(const char *text)
-{
-    return QCoreApplication::translate("CdrImport", text);
-}
 } // namespace
 
 bool isAvailable()
@@ -37,7 +33,7 @@ bool read(const QByteArray &data, Document &document, QString *errorMessage, svg
     Q_UNUSED(document);
     Q_UNUSED(report);
     if (errorMessage)
-        *errorMessage = tr("This version of OpenDraw was built without CorelDRAW import (libcdr).");
+        *errorMessage = QCoreApplication::translate("CdrImport", "This version of OpenDraw was built without CorelDRAW import (libcdr).");
     return false;
 #else
     // Reading from memory avoids file-name encoding problems on Windows; the stream also
@@ -46,7 +42,7 @@ bool read(const QByteArray &data, Document &document, QString *errorMessage, svg
                                        unsigned(data.size()));
     if (!libcdr::CDRDocument::isSupported(&input)) {
         if (errorMessage)
-            *errorMessage = tr("The file is not a CorelDRAW drawing, or its version is not supported.");
+            *errorMessage = QCoreApplication::translate("CdrImport", "The file is not a CorelDRAW drawing, or its version is not supported.");
         return false;
     }
 
@@ -54,7 +50,7 @@ bool read(const QByteArray &data, Document &document, QString *errorMessage, svg
     librevenge::RVNGSVGDrawingGenerator generator(pageSvgs, "svg");
     if (!libcdr::CDRDocument::parse(&input, &generator) || pageSvgs.empty()) {
         if (errorMessage)
-            *errorMessage = tr("The CorelDRAW file could not be read.");
+            *errorMessage = QCoreApplication::translate("CdrImport", "The CorelDRAW file could not be read.");
         return false;
     }
 
@@ -71,7 +67,7 @@ bool read(const QByteArray &data, Document &document, QString *errorMessage, svg
         QString error;
         if (!svg::read(&buffer, page, &error, &pageReport)) {
             if (errorMessage)
-                *errorMessage = tr("Page %1 could not be converted: %2").arg(i + 1).arg(error);
+                *errorMessage = QCoreApplication::translate("CdrImport", "Page %1 could not be converted: %2").arg(i + 1).arg(error);
             return false;
         }
         if (i == 0)
@@ -79,7 +75,7 @@ bool read(const QByteArray &data, Document &document, QString *errorMessage, svg
         for (auto it = pageReport.skippedElements.cbegin(); it != pageReport.skippedElements.cend(); ++it)
             combined.skippedElements[it.key()] += it.value();
         for (auto &released : page.releasePages()) {
-            released->name = tr("Page %1").arg(pages.size() + 1);
+            released->name = QCoreApplication::translate("CdrImport", "Page %1").arg(pages.size() + 1);
             pages.push_back(std::move(released));
         }
     }

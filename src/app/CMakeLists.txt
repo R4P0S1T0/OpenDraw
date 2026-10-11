@@ -14,6 +14,8 @@ add_library(opendraw_ui STATIC
     FillDialog.h
     Icons.cpp
     Icons.h
+    Language.cpp
+    Language.h
     LayersPanel.cpp
     LayersPanel.h
     MainWindow.cpp
@@ -36,6 +38,26 @@ qt_add_resources(opendraw_ui "branding"
     BASE ${BRANDING_DIR}
     FILES ${BRANDING_DIR}/opendraw-icon-256.png
 )
+
+# Interface translations, compiled into the program as ":/i18n/opendraw_<lang>.qm".
+# To refresh translations/*.ts after changing user-visible strings, run from the source folder:
+#   lupdate -locations none -extensions cpp,h -recursive src -ts translations/opendraw_pt_BR.ts
+option(OPENDRAW_REQUIRE_TRANSLATIONS "Fail the configuration when Qt's LinguistTools are missing" OFF)
+find_package(Qt6 QUIET COMPONENTS LinguistTools)
+if(Qt6LinguistTools_FOUND)
+    file(GLOB TS_FILES ${PROJECT_SOURCE_DIR}/translations/opendraw_*.ts)
+    qt_add_lrelease(opendraw_ui TS_FILES ${TS_FILES} QM_FILES_OUTPUT_VARIABLE QM_FILES)
+    qt_add_resources(opendraw_ui "translations"
+        PREFIX "/i18n"
+        BASE ${CMAKE_CURRENT_BINARY_DIR}
+        FILES ${QM_FILES}
+    )
+    message(STATUS "Translations: ${TS_FILES}")
+elseif(OPENDRAW_REQUIRE_TRANSLATIONS)
+    message(FATAL_ERROR "Qt6 LinguistTools not found (needed for the interface translations)")
+else()
+    message(STATUS "Translations: disabled (Qt6 LinguistTools not found)")
+endif()
 
 set(APP_SOURCES main.cpp)
 

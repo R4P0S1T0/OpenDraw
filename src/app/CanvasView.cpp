@@ -6,6 +6,7 @@
 
 #include <QActionGroup>
 #include <QGridLayout>
+#include <QLocale>
 #include <QMenu>
 #include <QPainter>
 #include <QScrollBar>
@@ -37,7 +38,9 @@ QString label(double value)
 {
     if (std::abs(value) < 1e-9)
         value = 0.0;
-    return QString::number(value, 'g', 7);
+    QLocale locale;
+    locale.setNumberOptions(QLocale::OmitGroupSeparator);
+    return locale.toString(value, 'g', 7);
 }
 } // namespace
 

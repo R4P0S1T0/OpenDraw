@@ -20,11 +20,6 @@ namespace opendraw::svg {
 
 namespace {
 
-QString tr(const char *text)
-{
-    return QCoreApplication::translate("SvgIO", text);
-}
-
 QString number(double value)
 {
     return QString::number(value, 'g', 10);
@@ -428,7 +423,7 @@ private:
         if (v.isEmpty())
             return fallback;
         if (v.startsWith(u"url(")) {
-            ++report.skippedElements[tr("gradient or pattern outline (replaced with gray)")];
+            ++report.skippedElements[QCoreApplication::translate("SvgIO", "gradient or pattern outline (replaced with gray)")];
             return QColor(0x80, 0x80, 0x80);
         }
         if (v == u"currentColor")
@@ -993,7 +988,7 @@ bool read(QIODevice *device, Document &document, QString *errorMessage, ReadRepo
                     ShapeList loose = std::move(containers.back());
                     containers.pop_back();
                     if (!loose.empty()) {
-                        auto layer = Document::makeLayer(tr("Layer"));
+                        auto layer = Document::makeLayer(QCoreApplication::translate("SvgIO", "Layer"));
                         layer->shapes = std::move(loose);
                         pages.back()->layers.push_back(std::move(layer));
                     }
@@ -1050,7 +1045,7 @@ bool read(QIODevice *device, Document &document, QString *errorMessage, ReadRepo
             QString layerName = attributes.value(ns, QStringLiteral("layer")).toString();
             if (layerName.isEmpty())
                 layerName = attributes.value(QString::fromLatin1(kInkscapeNamespace), QStringLiteral("label")).toString();
-            auto layer = Document::makeLayer(layerName.isEmpty() ? tr("Layer") : layerName);
+            auto layer = Document::makeLayer(layerName.isEmpty() ? QCoreApplication::translate("SvgIO", "Layer") : layerName);
             layer->visible = !hidden;
             layer->locked = attributes.value(ns, QStringLiteral("locked")) == u"true"
                             || attributes.value(QString::fromLatin1(kSodipodiNamespace), QStringLiteral("insensitive"))
@@ -1137,7 +1132,7 @@ bool read(QIODevice *device, Document &document, QString *errorMessage, ReadRepo
                 const QRectF rect(props.length(QStringLiteral("x")), props.length(QStringLiteral("y")),
                                   props.length(QStringLiteral("width")), props.length(QStringLiteral("height")));
                 if (image.isNull()) {
-                    ++localReport.skippedElements[tr("<image> linked to a separate file")];
+                    ++localReport.skippedElements[QCoreApplication::translate("SvgIO", "<image> linked to a separate file")];
                 } else if (rect.width() > 0 && rect.height() > 0) {
                     // Stretched to its box; preserveAspectRatio fitting is not applied.
                     const QTransform placement =
@@ -1170,12 +1165,12 @@ bool read(QIODevice *device, Document &document, QString *errorMessage, ReadRepo
 
     if (r.hasError()) {
         if (errorMessage)
-            *errorMessage = tr("Line %1: %2").arg(r.lineNumber()).arg(r.errorString());
+            *errorMessage = QCoreApplication::translate("SvgIO", "Line %1: %2").arg(r.lineNumber()).arg(r.errorString());
         return false;
     }
     if (!foundSvg) {
         if (errorMessage)
-            *errorMessage = tr("The file is not an SVG document.");
+            *errorMessage = QCoreApplication::translate("SvgIO", "The file is not an SVG document.");
         return false;
     }
 

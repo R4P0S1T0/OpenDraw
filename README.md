@@ -31,7 +31,7 @@ See [docs/ROADMAP.md](docs/ROADMAP.md) for what is planned next.
 
 ## Using it
 
-The workspace follows the layout desktop designers know: menu bar and standard toolbar at the top, a context-sensitive property bar under it (page size, orientation and units with nothing selected; position, size, mirroring, outline and opacity with a selection), the toolbox on the left (hold a tool with a small arrow to open its flyout), rulers, the colour palette along the right edge, the page navigator and the document palette (colours used in the drawing) under the page, and the fill and outline of the selection at the right of the status bar (click them to change). Dark and light colour schemes are in View › Color Scheme; toolbars, dockers and palettes can be brought back from the Window menu.
+The workspace follows the layout desktop designers know: menu bar and standard toolbar at the top, a context-sensitive property bar under it (page size, orientation and units with nothing selected; position, size, mirroring, outline and opacity with a selection), the toolbox on the left (hold a tool with a small arrow to open its flyout), rulers, the colour palette along the right edge, the page navigator and the document palette (colours used in the drawing) under the page, and the fill and outline of the selection at the right of the status bar (click them to change). Dark and light colour schemes are in View › Color Scheme; toolbars, dockers and palettes can be brought back from the Window menu. The interface is available in English and Brazilian Portuguese: it follows the system language, or pick one in View › Language.
 
 | Action | How |
 |---|---|
@@ -68,12 +68,13 @@ The workspace follows the layout desktop designers know: menu bar and standard t
 
 ## Building
 
-Requirements: a C++20 compiler, CMake 3.21+, Ninja (optional) and Qt 6.4+ (Core, Gui, Widgets; Test for the tests). Optional: libcdr 0.1 and librevenge 0.0, found with pkg-config, for CorelDRAW import (without them OpenDraw builds and runs, but cannot open `.cdr` files; `-DOPENDRAW_REQUIRE_LIBCDR=ON` makes their absence an error).
+Requirements: a C++20 compiler, CMake 3.21+, Ninja (optional) and Qt 6.4+ (Core, Gui, Widgets; Test for the tests). Optional: libcdr 0.1 and librevenge 0.0, found with pkg-config, for CorelDRAW import (without them OpenDraw builds and runs, but cannot open `.cdr` files; `-DOPENDRAW_REQUIRE_LIBCDR=ON` makes their absence an error). Optional: Qt's LinguistTools (`lrelease`) to build the interface translations (without them the interface is English only; `-DOPENDRAW_REQUIRE_TRANSLATIONS=ON` makes their absence an error).
 
 ### Linux (Debian / Ubuntu)
 
 ```sh
-sudo apt install build-essential cmake ninja-build pkg-config qt6-base-dev libgl-dev libcdr-dev librevenge-dev
+sudo apt install build-essential cmake ninja-build pkg-config qt6-base-dev qt6-tools-dev qt6-l10n-tools libgl-dev \
+    libcdr-dev librevenge-dev
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ctest --test-dir build
@@ -85,7 +86,7 @@ ctest --test-dir build
 Install [MSYS2](https://www.msys2.org/), open the **UCRT64** shell and run:
 
 ```sh
-pacman -S --needed mingw-w64-ucrt-x86_64-{gcc,cmake,ninja,pkgconf,qt6-base,libcdr,librevenge}
+pacman -S --needed mingw-w64-ucrt-x86_64-{gcc,cmake,ninja,pkgconf,qt6-base,qt6-tools,libcdr,librevenge}
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ctest --test-dir build

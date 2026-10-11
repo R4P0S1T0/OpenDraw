@@ -16,6 +16,19 @@ windeployqt6 --release --no-translations --no-system-d3d-compiler --no-opengl-sw
     --no-compiler-runtime --skip-plugin-types tls,networkinformation "$out_dir/opendraw.exe"
 rm -f "$out_dir/Qt6Network.dll"
 
+# Qt's own strings (standard buttons and dialogs) for each language OpenDraw is translated into.
+# OpenDraw's translations are compiled into the program.
+qt_translations=$(qtpaths6 --query QT_INSTALL_TRANSLATIONS 2>/dev/null || echo /ucrt64/share/qt6/translations)
+for ts in "$source_dir"/translations/opendraw_*.ts; do
+    [ -e "$ts" ] || continue
+    lang=$(basename "$ts" .ts)
+    lang=${lang#opendraw_}
+    if [ -e "$qt_translations/qtbase_$lang.qm" ]; then
+        mkdir -p "$out_dir/translations"
+        cp "$qt_translations/qtbase_$lang.qm" "$out_dir/translations/"
+    fi
+done
+
 # Everything else the executable and the Qt plugins load from the MSYS2 prefix
 # (GCC runtime, ICU, FreeType, HarfBuzz, ...). ldd lists dependencies recursively.
 find "$out_dir" -name '*.exe' -o -name '*.dll' | while read -r binary; do

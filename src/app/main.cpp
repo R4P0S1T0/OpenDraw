@@ -1,3 +1,4 @@
+#include "Language.h"
 #include "MainWindow.h"
 #include "Theme.h"
 
@@ -14,6 +15,7 @@ int main(int argc, char *argv[])
     QApplication::setWindowIcon(QIcon(QStringLiteral(":/opendraw-icon-256.png")));
     QApplication::setDesktopFileName(QStringLiteral("opendraw"));
     opendraw::theme::apply(opendraw::theme::stored());
+    opendraw::language::install();
 
     opendraw::MainWindow window;
     window.show();

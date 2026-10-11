@@ -1,6 +1,7 @@
 #include "CanvasView.h"
 #include "CanvasWidget.h"
 #include "FillDialog.h"
+#include "Language.h"
 #include "LayersPanel.h"
 #include "MainWindow.h"
 #include "PageBar.h"
@@ -15,6 +16,7 @@
 #include <QSignalSpy>
 #include <QToolBar>
 #include <QToolButton>
+#include <QTranslator>
 #include <QTreeWidget>
 #include <QUndoStack>
 #include <QtTest>
@@ -109,6 +111,7 @@ private slots:
     void arrowKeysNudgeAndMirror();
     void zoomAndPanTools();
     void mainWindowWorkspace();
+    void portugueseTranslation();
     void screenshot();
 
 private:
@@ -741,6 +744,26 @@ void CanvasTests::mainWindowWorkspace()
         QTest::qWait(50); // let the toolbars lay out again
         QVERIFY(window.grab().save(dir + QStringLiteral("/window-selection.png")));
     }
+}
+
+// The Brazilian Portuguese translation is built into the program and covers the window, the
+// core's messages and the default page and layer names.
+void CanvasTests::portugueseTranslation()
+{
+    if (!QFile::exists(QStringLiteral(":/i18n/opendraw_pt_BR.qm")))
+        QSKIP("Built without Qt LinguistTools");
+    QVERIFY(language::available().contains(QStringLiteral("pt_BR")));
+    QTranslator translator;
+    QVERIFY(translator.load(QStringLiteral(":/i18n/opendraw_pt_BR.qm")));
+    QCoreApplication::installTranslator(&translator);
+    QCOMPARE(MainWindow::tr("&File"), QStringLiteral("&Arquivo"));
+    QCOMPARE(QCoreApplication::translate("Commands", "Add rectangle"), QStringLiteral("Adicionar retângulo"));
+    QCOMPARE(PropertyBar::tr("Page width"), QStringLiteral("Largura da página"));
+    QCOMPARE(MainWindow::tr("%n objects selected", nullptr, 3), QStringLiteral("3 objetos selecionados"));
+    Document document;
+    QCOMPARE(document.currentPage()->name, QStringLiteral("Página 1"));
+    QCOMPARE(document.activeLayer()->name, QStringLiteral("Camada 1"));
+    QCoreApplication::removeTranslator(&translator);
 }
 
 // Not an assertion: saves a picture of the canvas for manual review when
