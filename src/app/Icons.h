@@ -1,0 +1,21 @@
+#pragma once
+
+#include <QIcon>
+
+namespace opendraw {
+
+// OpenDraw's own icons, drawn in code on a 24 × 24 grid so they stay sharp at any size and
+// follow the colour scheme (no image assets, no third-party artwork).
+enum class Icon {
+    New, Open, Save, Cut, Copy, Paste, Undo, Redo, Import, Export, ExportPdf, Rulers,
+    Pick, Shape, Freehand, Bezier, Zoom, Pan, Rectangle, Ellipse, Text,
+    FillBucket, OutlinePen, Portrait, Landscape,
+    FirstPage, PreviousPage, NextPage, LastPage, AddPage,
+    LockRatio, MirrorHorizontal, MirrorVertical,
+    AlignLeft, AlignCenter, AlignRight,
+    ScrollUp, ScrollDown, ScrollLeft, ScrollRight,
+};
+
+QIcon icon(Icon id);
+
+} // namespace opendraw

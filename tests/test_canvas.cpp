@@ -1,13 +1,19 @@
+#include "CanvasView.h"
 #include "CanvasWidget.h"
 #include "FillDialog.h"
 #include "LayersPanel.h"
+#include "MainWindow.h"
+#include "PageBar.h"
 #include "PropertyBar.h"
+#include "Units.h"
 #include "core/Commands.h"
 #include "core/Document.h"
 #include "core/Export.h"
 
 #include <QDoubleSpinBox>
 #include <QMouseEvent>
+#include <QSignalSpy>
+#include <QToolBar>
 #include <QToolButton>
 #include <QTreeWidget>
 #include <QUndoStack>
@@ -98,6 +104,11 @@ private slots:
     void layersPanelEditsLayers();
     void fillDialogBuildsGradients();
     void propertyBarSetsOpacity();
+    void propertyBarEditsThePage();
+    void copyPasteAndDuplicate();
+    void arrowKeysNudgeAndMirror();
+    void zoomAndPanTools();
+    void mainWindowWorkspace();
     void screenshot();
 
 private:
@@ -587,6 +598,149 @@ void CanvasTests::propertyBarSetsOpacity()
     QCOMPARE(shape->style().opacity, 0.4);
     m_undo->undo();
     QCOMPARE(shape->style().opacity, 1.0);
+}
+
+void CanvasTests::propertyBarEditsThePage()
+{
+    PropertyBar bar(m_doc, m_undo);
+    bar.setSelection(nullptr, false);
+    QDoubleSpinBox *pageWidth = nullptr;
+    for (QDoubleSpinBox *box : bar.findChildren<QDoubleSpinBox *>()) {
+        if (box->toolTip() == QStringLiteral("Page width"))
+            pageWidth = box;
+    }
+    QVERIFY(pageWidth);
+    const QSizeF before = m_doc->pageSize();
+    QCOMPARE(pageWidth->value(), Units::instance().toDisplay(before.width()));
+    pageWidth->setValue(Units::instance().toDisplay(100 * kUnitsPerMm));
+    emit pageWidth->editingFinished();
+    QVERIFY(std::abs(m_doc->pageSize().width() - 100 * kUnitsPerMm) < 0.01);
+    QCOMPARE(m_doc->pageSize().height(), before.height());
+    m_undo->undo();
+    QCOMPARE(m_doc->pageSize(), before);
+}
+
+void CanvasTests::copyPasteAndDuplicate()
+{
+    Style style;
+    style.fill = Qt::red;
+    Shape *rect = m_doc->insertShape(-1, std::make_unique<Shape>(ShapeKind::Rectangle, QRectF(10, 20, 30, 40), style));
+    m_canvas->setSelectedShape(rect);
+
+    m_canvas->copySelection();
+    m_canvas->paste();
+    QCOMPARE(m_doc->count(), 2);
+    QCOMPARE(m_canvas->selection().size(), std::size_t(1));
+    Shape *pasted = m_canvas->selection().front();
+    QVERIFY(pasted != rect);
+    QCOMPARE(pasted->bounds(), rect->bounds());
+    QCOMPARE(pasted->style().fill, QColor(Qt::red));
+
+    m_canvas->setDuplicateOffset(QPointF(5, 7));
+    m_canvas->duplicateSelection();
+    QCOMPARE(m_doc->count(), 3);
+    QCOMPARE(m_canvas->selection().front()->bounds(), QRectF(15, 27, 30, 40));
+
+    m_undo->undo();
+    m_undo->undo();
+    QCOMPARE(m_doc->count(), 1);
+
+    m_canvas->setSelectedShape(rect);
+    m_canvas->cutSelection();
+    QCOMPARE(m_doc->count(), 0);
+    m_canvas->paste();
+    QCOMPARE(m_doc->count(), 1);
+}
+
+void CanvasTests::arrowKeysNudgeAndMirror()
+{
+    Shape *rect = m_doc->insertShape(-1, std::make_unique<Shape>(ShapeKind::Rectangle, QRectF(100, 100, 50, 50)));
+    m_canvas->setSelectedShape(rect);
+    m_canvas->setNudgeDistance(2.0);
+    m_canvas->setFocus();
+    QTest::keyClick(m_canvas, Qt::Key_Right);
+    QCOMPARE(rect->bounds().topLeft(), QPointF(102, 100));
+    QTest::keyClick(m_canvas, Qt::Key_Up, Qt::ShiftModifier);
+    QCOMPARE(rect->bounds().topLeft(), QPointF(102, 80));
+    m_undo->undo();
+    QCOMPARE(rect->bounds().topLeft(), QPointF(102, 100));
+
+    // A right triangle flipped left to right keeps its box but points the other way.
+    SubPath triangle;
+    triangle.closed = true;
+    for (const QPointF &p : {QPointF(0, 0), QPointF(0, 100), QPointF(100, 100)})
+        triangle.nodes.push_back(PathNode::corner(p));
+    Shape *path = m_doc->insertShape(-1, std::make_unique<Shape>(PathData{triangle}));
+    m_canvas->setSelectedShape(path);
+    m_canvas->mirrorSelection(Qt::Horizontal);
+    QCOMPARE(path->bounds(), QRectF(0, 0, 100, 100));
+    QCOMPARE(path->pathData().front().nodes.front().point, QPointF(100, 0));
+    m_undo->undo();
+    QCOMPARE(path->pathData().front().nodes.front().point, QPointF(0, 0));
+}
+
+void CanvasTests::zoomAndPanTools()
+{
+    QSignalSpy viewChanged(m_canvas, &CanvasWidget::viewChanged);
+    const double zoom = m_canvas->zoom();
+    m_canvas->setTool(CanvasWidget::Tool::Zoom);
+    click(m_canvas, {450, 350});
+    QVERIFY(m_canvas->zoom() > zoom * 1.2);
+    QVERIFY(!viewChanged.isEmpty());
+
+    // Dragging a box zooms so the box fills the view.
+    const QPointF from = m_canvas->viewTransform().inverted().map(QPointF(400, 300));
+    dragFromTo(m_canvas, {400, 300}, {500, 380});
+    const QRectF visible = m_canvas->visibleDocumentRect();
+    QVERIFY(visible.contains(from));
+    QVERIFY(m_canvas->zoom() > zoom * 5);
+
+    m_canvas->setTool(CanvasWidget::Tool::Pan);
+    const QPointF pan = m_canvas->pan();
+    dragFromTo(m_canvas, {300, 300}, {340, 260});
+    QCOMPARE(m_canvas->pan(), pan + QPointF(40, -40));
+
+    m_canvas->setZoom(1.0);
+    QCOMPARE(m_canvas->zoom(), 1.0);
+}
+
+// The whole workspace builds, and its toolbars drive the canvas.
+void CanvasTests::mainWindowWorkspace()
+{
+    MainWindow window;
+    window.resize(1400, 900);
+    window.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
+    auto *canvas = window.findChild<CanvasWidget *>();
+    QVERIFY(canvas);
+    QVERIFY(window.findChild<CanvasView *>());
+    QVERIFY(window.findChild<PageBar *>());
+    QVERIFY(window.findChild<QToolBar *>(QStringLiteral("standard")));
+    QVERIFY(window.findChild<QToolBar *>(QStringLiteral("tools")));
+
+    // Picking a tool from the toolbox (including one inside a flyout) switches the canvas tool.
+    QAction *pan = nullptr;
+    for (QAction *action : window.findChildren<QAction *>()) {
+        if (action->data().toInt() == int(CanvasWidget::Tool::Pan) && action->isCheckable())
+            pan = action;
+    }
+    QVERIFY(pan);
+    pan->trigger();
+    QCOMPARE(canvas->tool(), CanvasWidget::Tool::Pan);
+    canvas->setTool(CanvasWidget::Tool::Select);
+    QVERIFY(!pan->isChecked());
+
+    const QString dir = qEnvironmentVariable("OPENDRAW_SCREENSHOT_DIR");
+    if (!dir.isEmpty()) {
+        auto *doc = window.findChild<Document *>();
+        Style style;
+        style.fill = QColor(0x1e, 0x88, 0xe5);
+        style.stroke = Qt::black;
+        Shape *rect = doc->insertShape(-1, std::make_unique<Shape>(ShapeKind::Rectangle, QRectF(150, 200, 300, 200), style));
+        canvas->setSelectedShape(rect);
+        QTest::qWait(50); // let the toolbars lay out again
+        QVERIFY(window.grab().save(dir + QStringLiteral("/window-selection.png")));
+    }
 }
 
 // Not an assertion: saves a picture of the canvas for manual review when

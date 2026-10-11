@@ -31,6 +31,8 @@ See [docs/ROADMAP.md](docs/ROADMAP.md) for what is planned next.
 
 ## Using it
 
+The workspace follows the layout desktop designers know: menu bar and standard toolbar at the top, a context-sensitive property bar under it (page size, orientation and units with nothing selected; position, size, mirroring, outline and opacity with a selection), the toolbox on the left (hold a tool with a small arrow to open its flyout), rulers, the colour palette along the right edge, the page navigator and the document palette (colours used in the drawing) under the page, and the fill and outline of the selection at the right of the status bar (click them to change). Dark and light colour schemes are in View › Color Scheme; toolbars, dockers and palettes can be brought back from the Window menu.
+
 | Action | How |
 |---|---|
 | Select / move | Select tool (`V`), click and drag a shape |
@@ -39,7 +41,11 @@ See [docs/ROADMAP.md](docs/ROADMAP.md) for what is planned next.
 | Group / ungroup | `Ctrl` `G` / `Ctrl` `U` |
 | Order | `Shift` `PgUp` to front, `Shift` `PgDn` to back, `Ctrl` `PgUp` / `Ctrl` `PgDn` one step |
 | Align | `L` `R` `T` `B` (left, right, top, bottom), `E` / `C` (centres horizontally / vertically), `P` (centre on page). One object aligns to the page, several to their combined box. Distribute is in Object › Align and Distribute |
-| Exact position and size | Type values in the property bar at the top (millimetres) |
+| Exact position and size | Type values in the property bar (in the unit chosen there or from the corner of the rulers); the lock keeps the proportions |
+| Nudge | Arrow keys move the selection by the nudge distance (property bar, nothing selected); `Shift` moves ten times further |
+| Copy, paste, duplicate | `Ctrl` `C` / `Ctrl` `X` / `Ctrl` `V` (objects travel as SVG, so they paste into other programs too), `Ctrl` `D` duplicates with the offset set on the property bar |
+| Mirror | Mirror buttons on the property bar, or Object › Transform |
+| Page size | With nothing selected: paper type (A3–A6, Letter, Legal, Tabloid), width, height and portrait/landscape on the property bar |
 | Rectangle | `F6`, drag on the page. Hold `Shift` for a square |
 | Ellipse | `F7`, drag on the page. Hold `Shift` for a circle |
 | Bézier curve | `Shift` `B`. Click for a corner node, click and drag for a smooth node. Click the first node to close the shape; `Enter`, `Esc` or double-click to finish. `Backspace` removes the last node while drawing |
@@ -47,15 +53,16 @@ See [docs/ROADMAP.md](docs/ROADMAP.md) for what is planned next.
 | Edit nodes | Shape tool (`F10`): drag nodes and handles, double-click a segment to add a node, double-click a node or press `Delete` to remove it. Hold `Alt` while dragging a handle to make a corner |
 | Text | `F8`, click on the page and type. `Enter` starts a new line, `Esc` finishes. Click a text with the tool, or double-click it with the Select tool, to edit it. Font, size (pt), bold, italic and alignment are on the text bar |
 | Convert to curves | `Ctrl` `Q` turns a rectangle, ellipse or text into editable curves |
-| Fill / outline colour | Colour palette on the right: left click = fill, right click = outline, ✕ = none. With nothing selected it sets the colour for new shapes |
+| Fill / outline colour | Colour palette on the right or document palette at the bottom: left click = fill, right click = outline, the crossed swatch = none. With nothing selected it sets the colour for new shapes |
 | Fill and gradients | `Shift` `F11`: no fill, uniform colour, or a linear (with angle) or radial gradient, with a preview. `Shift` `F12` for the outline colour |
 | Transparency | *Opacity* on the property bar (0–100 %), for the whole object |
-| Zoom | Mouse wheel (around the cursor), `Ctrl` `+` / `Ctrl` `-`, `Shift` `F4` fits the page |
-| Pan | Middle mouse button, or hold `Space` and drag |
+| Zoom | Mouse wheel (around the cursor), `Ctrl` `+` / `Ctrl` `-`, the zoom box on the standard toolbar, `Shift` `F4` fits the page, `Shift` `F2` the selection. Zoom tool (`Z`): click to zoom in, `Shift`+click or right-click to zoom out, drag around an area |
+| Pan | Pan tool (`H`, in the zoom flyout), the scroll bars, the middle mouse button, or hold `Space` and drag |
 | Delete | `Delete` |
 | Layers | Layers panel on the right: checkbox shows/hides, Locked column locks, double-click renames, the bold layer receives new objects. `+` / `−` / `↑` / `↓` add, delete and reorder; *Move here* moves the selection to the highlighted layer |
-| Pages | Tabs under the drawing; `+` inserts a page, right-click or double-click a tab to rename or delete. `PgUp` / `PgDn` switch pages (Layout menu) |
+| Pages | Page navigator under the drawing: ⊕ inserts a page before or after the current one, arrows go to the first, previous, next and last page, right-click or double-click a page tab to rename or delete it. `PgUp` / `PgDn` also switch pages |
 | Open CorelDRAW files | `Ctrl` `O` and pick a `.cdr` file, or pass it on the command line. A report lists anything that could not be imported |
+| Import | `Ctrl` `I` adds the objects of an SVG or CorelDRAW file to the current page |
 | Undo / redo | `Ctrl` `Z` / `Ctrl` `Y` |
 | Export | `Ctrl` `E`: PDF (vector, exact page size, one PDF page per page) or PNG of the current page (choose the dpi, transparent background, or only the selected objects) |
 

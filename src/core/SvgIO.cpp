@@ -863,13 +863,9 @@ int ReadReport::skippedCount() const
     return total;
 }
 
-bool write(const Document &document, QIODevice *device)
+namespace {
+void writeRootStart(QXmlStreamWriter &w, const QSizeF &page)
 {
-    QXmlStreamWriter w(device);
-    w.setAutoFormatting(true);
-    w.writeStartDocument();
-
-    const QSizeF page = document.pageSize();
     w.writeStartElement(QStringLiteral("svg"));
     w.writeDefaultNamespace(QStringLiteral("http://www.w3.org/2000/svg"));
     w.writeNamespace(QString::fromLatin1(kNamespace), QStringLiteral("opendraw"));
@@ -882,6 +878,47 @@ bool write(const Document &document, QIODevice *device)
     w.writeAttribute(QStringLiteral("height"), number(page.height()));
     w.writeAttribute(QStringLiteral("viewBox"),
                      QStringLiteral("0 0 %1 %2").arg(number(page.width()), number(page.height())));
+}
+} // namespace
+
+QByteArray writeShapes(const std::vector<const Shape *> &shapes, const QSizeF &pageSize)
+{
+    QByteArray data;
+    QXmlStreamWriter w(&data);
+    w.writeStartDocument();
+    writeRootStart(w, pageSize);
+    int gradientCount = 0;
+    for (const Shape *shape : shapes)
+        writeShape(w, *shape, gradientCount);
+    w.writeEndElement();
+    w.writeEndDocument();
+    return data;
+}
+
+std::vector<std::unique_ptr<Shape>> readShapes(const QByteArray &data)
+{
+    QByteArray copy = data;
+    QBuffer buffer(&copy);
+    buffer.open(QIODevice::ReadOnly);
+    Document document;
+    std::vector<std::unique_ptr<Shape>> shapes;
+    if (!read(&buffer, document))
+        return shapes;
+    auto pages = document.releasePages();
+    for (auto &layer : pages.front()->layers) {
+        for (auto &shape : layer->shapes)
+            shapes.push_back(std::move(shape));
+    }
+    return shapes;
+}
+
+bool write(const Document &document, QIODevice *device)
+{
+    QXmlStreamWriter w(device);
+    w.setAutoFormatting(true);
+    w.writeStartDocument();
+
+    writeRootStart(w, document.pageSize());
     w.writeAttribute(QString::fromLatin1(kNamespace), QStringLiteral("page-name"), document.pages().front()->name);
 
     // Layers use Inkscape's layer markup too, so other editors show them as layers.

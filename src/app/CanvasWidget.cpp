@@ -4,9 +4,13 @@
 #include "core/Document.h"
 #include "core/PathOps.h"
 #include "core/Render.h"
+#include "core/SvgIO.h"
 #include "core/TextLayout.h"
 
+#include <QClipboard>
+#include <QGuiApplication>
 #include <QKeyEvent>
+#include <QMimeData>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QUndoStack>
@@ -95,6 +99,7 @@ void CanvasWidget::setTool(Tool tool)
     setActiveNode({});
     updateCursor();
     update();
+    emit toolChanged(tool);
 }
 
 void CanvasWidget::setSelectedShape(Shape *shape)
@@ -143,13 +148,74 @@ QPointF CanvasWidget::toWidget(const QPointF &documentPosition) const
     return documentPosition * m_zoom + m_pan;
 }
 
+QRectF CanvasWidget::visibleDocumentRect() const
+{
+    return QRectF(toDocument(QPointF(0, 0)), toDocument(QPointF(width(), height())));
+}
+
+void CanvasWidget::viewUpdated(bool zoomChanged)
+{
+    update();
+    if (zoomChanged)
+        emit this->zoomChanged(m_zoom);
+    emit viewChanged();
+}
+
+void CanvasWidget::setPan(const QPointF &pan)
+{
+    if (pan == m_pan)
+        return;
+    m_pan = pan;
+    viewUpdated(false);
+}
+
 void CanvasWidget::zoomAround(const QPointF &widgetPosition, double factor)
 {
     const QPointF anchor = toDocument(widgetPosition);
     m_zoom = std::clamp(m_zoom * factor, kMinZoom, kMaxZoom);
     m_pan = widgetPosition - anchor * m_zoom;
-    update();
-    emit zoomChanged(m_zoom);
+    viewUpdated(true);
+}
+
+void CanvasWidget::setZoom(double zoom)
+{
+    zoomAround(rect().center(), zoom / m_zoom);
+}
+
+void CanvasWidget::zoomToRect(const QRectF &documentRect)
+{
+    const QRectF target = documentRect.normalized();
+    if (target.isEmpty())
+        return;
+    const double availableWidth = std::max(width() - 2.0 * kPageMarginPx, 1.0);
+    const double availableHeight = std::max(height() - 2.0 * kPageMarginPx, 1.0);
+    m_zoom = std::clamp(std::min(availableWidth / target.width(), availableHeight / target.height()), kMinZoom,
+                        kMaxZoom);
+    m_pan = QPointF(width() / 2.0, height() / 2.0) - target.center() * m_zoom;
+    viewUpdated(true);
+}
+
+void CanvasWidget::fitPageWidth()
+{
+    const QSizeF page = m_document->pageSize();
+    m_zoom = std::clamp(std::max(width() - 2.0 * kPageMarginPx, 1.0) / page.width(), kMinZoom, kMaxZoom);
+    m_pan = QPointF((width() - page.width() * m_zoom) / 2.0, kPageMarginPx);
+    viewUpdated(true);
+}
+
+void CanvasWidget::fitPageHeight()
+{
+    const QSizeF page = m_document->pageSize();
+    m_zoom = std::clamp(std::max(height() - 2.0 * kPageMarginPx, 1.0) / page.height(), kMinZoom, kMaxZoom);
+    m_pan = QPointF((width() - page.width() * m_zoom) / 2.0, (height() - page.height() * m_zoom) / 2.0);
+    viewUpdated(true);
+}
+
+void CanvasWidget::zoomToSelection()
+{
+    if (m_selection.empty())
+        return;
+    zoomToRect(selectionBounds());
 }
 
 void CanvasWidget::zoomIn()
@@ -175,13 +241,12 @@ void CanvasWidget::fitPage()
     m_zoom = std::clamp(std::min(availableWidth / page.width(), availableHeight / page.height()),
                         kMinZoom, kMaxZoom);
     m_pan = QPointF((width() - page.width() * m_zoom) / 2.0, (height() - page.height() * m_zoom) / 2.0);
-    update();
-    emit zoomChanged(m_zoom);
+    viewUpdated(true);
 }
 
 void CanvasWidget::updateCursor()
 {
-    if (m_spaceHeld)
+    if (m_spaceHeld || m_tool == Tool::Pan)
         setCursor(Qt::OpenHandCursor);
     else if (m_tool == Tool::Select || m_tool == Tool::Node)
         unsetCursor();
@@ -644,6 +709,98 @@ void CanvasWidget::distribute(Qt::Orientation orientation)
     moveSelection(arrange::distributeOffsets(boxes, orientation), tr("Distribute"));
 }
 
+void CanvasWidget::nudgeSelection(const QPointF &offset)
+{
+    moveSelection(std::vector<QPointF>(m_selection.size(), offset), tr("Nudge"));
+}
+
+void CanvasWidget::mirrorSelection(Qt::Orientation orientation)
+{
+    if (m_selection.empty())
+        return;
+    // The selection flips as a block around its centre.
+    const QPointF c = selectionBounds().center();
+    QTransform t = QTransform::fromTranslate(c.x(), c.y());
+    t.scale(orientation == Qt::Horizontal ? -1 : 1, orientation == Qt::Vertical ? -1 : 1);
+    t.translate(-c.x(), -c.y());
+    const QString text = orientation == Qt::Horizontal ? tr("Mirror horizontally") : tr("Mirror vertically");
+    m_undoStack->beginMacro(text);
+    for (Shape *shape : m_selection)
+        m_undoStack->push(new TransformShapeCommand(m_document, shape, t, text));
+    m_undoStack->endMacro();
+}
+
+// ---------------------------------------------------------------------------------------------
+// Clipboard. Shapes travel as SVG, so they can also be pasted into other programs.
+
+namespace {
+const QString kSvgMime = QStringLiteral("image/svg+xml");
+}
+
+void CanvasWidget::copySelection()
+{
+    finishTextEdit();
+    if (m_selection.empty())
+        return;
+    const std::vector<const Shape *> shapes(m_selection.begin(), m_selection.end());
+    auto *mime = new QMimeData;
+    mime->setData(kSvgMime, svg::writeShapes(shapes, m_document->pageSize()));
+    QGuiApplication::clipboard()->setMimeData(mime);
+}
+
+void CanvasWidget::cutSelection()
+{
+    copySelection();
+    if (m_selection.empty())
+        return;
+    const std::vector<Shape *> shapes = m_selection;
+    m_undoStack->beginMacro(tr("Cut"));
+    for (Shape *shape : shapes)
+        m_undoStack->push(new RemoveShapeCommand(m_document, shape));
+    m_undoStack->endMacro();
+}
+
+void CanvasWidget::paste()
+{
+    finishTextEdit();
+    const QMimeData *mime = QGuiApplication::clipboard()->mimeData();
+    if (!mime)
+        return;
+    QByteArray data = mime->data(kSvgMime);
+    if (data.isEmpty() && mime->hasText() && mime->text().trimmed().startsWith(u'<'))
+        data = mime->text().toUtf8(); // SVG markup copied as text
+    if (data.isEmpty())
+        return;
+    addShapes(svg::readShapes(data), QPointF(), tr("Paste"));
+}
+
+void CanvasWidget::duplicateSelection()
+{
+    finishTextEdit();
+    if (m_selection.empty())
+        return;
+    const std::vector<const Shape *> shapes(m_selection.begin(), m_selection.end());
+    addShapes(svg::readShapes(svg::writeShapes(shapes, m_document->pageSize())), m_duplicateOffset,
+              tr("Duplicate"));
+}
+
+void CanvasWidget::addShapes(std::vector<std::unique_ptr<Shape>> shapes, const QPointF &offset, const QString &text)
+{
+    if (shapes.empty() || !m_document->activeLayer()->isEditable())
+        return;
+    std::vector<Shape *> added;
+    m_undoStack->beginMacro(text);
+    for (auto &shape : shapes) {
+        if (!offset.isNull())
+            shape->moveBy(offset);
+        auto *command = new AddShapeCommand(m_document, std::move(shape));
+        added.push_back(command->shape());
+        m_undoStack->push(command);
+    }
+    m_undoStack->endMacro();
+    setSelection(std::move(added));
+}
+
 // ---------------------------------------------------------------------------------------------
 // Shape tool (node editing)
 
@@ -900,12 +1057,12 @@ void CanvasWidget::paintEvent(QPaintEvent *)
         paintSelection(painter);
     paintBezierPreview(painter);
 
-    if (m_drag == Drag::Marquee) {
+    if (m_drag == Drag::Marquee || m_drag == Drag::ZoomBox) {
         QColor fill = palette().color(QPalette::Highlight);
-        fill.setAlpha(40);
+        fill.setAlpha(m_drag == Drag::Marquee ? 40 : 0);
         painter.setPen(QPen(palette().color(QPalette::Highlight), 1, Qt::DashLine));
         painter.setBrush(fill);
-        painter.drawRect(viewTransform().mapRect(m_marquee));
+        painter.drawRect(viewTransform().mapRect(m_drag == Drag::Marquee ? m_marquee : m_zoomBox.normalized()));
     }
 }
 
@@ -1036,6 +1193,7 @@ void CanvasWidget::resizeEvent(QResizeEvent *event)
         m_needsInitialFit = false;
         fitPage();
     }
+    emit viewChanged();
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1047,10 +1205,15 @@ void CanvasWidget::mousePressEvent(QMouseEvent *event)
     const QPointF docPos = toDocument(pos);
     const bool shift = event->modifiers() & Qt::ShiftModifier;
 
-    if (event->button() == Qt::MiddleButton || (event->button() == Qt::LeftButton && m_spaceHeld)) {
+    if (event->button() == Qt::MiddleButton
+        || (event->button() == Qt::LeftButton && (m_spaceHeld || m_tool == Tool::Pan))) {
         m_drag = Drag::Pan;
         m_panLast = pos;
         setCursor(Qt::ClosedHandCursor);
+        return;
+    }
+    if (m_tool == Tool::Zoom && event->button() == Qt::RightButton) {
+        zoomAround(pos, 1.0 / kZoomStep);
         return;
     }
     if (event->button() != Qt::LeftButton)
@@ -1070,6 +1233,14 @@ void CanvasWidget::mousePressEvent(QMouseEvent *event)
     const double tolerance = kHitTolerancePx / m_zoom;
 
     switch (m_tool) {
+    case Tool::Zoom:
+        m_drag = Drag::ZoomBox;
+        m_zoomBox = QRectF(docPos, docPos);
+        break;
+
+    case Tool::Pan:
+        break; // handled above
+
     case Tool::Text: {
         Shape *hit = m_document->shapeAt(docPos, tolerance);
         if (hit && hit->kind() == ShapeKind::Text) {
@@ -1181,6 +1352,11 @@ void CanvasWidget::mouseMoveEvent(QMouseEvent *event)
     case Drag::Pan:
         m_pan += pos - m_panLast;
         m_panLast = pos;
+        viewUpdated(false);
+        break;
+
+    case Drag::ZoomBox:
+        m_zoomBox.setBottomRight(docPos);
         update();
         break;
 
@@ -1316,6 +1492,19 @@ void CanvasWidget::mouseReleaseEvent(QMouseEvent *event)
     case Drag::Pan:
         updateCursor();
         break;
+
+    case Drag::ZoomBox: {
+        // A click zooms in (Shift: out) around the cursor; a drag zooms to the rectangle.
+        const QRectF box = m_zoomBox.normalized();
+        m_zoomBox = QRectF();
+        if (box.width() * m_zoom < kMinMarqueePx && box.height() * m_zoom < kMinMarqueePx) {
+            const bool out = event->modifiers() & Qt::ShiftModifier;
+            zoomAround(event->position(), out ? 1.0 / kZoomStep : kZoomStep);
+        } else {
+            zoomToRect(box);
+        }
+        break;
+    }
 
     case Drag::Move: {
         const QPointF total = m_dragLast - m_dragStart;
@@ -1460,6 +1649,30 @@ void CanvasWidget::keyPressEvent(QKeyEvent *event)
         && (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter || event->key() == Qt::Key_Escape)) {
         finishCurve();
         return;
+    }
+    if (!m_selection.empty() && m_drag == Drag::None) {
+        const double step = m_nudge * (event->modifiers() & Qt::ShiftModifier ? 10.0 : 1.0);
+        QPointF offset;
+        switch (event->key()) {
+        case Qt::Key_Left:
+            offset = {-step, 0};
+            break;
+        case Qt::Key_Right:
+            offset = {step, 0};
+            break;
+        case Qt::Key_Up:
+            offset = {0, -step};
+            break;
+        case Qt::Key_Down:
+            offset = {0, step};
+            break;
+        default:
+            break;
+        }
+        if (!offset.isNull()) {
+            nudgeSelection(offset);
+            return;
+        }
     }
     QWidget::keyPressEvent(event);
 }

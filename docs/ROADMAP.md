@@ -18,7 +18,11 @@ Rough order of work. Items move as contributors pick them up.
 - [x] Status bar showing the selection's fill and outline
 - [x] Resize handles
 - [x] Format version in every file; newer files open with a report instead of being refused
-- [ ] Rulers and guidelines
+- [x] Familiar workspace layout: standard toolbar, context-sensitive property bar (page or object), toolbox with flyouts, document tab, rulers with selectable units, scroll bars, page navigator, document palette, fill/outline indicators in the status bar, dark and light schemes, Window menu
+- [x] Zoom and pan tools, clipboard (copy/cut/paste as SVG), duplicate, nudge with arrow keys, mirroring, paper sizes and orientation
+- [ ] Guidelines (dragged from the rulers), grid and snapping
+- [ ] Several documents open at once (one tab each)
+- [ ] Portuguese and other translations of the interface
 - [ ] Keep unsupported SVG elements when saving, so round-tripping a newer file loses nothing
 
 ## 0.3 — Real drawings (current)

@@ -2,6 +2,8 @@ set(BRANDING_DIR ${PROJECT_SOURCE_DIR}/assets/branding)
 
 # Everything except main(), so the UI can also be driven by tests.
 add_library(opendraw_ui STATIC
+    CanvasView.cpp
+    CanvasView.h
     CanvasWidget.cpp
     CanvasWidget.h
     ColorPalette.cpp
@@ -10,12 +12,20 @@ add_library(opendraw_ui STATIC
     ExportImageDialog.h
     FillDialog.cpp
     FillDialog.h
+    Icons.cpp
+    Icons.h
     LayersPanel.cpp
     LayersPanel.h
     MainWindow.cpp
     MainWindow.h
+    PageBar.cpp
+    PageBar.h
     PropertyBar.cpp
     PropertyBar.h
+    Theme.cpp
+    Theme.h
+    Units.cpp
+    Units.h
 )
 target_include_directories(opendraw_ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(opendraw_ui PUBLIC opendraw_core Qt6::Widgets)

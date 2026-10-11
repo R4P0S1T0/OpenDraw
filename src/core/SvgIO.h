@@ -1,13 +1,18 @@
 #pragma once
 
 #include <QMap>
+#include <QSizeF>
 #include <QString>
+
+#include <memory>
+#include <vector>
 
 class QIODevice;
 
 namespace opendraw {
 
 class Document;
+class Shape;
 
 // SVG is OpenDraw's native file format for now.
 namespace svg {
@@ -35,6 +40,11 @@ bool write(const Document &document, QIODevice *device);
 // and other elements not supported yet are skipped and listed in `report`.
 bool read(QIODevice *device, Document &document, QString *errorMessage = nullptr,
           ReadReport *report = nullptr);
+
+// A standalone SVG holding just these shapes (used for the clipboard).
+QByteArray writeShapes(const std::vector<const Shape *> &shapes, const QSizeF &pageSize);
+// Every shape on the first page of an SVG, all layers, bottom to top.
+std::vector<std::unique_ptr<Shape>> readShapes(const QByteArray &data);
 
 } // namespace svg
 } // namespace opendraw

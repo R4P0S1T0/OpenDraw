@@ -485,4 +485,43 @@ void RenamePageCommand::undo()
     m_document->renamePage(m_page, m_oldName);
 }
 
+TransformShapeCommand::TransformShapeCommand(Document *document, Shape *shape, const QTransform &transform,
+                                             const QString &text, QUndoCommand *parent)
+    : QUndoCommand(text, parent)
+    , m_document(document)
+    , m_shape(shape)
+    , m_transform(transform)
+{
+}
+
+void TransformShapeCommand::redo()
+{
+    m_shape->transform(m_transform);
+    m_document->notifyShapeChanged(m_shape);
+}
+
+void TransformShapeCommand::undo()
+{
+    m_shape->transform(m_transform.inverted());
+    m_document->notifyShapeChanged(m_shape);
+}
+
+SetPageSizeCommand::SetPageSizeCommand(Document *document, const QSizeF &size, QUndoCommand *parent)
+    : QUndoCommand(tr("Page size"), parent)
+    , m_document(document)
+    , m_oldSize(document->pageSize())
+    , m_newSize(size)
+{
+}
+
+void SetPageSizeCommand::redo()
+{
+    m_document->setPageSize(m_newSize);
+}
+
+void SetPageSizeCommand::undo()
+{
+    m_document->setPageSize(m_oldSize);
+}
+
 } // namespace opendraw

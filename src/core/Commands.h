@@ -3,6 +3,8 @@
 #include "core/Shape.h"
 
 #include <QPointF>
+#include <QSizeF>
+#include <QTransform>
 #include <QUndoCommand>
 
 #include <memory>
@@ -336,6 +338,35 @@ private:
     Page *m_page;
     QString m_oldName;
     QString m_newName;
+};
+
+// Applies an invertible transform (mirroring, for example) to a shape.
+class TransformShapeCommand : public QUndoCommand {
+public:
+    TransformShapeCommand(Document *document, Shape *shape, const QTransform &transform, const QString &text,
+                          QUndoCommand *parent = nullptr);
+
+    void redo() override;
+    void undo() override;
+
+private:
+    Document *m_document;
+    Shape *m_shape;
+    QTransform m_transform;
+};
+
+// Changes the size of every page.
+class SetPageSizeCommand : public QUndoCommand {
+public:
+    SetPageSizeCommand(Document *document, const QSizeF &size, QUndoCommand *parent = nullptr);
+
+    void redo() override;
+    void undo() override;
+
+private:
+    Document *m_document;
+    QSizeF m_oldSize;
+    QSizeF m_newSize;
 };
 
 } // namespace opendraw

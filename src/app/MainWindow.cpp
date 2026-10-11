@@ -1,12 +1,17 @@
 #include "MainWindow.h"
 
+#include "CanvasView.h"
 #include "CanvasWidget.h"
 #include "ColorPalette.h"
 #include "ExportImageDialog.h"
 #include "FillDialog.h"
+#include "Icons.h"
 #include "LayersPanel.h"
-#include "core/Render.h"
+#include "PageBar.h"
 #include "PropertyBar.h"
+#include "Theme.h"
+#include "Units.h"
+#include "core/Render.h"
 #include "core/CdrImport.h"
 #include "core/Export.h"
 #include "core/Commands.h"
@@ -18,6 +23,10 @@
 #include <QApplication>
 #include <QCloseEvent>
 #include <QColorDialog>
+#include <QComboBox>
+#include <QLineEdit>
+#include <QMenu>
+#include <QTimer>
 #include <QFileDialog>
 #include <QDir>
 #include <QDockWidget>
@@ -44,101 +53,6 @@ namespace opendraw {
 
 namespace {
 
-// Simple drawn icons so the first release needs no image assets.
-QIcon toolIcon(CanvasWidget::Tool tool, const QColor &ink)
-{
-    QPixmap pixmap(32, 32);
-    pixmap.fill(Qt::transparent);
-    QPainter p(&pixmap);
-    p.setRenderHint(QPainter::Antialiasing);
-    p.setPen(QPen(ink, 2.2, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-    switch (tool) {
-    case CanvasWidget::Tool::Select: {
-        const QPointF arrow[] = {{9, 5}, {9, 25}, {14, 20}, {18, 28}, {21, 27}, {17, 19}, {24, 19}};
-        p.setBrush(ink);
-        p.drawPolygon(arrow, 7);
-        break;
-    }
-    case CanvasWidget::Tool::Node: {
-        // Hollow arrow touching a node on a curve.
-        QPainterPath curve;
-        curve.moveTo(4, 27);
-        curve.cubicTo(8, 12, 18, 30, 28, 8);
-        p.setPen(QPen(ink, 1.6));
-        p.drawPath(curve);
-        const QPointF arrow[] = {{12, 6}, {12, 20}, {15.5, 16.5}, {18.5, 22}, {20.5, 21}, {17.5, 15.5}, {22, 15.5}};
-        p.setPen(QPen(ink, 1.6, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-        p.setBrush(Qt::white);
-        p.drawPolygon(arrow, 7);
-        p.setBrush(ink);
-        p.drawRect(QRectF(25, 5, 5, 5));
-        break;
-    }
-    case CanvasWidget::Tool::Freehand: {
-        QPainterPath squiggle;
-        squiggle.moveTo(4, 22);
-        squiggle.cubicTo(8, 6, 13, 6, 14, 16);
-        squiggle.cubicTo(15, 26, 22, 26, 27, 10);
-        p.setBrush(Qt::NoBrush);
-        p.drawPath(squiggle);
-        break;
-    }
-    case CanvasWidget::Tool::Bezier: {
-        QPainterPath curve;
-        curve.moveTo(5, 25);
-        curve.cubicTo(5, 8, 27, 24, 27, 7);
-        p.setPen(QPen(ink, 1.8));
-        p.setBrush(Qt::NoBrush);
-        p.drawPath(curve);
-        p.setPen(QPen(ink, 1));
-        p.drawLine(QPointF(27, 7), QPointF(20, 3));
-        p.drawLine(QPointF(27, 7), QPointF(30, 13));
-        p.setBrush(ink);
-        p.drawRect(QRectF(2.5, 22.5, 5, 5));
-        p.drawRect(QRectF(24.5, 4.5, 5, 5));
-        break;
-    }
-    case CanvasWidget::Tool::Text: {
-        QFont font(QStringLiteral("Times New Roman"));
-        font.setPixelSize(24);
-        font.setBold(true);
-        p.setFont(font);
-        p.setPen(ink);
-        p.drawText(QRectF(0, 0, 32, 32), Qt::AlignCenter, QStringLiteral("A"));
-        break;
-    }
-    case CanvasWidget::Tool::Rectangle:
-        p.drawRect(QRectF(6, 9, 20, 14));
-        break;
-    case CanvasWidget::Tool::Ellipse:
-        p.drawEllipse(QRectF(5, 8, 22, 16));
-        break;
-    }
-    return QIcon(pixmap);
-}
-
-QIcon swatchIcon(const QColor &color, bool outline)
-{
-    QPixmap pixmap(32, 32);
-    pixmap.fill(Qt::transparent);
-    QPainter p(&pixmap);
-    p.setRenderHint(QPainter::Antialiasing);
-    const QRectF box(5.5, 5.5, 21, 21);
-    if (outline) {
-        p.setPen(QPen(color.alpha() > 0 ? color : QColor(0, 0, 0, 120), color.alpha() > 0 ? 4 : 1));
-        p.setBrush(Qt::NoBrush);
-    } else {
-        p.setPen(QPen(QColor(0, 0, 0, 120), 1));
-        p.setBrush(color.alpha() > 0 ? QBrush(color) : QBrush(Qt::NoBrush));
-    }
-    p.drawRoundedRect(box, 3, 3);
-    if (color.alpha() == 0) {
-        p.setPen(QPen(Qt::red, 2));
-        p.drawLine(QPointF(7, 25), QPointF(25, 7));
-    }
-    return QIcon(pixmap);
-}
-
 QString describeColor(const QColor &color)
 {
     return color.alpha() == 0 ? QCoreApplication::translate("MainWindow", "none") : color.name().toUpper();
@@ -156,22 +70,28 @@ QString describeFill(const Style &style)
     return describeColor(style.fill);
 }
 
-// Fill swatch that also shows gradients and patterns.
-QIcon fillSwatchIcon(const Style &style)
+const QString kSvgFilter = QStringLiteral("SVG (*.svg)");
+
+// A swatch beside an icon, for the fill and outline indicators of the status bar.
+QIcon indicatorIcon(const QIcon &glyph, const QBrush &swatch, bool none)
 {
-    if (!style.gradient && !style.pattern)
-        return swatchIcon(style.fill, false);
-    QPixmap pixmap(32, 32);
+    const qreal dpr = qApp->devicePixelRatio();
+    QPixmap pixmap(QSize(44, 20) * dpr);
+    pixmap.setDevicePixelRatio(dpr);
     pixmap.fill(Qt::transparent);
     QPainter p(&pixmap);
     p.setRenderHint(QPainter::Antialiasing);
-    p.setPen(QPen(QColor(0, 0, 0, 120), 1));
-    p.setBrush(render::fillBrush(style, QRectF(5.5, 5.5, 21, 21)));
-    p.drawRoundedRect(QRectF(5.5, 5.5, 21, 21), 3, 3);
+    glyph.paint(&p, QRect(0, 0, 20, 20));
+    const QRectF box(24.5, 2.5, 18, 15);
+    p.setPen(QPen(QColor(0, 0, 0, 140), 1));
+    p.setBrush(none ? QBrush(Qt::white) : swatch);
+    p.drawRect(box);
+    if (none) {
+        p.setPen(QPen(QColor(0xd0, 0x30, 0x30), 1.5));
+        p.drawLine(box.bottomLeft() + QPointF(2, -2), box.topRight() + QPointF(-2, 2));
+    }
     return QIcon(pixmap);
 }
-
-const QString kSvgFilter = QStringLiteral("SVG (*.svg)");
 
 } // namespace
 
@@ -181,101 +101,120 @@ MainWindow::MainWindow(QWidget *parent)
     , m_undoStack(new QUndoStack(this))
     , m_canvas(new CanvasWidget(m_document, m_undoStack, this))
 {
-    // Canvas with the page tabs underneath, as in other desktop vector editors.
+    setDocumentMode(true);
+    setDockOptions(QMainWindow::AnimatedDocks | QMainWindow::AllowTabbedDocks);
+
+    // Centre: document tab, the canvas with rulers and scroll bars, the page navigator and the
+    // document palette, top to bottom.
     auto *central = new QWidget(this);
     auto *centralLayout = new QVBoxLayout(central);
     centralLayout->setContentsMargins(0, 0, 0, 0);
     centralLayout->setSpacing(0);
-    centralLayout->addWidget(m_canvas, 1);
-    auto *pageRow = new QHBoxLayout;
-    pageRow->setContentsMargins(4, 0, 4, 0);
-    m_pageTabs = new QTabBar(this);
-    m_pageTabs->setShape(QTabBar::RoundedSouth);
-    m_pageTabs->setExpanding(false);
-    m_pageTabs->setContextMenuPolicy(Qt::CustomContextMenu);
-    auto *addPage = new QToolButton(this);
-    addPage->setText(QStringLiteral("+"));
-    addPage->setToolTip(tr("Insert page after the current one"));
-    addPage->setAutoRaise(true);
-    pageRow->addWidget(m_pageTabs);
-    pageRow->addWidget(addPage);
-    pageRow->addStretch();
-    centralLayout->addLayout(pageRow);
+    centralLayout->addWidget(createDocumentTabs());
+    m_canvasView = new CanvasView(m_canvas, m_document, central);
+    centralLayout->addWidget(m_canvasView, 1);
+    m_pageBar = new PageBar(m_document, central);
+    centralLayout->addWidget(m_pageBar);
+    m_documentPalette = new ColorPalette(Qt::Horizontal, central);
+    m_documentPalette->setToolTip(tr("Document palette: the colours used in this drawing"));
+    centralLayout->addWidget(m_documentPalette);
     setCentralWidget(central);
 
-    connect(addPage, &QToolButton::clicked, this, &MainWindow::insertPage);
-    connect(m_pageTabs, &QTabBar::currentChanged, this, [this](int index) {
-        if (!m_updatingPageTabs && index >= 0)
-            m_document->setCurrentPage(index);
-    });
-    connect(m_pageTabs, &QTabBar::tabBarDoubleClicked, this, [this](int index) {
-        if (index >= 0)
-            renamePage();
-    });
-    connect(m_pageTabs, &QTabBar::customContextMenuRequested, this, [this](const QPoint &pos) {
-        const int index = m_pageTabs->tabAt(pos);
-        if (index < 0)
-            return;
-        m_document->setCurrentPage(index);
-        QMenu menu(this);
-        menu.addAction(tr("Rename Page…"), this, &MainWindow::renamePage);
-        menu.addAction(tr("Insert Page After"), this, &MainWindow::insertPage);
-        QAction *remove = menu.addAction(tr("Delete Page"), this, &MainWindow::deletePage);
-        remove->setEnabled(m_document->pageCount() > 1);
-        menu.exec(m_pageTabs->mapToGlobal(pos));
-    });
-    connect(m_document, &Document::structureChanged, this, &MainWindow::syncPageTabs);
-    connect(m_document, &Document::currentPageChanged, this, &MainWindow::syncPageTabs);
-    syncPageTabs();
+    connect(m_pageBar, &PageBar::insertPageRequested, this, &MainWindow::insertPage);
+    connect(m_pageBar, &PageBar::renamePageRequested, this, &MainWindow::renamePage);
+    connect(m_pageBar, &PageBar::deletePageRequested, this, &MainWindow::deletePage);
+    connect(m_documentPalette, &ColorPalette::fillChosen, this, &MainWindow::applyFill);
+    connect(m_documentPalette, &ColorPalette::outlineChosen, this, &MainWindow::applyOutline);
+    m_documentPaletteTimer = new QTimer(this);
+    m_documentPaletteTimer->setSingleShot(true);
+    m_documentPaletteTimer->setInterval(150);
+    connect(m_documentPaletteTimer, &QTimer::timeout, this, &MainWindow::updateDocumentPalette);
+    connect(m_document, &Document::changed, m_documentPaletteTimer, qOverload<>(&QTimer::start));
+    connect(m_document, &Document::currentPageChanged, m_documentPaletteTimer, qOverload<>(&QTimer::start));
 
     createActions();
 
-    auto *layersDock = new QDockWidget(tr("Layers"), this);
-    layersDock->setObjectName(QStringLiteral("layers"));
-    layersDock->setWidget(new LayersPanel(m_document, m_undoStack, m_canvas, layersDock));
-    addDockWidget(Qt::RightDockWidgetArea, layersDock);
-    m_viewMenu->addSeparator();
-    m_viewMenu->addAction(layersDock->toggleViewAction());
-
     m_propertyBar = new PropertyBar(m_document, m_undoStack, this);
+    addToolBarBreak(Qt::TopToolBarArea);
     addToolBar(Qt::TopToolBarArea, m_propertyBar);
     addToolBar(Qt::TopToolBarArea, m_nodeBar);
     m_nodeBar->hide();
     createTextBar();
+    connect(m_propertyBar, &PropertyBar::mirrorRequested, m_canvas, &CanvasWidget::mirrorSelection);
+    connect(m_propertyBar, &PropertyBar::nudgeDistanceChanged, m_canvas, &CanvasWidget::setNudgeDistance);
+    connect(m_propertyBar, &PropertyBar::duplicateOffsetChanged, m_canvas, &CanvasWidget::setDuplicateOffset);
     connect(m_canvas, &CanvasWidget::nodeSelectionChanged, this, &MainWindow::updateNodeActions);
     connect(m_document, &Document::changed, this, &MainWindow::updateNodeActions);
     updateNodeActions();
 
-    auto *palette = new ColorPalette(this);
-    QToolBar *paletteBar = new QToolBar(tr("Color Palette"), this);
-    paletteBar->setObjectName(QStringLiteral("colorPalette"));
-    paletteBar->setMovable(false);
-    paletteBar->addWidget(palette);
-    addToolBar(Qt::RightToolBarArea, paletteBar);
+    // Dockers sit between the drawing and the colour palette, which hugs the window edge.
+    auto *layersDock = new QDockWidget(tr("Layers"), this);
+    layersDock->setObjectName(QStringLiteral("layers"));
+    layersDock->setWidget(new LayersPanel(m_document, m_undoStack, m_canvas, layersDock));
+    addDockWidget(Qt::RightDockWidgetArea, layersDock);
+    // Sizes only stick once the window is laid out.
+    QTimer::singleShot(0, this, [this, layersDock] { resizeDocks({layersDock}, {230}, Qt::Horizontal); });
+
+    auto *palette = new ColorPalette(Qt::Vertical, this);
+    m_paletteBar = new QToolBar(tr("Color Palette"), this);
+    m_paletteBar->setObjectName(QStringLiteral("colorPalette"));
+    m_paletteBar->setMovable(false);
+    m_paletteBar->addWidget(palette);
+    addToolBar(Qt::RightToolBarArea, m_paletteBar);
     connect(palette, &ColorPalette::fillChosen, this, &MainWindow::applyFill);
     connect(palette, &ColorPalette::outlineChosen, this, &MainWindow::applyOutline);
 
-    m_styleLabel = new QLabel(this);
-    m_zoomLabel = new QLabel(this);
-    m_positionLabel = new QLabel(this);
-    statusBar()->addWidget(m_styleLabel);
-    statusBar()->addPermanentWidget(m_positionLabel);
-    statusBar()->addPermanentWidget(m_zoomLabel);
+    // Window menu: dockers, toolbars and palettes can be hidden and brought back.
+    QMenu *dockers = m_windowMenu->addMenu(tr("&Dockers"));
+    dockers->addAction(layersDock->toggleViewAction());
+    QMenu *toolbars = m_windowMenu->addMenu(tr("&Toolbars"));
+    for (QToolBar *bar : {m_standardBar, static_cast<QToolBar *>(m_propertyBar), m_toolbox}) {
+        QAction *toggle = bar->toggleViewAction();
+        toolbars->addAction(toggle);
+    }
+    QMenu *palettes = m_windowMenu->addMenu(tr("Color &Palettes"));
+    QAction *defaultPalette = m_paletteBar->toggleViewAction();
+    defaultPalette->setText(tr("Default Palette"));
+    palettes->addAction(defaultPalette);
+    QAction *documentPalette = palettes->addAction(tr("Document Palette"));
+    documentPalette->setCheckable(true);
+    documentPalette->setChecked(true);
+    connect(documentPalette, &QAction::toggled, m_documentPalette, &QWidget::setVisible);
+
+    createStatusBar();
 
     connect(m_canvas, &CanvasWidget::zoomChanged, this, [this](double zoom) {
-        m_zoomLabel->setText(tr("Zoom %1%").arg(qRound(zoom * 100)));
+        m_zoomBox->setEditText(QStringLiteral("%1%").arg(qRound(zoom * 100)));
     });
     connect(m_canvas, &CanvasWidget::cursorMoved, this, [this](const QPointF &pos) {
-        m_positionLabel->setText(tr("x %1 mm   y %2 mm")
-                                     .arg(pos.x() / kUnitsPerMm, 0, 'f', 1)
-                                     .arg(pos.y() / kUnitsPerMm, 0, 'f', 1));
+        const Units &units = Units::instance();
+        m_positionLabel->setText(QStringLiteral("x %1  y %2 %3")
+                                     .arg(units.toDisplay(pos.x()), 0, 'f', units.decimals())
+                                     .arg(units.toDisplay(pos.y()), 0, 'f', units.decimals())
+                                     .arg(units.suffix()));
     });
     connect(m_canvas, &CanvasWidget::selectionChanged, this, [this] {
-        m_propertyBar->setShape(m_canvas->selectedShape());
+        m_propertyBar->setSelection(m_canvas->selectedShape(), !m_canvas->selection().empty());
+        updateStyleIndicators();
+        const bool any = !m_canvas->selection().empty();
+        m_cutAction->setEnabled(any);
+        m_copyAction->setEnabled(any);
+    });
+    connect(m_canvas, &CanvasWidget::toolChanged, this, [this](CanvasWidget::Tool tool) {
+        for (QAction *action : std::as_const(m_toolActions)) {
+            if (action->data().toInt() == int(tool))
+                action->setChecked(true);
+        }
+        m_nodeBar->setVisible(tool == CanvasWidget::Tool::Node);
+        updateNodeActions();
+        updateTextBar();
         updateStyleIndicators();
     });
     connect(m_document, &Document::changed, this, &MainWindow::updateStyleIndicators);
+    connect(&Units::instance(), &Units::unitChanged, this, &MainWindow::updateStyleIndicators);
     connect(m_undoStack, &QUndoStack::cleanChanged, this, &MainWindow::updateTitle);
+    m_cutAction->setEnabled(false);
+    m_copyAction->setEnabled(false);
 
     // Fit comfortably on the current screen, whatever its size and scaling.
     if (const QScreen *screen = this->screen()) {
@@ -285,33 +224,81 @@ MainWindow::MainWindow(QWidget *parent)
     }
     updateTitle();
     updateStyleIndicators();
+    updateDocumentPalette();
+}
+
+QWidget *MainWindow::createDocumentTabs()
+{
+    // One tab for the open drawing, as in other desktop editors; "+" starts a new drawing.
+    auto *row = new QWidget(this);
+    auto *layout = new QHBoxLayout(row);
+    layout->setContentsMargins(4, 2, 4, 0);
+    layout->setSpacing(2);
+    m_documentTabs = new QTabBar(row);
+    m_documentTabs->setObjectName(QStringLiteral("documentTabs"));
+    m_documentTabs->setDocumentMode(true);
+    m_documentTabs->setDrawBase(false);
+    m_documentTabs->setExpanding(false);
+    m_documentTabs->addTab(QString());
+    auto *add = new QToolButton(row);
+    add->setText(QStringLiteral("+"));
+    add->setAutoRaise(true);
+    add->setToolTip(tr("New drawing (Ctrl+N)"));
+    connect(add, &QToolButton::clicked, this, &MainWindow::newDocument);
+    layout->addWidget(m_documentTabs);
+    layout->addWidget(add);
+    layout->addStretch();
+    return row;
 }
 
 void MainWindow::createActions()
 {
-    const QColor ink = palette().color(QPalette::WindowText);
-
     // File
     QMenu *fileMenu = menuBar()->addMenu(tr("&File"));
-    fileMenu->addAction(tr("&New"), QKeySequence::New, this, &MainWindow::newDocument);
-    fileMenu->addAction(tr("&Open…"), QKeySequence::Open, this, &MainWindow::open);
-    fileMenu->addAction(tr("&Save"), QKeySequence::Save, this, &MainWindow::save);
+    QAction *newAction = fileMenu->addAction(icon(Icon::New), tr("&New"), QKeySequence::New, this,
+                                             &MainWindow::newDocument);
+    QAction *openAction = fileMenu->addAction(icon(Icon::Open), tr("&Open…"), QKeySequence::Open, this,
+                                              &MainWindow::open);
+    fileMenu->addSeparator();
+    QAction *saveAction = fileMenu->addAction(icon(Icon::Save), tr("&Save"), QKeySequence::Save, this,
+                                              &MainWindow::save);
     fileMenu->addAction(tr("Save &As…"), QKeySequence::SaveAs, this, &MainWindow::saveAs);
-    fileMenu->addAction(tr("&Export…"), QKeySequence(Qt::CTRL | Qt::Key_E), this, &MainWindow::exportDocument);
+    fileMenu->addSeparator();
+    QAction *importAction = fileMenu->addAction(icon(Icon::Import), tr("&Import…"),
+                                                QKeySequence(Qt::CTRL | Qt::Key_I), this, &MainWindow::import);
+    QAction *exportAction = fileMenu->addAction(icon(Icon::Export), tr("&Export…"),
+                                                QKeySequence(Qt::CTRL | Qt::Key_E), this,
+                                                &MainWindow::exportDocument);
     fileMenu->addSeparator();
     fileMenu->addAction(tr("&Quit"), QKeySequence::Quit, this, &QWidget::close);
+    newAction->setToolTip(tr("New (Ctrl+N)"));
+    openAction->setToolTip(tr("Open (Ctrl+O)"));
+    saveAction->setToolTip(tr("Save (Ctrl+S)"));
+    importAction->setToolTip(tr("Import a drawing into this page (Ctrl+I)"));
+    exportAction->setToolTip(tr("Export as PDF or PNG (Ctrl+E)"));
 
     // Edit
     QMenu *editMenu = menuBar()->addMenu(tr("&Edit"));
-    QAction *undo = m_undoStack->createUndoAction(this, tr("&Undo"));
-    undo->setShortcut(QKeySequence::Undo);
-    QAction *redo = m_undoStack->createRedoAction(this, tr("&Redo"));
-    redo->setShortcut(QKeySequence::Redo);
-    editMenu->addAction(undo);
-    editMenu->addAction(redo);
+    m_undoAction = m_undoStack->createUndoAction(this, tr("&Undo"));
+    m_undoAction->setShortcut(QKeySequence::Undo);
+    m_undoAction->setIcon(icon(Icon::Undo));
+    m_redoAction = m_undoStack->createRedoAction(this, tr("&Redo"));
+    m_redoAction->setShortcut(QKeySequence::Redo);
+    m_redoAction->setIcon(icon(Icon::Redo));
+    editMenu->addAction(m_undoAction);
+    editMenu->addAction(m_redoAction);
     editMenu->addSeparator();
+    m_cutAction = editMenu->addAction(icon(Icon::Cut), tr("Cu&t"), QKeySequence::Cut, m_canvas,
+                                      &CanvasWidget::cutSelection);
+    m_copyAction = editMenu->addAction(icon(Icon::Copy), tr("&Copy"), QKeySequence::Copy, m_canvas,
+                                       &CanvasWidget::copySelection);
+    m_pasteAction = editMenu->addAction(icon(Icon::Paste), tr("&Paste"), QKeySequence::Paste, m_canvas,
+                                        &CanvasWidget::paste);
+    editMenu->addAction(tr("D&uplicate"), QKeySequence(Qt::CTRL | Qt::Key_D), m_canvas,
+                        &CanvasWidget::duplicateSelection);
     QAction *deleteAction = editMenu->addAction(tr("&Delete"), m_canvas, &CanvasWidget::deleteSelection);
     deleteAction->setShortcuts({QKeySequence::Delete, QKeySequence(Qt::Key_Backspace)});
+    editMenu->addSeparator();
     editMenu->addAction(tr("Select &All"), QKeySequence::SelectAll, m_canvas, &CanvasWidget::selectAll);
 
     // View
@@ -321,11 +308,32 @@ void MainWindow::createActions()
     viewMenu->addAction(tr("Zoom &Out"), QKeySequence::ZoomOut, m_canvas, &CanvasWidget::zoomOut);
     viewMenu->addAction(tr("&Actual Size"), QKeySequence(Qt::CTRL | Qt::Key_1), m_canvas,
                         &CanvasWidget::zoomToActualSize);
-    viewMenu->addAction(tr("&Fit Page"), QKeySequence(Qt::SHIFT | Qt::Key_F4), m_canvas, &CanvasWidget::fitPage);
+    viewMenu->addAction(tr("Zoom to &Page"), QKeySequence(Qt::SHIFT | Qt::Key_F4), m_canvas, &CanvasWidget::fitPage);
+    viewMenu->addAction(tr("Zoom to Page &Width"), m_canvas, &CanvasWidget::fitPageWidth);
+    viewMenu->addAction(tr("Zoom to &Selected"), QKeySequence(Qt::SHIFT | Qt::Key_F2), m_canvas,
+                        &CanvasWidget::zoomToSelection);
+    viewMenu->addSeparator();
+    m_rulersAction = viewMenu->addAction(icon(Icon::Rulers), tr("&Rulers"));
+    m_rulersAction->setCheckable(true);
+    m_rulersAction->setChecked(true);
+    m_rulersAction->setToolTip(tr("Show rulers"));
+    connect(m_rulersAction, &QAction::toggled, this, [this](bool on) { m_canvasView->setRulersVisible(on); });
+    QMenu *schemeMenu = viewMenu->addMenu(tr("&Color Scheme"));
+    auto *schemes = new QActionGroup(schemeMenu);
+    for (const auto &[text, scheme] : {std::pair{tr("&Dark"), ColorScheme::Dark}, std::pair{tr("&Light"), ColorScheme::Light}}) {
+        QAction *action = schemeMenu->addAction(text);
+        action->setCheckable(true);
+        action->setChecked(theme::stored() == scheme);
+        schemes->addAction(action);
+        connect(action, &QAction::triggered, this, [this, s = scheme] {
+            theme::set(s);
+            updateStyleIndicators();
+        });
+    }
 
     // Layout: pages
     QMenu *layoutMenu = menuBar()->addMenu(tr("&Layout"));
-    layoutMenu->addAction(tr("&Insert Page"), this, &MainWindow::insertPage);
+    layoutMenu->addAction(tr("&Insert Page"), this, [this] { insertPage(m_document->currentPageIndex() + 1); });
     m_deletePageAction = layoutMenu->addAction(tr("&Delete Page"), this, &MainWindow::deletePage);
     layoutMenu->addAction(tr("&Rename Page…"), this, &MainWindow::renamePage);
     layoutMenu->addSeparator();
@@ -333,6 +341,9 @@ void MainWindow::createActions()
                           [this] { m_document->setCurrentPage(m_document->currentPageIndex() + 1); });
     layoutMenu->addAction(tr("&Previous Page"), QKeySequence(Qt::Key_PageUp), this,
                           [this] { m_document->setCurrentPage(m_document->currentPageIndex() - 1); });
+    connect(m_document, &Document::structureChanged, this,
+            [this] { m_deletePageAction->setEnabled(m_document->pageCount() > 1); });
+    m_deletePageAction->setEnabled(m_document->pageCount() > 1);
 
     // Object
     QMenu *objectMenu = menuBar()->addMenu(tr("&Object"));
@@ -377,6 +388,12 @@ void MainWindow::createActions()
                          [this] { m_canvas->distribute(Qt::Horizontal); });
     alignMenu->addAction(tr("Distribute V&ertically"), m_canvas, [this] { m_canvas->distribute(Qt::Vertical); });
 
+    QMenu *transformMenu = objectMenu->addMenu(tr("&Transform"));
+    transformMenu->addAction(icon(Icon::MirrorHorizontal), tr("Mirror &Horizontally"), m_canvas,
+                             [this] { m_canvas->mirrorSelection(Qt::Horizontal); });
+    transformMenu->addAction(icon(Icon::MirrorVertical), tr("Mirror &Vertically"), m_canvas,
+                             [this] { m_canvas->mirrorSelection(Qt::Vertical); });
+
     objectMenu->addSeparator();
     objectMenu->addAction(tr("Convert to &Curves"), QKeySequence(Qt::CTRL | Qt::Key_Q), m_canvas,
                           &CanvasWidget::convertSelectionToCurves);
@@ -417,56 +434,282 @@ void MainWindow::createActions()
 
     // Tools
     QMenu *toolsMenu = menuBar()->addMenu(tr("&Tools"));
-    QToolBar *toolBar = addToolBar(tr("Tools"));
-    toolBar->setObjectName(QStringLiteral("tools"));
-    addToolBar(Qt::LeftToolBarArea, toolBar);
-    toolBar->setMovable(false);
+    createToolbox(toolsMenu);
 
-    auto *tools = new QActionGroup(this);
-    struct ToolDef {
-        CanvasWidget::Tool tool;
-        QString name;
-        QKeySequence shortcut;
-    };
-    const ToolDef defs[] = {
-        {CanvasWidget::Tool::Select, tr("Select"), QKeySequence(Qt::Key_V)},
-        {CanvasWidget::Tool::Node, tr("Shape (edit nodes)"), QKeySequence(Qt::Key_F10)},
-        {CanvasWidget::Tool::Freehand, tr("Freehand"), QKeySequence(Qt::Key_F5)},
-        {CanvasWidget::Tool::Bezier, tr("Bézier"), QKeySequence(Qt::SHIFT | Qt::Key_B)},
-        {CanvasWidget::Tool::Rectangle, tr("Rectangle"), QKeySequence(Qt::Key_F6)},
-        {CanvasWidget::Tool::Ellipse, tr("Ellipse"), QKeySequence(Qt::Key_F7)},
-        {CanvasWidget::Tool::Text, tr("Text"), QKeySequence(Qt::Key_F8)},
-    };
-    for (const ToolDef &def : defs) {
-        QAction *action = tools->addAction(toolIcon(def.tool, ink), def.name);
-        action->setCheckable(true);
-        action->setShortcut(def.shortcut);
-        action->setToolTip(QStringLiteral("%1 (%2)").arg(def.name, def.shortcut.toString(QKeySequence::NativeText)));
-        action->setChecked(def.tool == CanvasWidget::Tool::Select);
-        connect(action, &QAction::triggered, m_canvas, [this, tool = def.tool] {
-            m_canvas->setTool(tool);
-            m_nodeBar->setVisible(tool == CanvasWidget::Tool::Node);
-            updateNodeActions();
-            updateTextBar();
-        });
-        toolBar->addAction(action);
-        toolsMenu->addAction(action);
-    }
-
-    toolBar->addSeparator();
-    m_fillAction = toolBar->addAction(tr("Fill…"), this, &MainWindow::chooseFillColor);
+    m_fillAction = new QAction(icon(Icon::FillBucket), tr("&Fill…"), this);
     m_fillAction->setToolTip(tr("Fill: colour or gradient (Shift+F11)"));
     m_fillAction->setShortcut(QKeySequence(Qt::SHIFT | Qt::Key_F11));
-    m_outlineAction = toolBar->addAction(tr("Outline Color…"), this, &MainWindow::chooseOutlineColor);
+    connect(m_fillAction, &QAction::triggered, this, &MainWindow::chooseFillColor);
+    m_outlineAction = new QAction(icon(Icon::OutlinePen), tr("&Outline Color…"), this);
     m_outlineAction->setShortcut(QKeySequence(Qt::SHIFT | Qt::Key_F12));
+    connect(m_outlineAction, &QAction::triggered, this, &MainWindow::chooseOutlineColor);
     toolsMenu->addSeparator();
     toolsMenu->addAction(m_fillAction);
     toolsMenu->addAction(m_outlineAction);
+
+    // Window
+    m_windowMenu = menuBar()->addMenu(tr("&Window"));
 
     // Help
     QMenu *helpMenu = menuBar()->addMenu(tr("&Help"));
     helpMenu->addAction(tr("&About OpenDraw"), this, &MainWindow::about);
     helpMenu->addAction(tr("About &Qt"), qApp, &QApplication::aboutQt);
+
+    // Standard toolbar
+    m_standardBar = addToolBar(tr("Standard"));
+    m_standardBar->setObjectName(QStringLiteral("standard"));
+    m_standardBar->setMovable(false);
+    m_standardBar->setIconSize(QSize(20, 20));
+    m_standardBar->addAction(newAction);
+    m_standardBar->addAction(openAction);
+    m_standardBar->addAction(saveAction);
+    m_standardBar->addSeparator();
+    m_standardBar->addAction(m_cutAction);
+    m_standardBar->addAction(m_copyAction);
+    m_standardBar->addAction(m_pasteAction);
+    m_standardBar->addSeparator();
+    m_standardBar->addAction(m_undoAction);
+    m_standardBar->addAction(m_redoAction);
+    m_standardBar->addSeparator();
+    m_standardBar->addAction(importAction);
+    m_standardBar->addAction(exportAction);
+    m_standardBar->addSeparator();
+    createStandardBar();
+    m_standardBar->addSeparator();
+    m_standardBar->addAction(m_rulersAction);
+}
+
+// Zoom levels box on the standard toolbar.
+void MainWindow::createStandardBar()
+{
+    m_zoomBox = new QComboBox(this);
+    m_zoomBox->setEditable(true);
+    m_zoomBox->setInsertPolicy(QComboBox::NoInsert);
+    m_zoomBox->setMinimumWidth(110);
+    m_zoomBox->setToolTip(tr("Zoom level"));
+    const std::pair<QString, std::function<void()>> fits[] = {
+        {tr("To Page"), [this] { m_canvas->fitPage(); }},
+        {tr("To Width"), [this] { m_canvas->fitPageWidth(); }},
+        {tr("To Height"), [this] { m_canvas->fitPageHeight(); }},
+        {tr("To Selected"), [this] { m_canvas->zoomToSelection(); }},
+    };
+    for (const auto &fit : fits)
+        m_zoomBox->addItem(fit.first);
+    for (int percent : {10, 25, 50, 75, 100, 200, 400, 800, 1600})
+        m_zoomBox->addItem(QStringLiteral("%1%").arg(percent), percent);
+    std::vector<std::function<void()>> actions;
+    for (const auto &fit : fits)
+        actions.push_back(fit.second);
+    connect(m_zoomBox, &QComboBox::activated, this, [this, actions](int index) {
+        if (index < int(actions.size()))
+            actions[index]();
+        else
+            m_canvas->setZoom(m_zoomBox->itemData(index).toInt() / 100.0);
+        m_zoomBox->setEditText(QStringLiteral("%1%").arg(qRound(m_canvas->zoom() * 100)));
+        m_canvas->setFocus();
+    });
+    connect(m_zoomBox->lineEdit(), &QLineEdit::returnPressed, this, [this] {
+        QString text = m_zoomBox->lineEdit()->text();
+        text.remove(QLatin1Char('%'));
+        bool ok = false;
+        const double percent = text.trimmed().toDouble(&ok);
+        if (ok && percent > 0)
+            m_canvas->setZoom(percent / 100.0);
+        m_zoomBox->setEditText(QStringLiteral("%1%").arg(qRound(m_canvas->zoom() * 100)));
+        m_canvas->setFocus();
+    });
+    m_standardBar->addWidget(m_zoomBox);
+}
+
+// Toolbox on the left, with flyouts grouping related tools (hold the button or click its
+// corner arrow to open one).
+void MainWindow::createToolbox(QMenu *toolsMenu)
+{
+    m_toolbox = new QToolBar(tr("Toolbox"), this);
+    m_toolbox->setObjectName(QStringLiteral("tools"));
+    m_toolbox->setMovable(false);
+    m_toolbox->setIconSize(QSize(22, 22));
+    addToolBar(Qt::LeftToolBarArea, m_toolbox);
+
+    auto *tools = new QActionGroup(this);
+    struct ToolDef {
+        CanvasWidget::Tool tool;
+        Icon iconId;
+        QString name;
+        QKeySequence shortcut;
+    };
+    auto makeAction = [&](const ToolDef &def) {
+        QAction *action = tools->addAction(icon(def.iconId), def.name);
+        action->setCheckable(true);
+        action->setData(int(def.tool));
+        action->setShortcut(def.shortcut);
+        action->setToolTip(def.shortcut.isEmpty()
+                               ? def.name
+                               : QStringLiteral("%1 (%2)").arg(def.name, def.shortcut.toString(QKeySequence::NativeText)));
+        action->setChecked(def.tool == CanvasWidget::Tool::Select);
+        connect(action, &QAction::triggered, m_canvas, [this, tool = def.tool] { m_canvas->setTool(tool); });
+        toolsMenu->addAction(action);
+        m_toolActions << action;
+        return action;
+    };
+    auto addFlyout = [&](std::initializer_list<ToolDef> defs) {
+        auto *button = new QToolButton(m_toolbox);
+        auto *menu = new QMenu(button);
+        QAction *first = nullptr;
+        for (const ToolDef &def : defs) {
+            QAction *action = makeAction(def);
+            menu->addAction(action);
+            if (!first)
+                first = action;
+            // The flyout button shows the tool last picked from it.
+            connect(action, &QAction::triggered, button, [button, action] { button->setDefaultAction(action); });
+        }
+        button->setDefaultAction(first);
+        button->setMenu(menu);
+        button->setPopupMode(QToolButton::DelayedPopup);
+        button->setIconSize(m_toolbox->iconSize());
+        m_toolbox->addWidget(button);
+    };
+
+    m_toolbox->addAction(makeAction({CanvasWidget::Tool::Select, Icon::Pick, tr("Pick"), QKeySequence(Qt::Key_V)}));
+    m_toolbox->addAction(
+        makeAction({CanvasWidget::Tool::Node, Icon::Shape, tr("Shape (edit nodes)"), QKeySequence(Qt::Key_F10)}));
+    addFlyout({{CanvasWidget::Tool::Zoom, Icon::Zoom, tr("Zoom"), QKeySequence(Qt::Key_Z)},
+               {CanvasWidget::Tool::Pan, Icon::Pan, tr("Pan"), QKeySequence(Qt::Key_H)}});
+    m_toolbox->addSeparator();
+    addFlyout({{CanvasWidget::Tool::Freehand, Icon::Freehand, tr("Freehand"), QKeySequence(Qt::Key_F5)},
+               {CanvasWidget::Tool::Bezier, Icon::Bezier, tr("Bézier"), QKeySequence(Qt::SHIFT | Qt::Key_B)}});
+    m_toolbox->addSeparator();
+    m_toolbox->addAction(
+        makeAction({CanvasWidget::Tool::Rectangle, Icon::Rectangle, tr("Rectangle"), QKeySequence(Qt::Key_F6)}));
+    m_toolbox->addAction(
+        makeAction({CanvasWidget::Tool::Ellipse, Icon::Ellipse, tr("Ellipse"), QKeySequence(Qt::Key_F7)}));
+    m_toolbox->addSeparator();
+    m_toolbox->addAction(makeAction({CanvasWidget::Tool::Text, Icon::Text, tr("Text"), QKeySequence(Qt::Key_F8)}));
+}
+
+void MainWindow::createStatusBar()
+{
+    m_hintLabel = new QLabel(this);
+    m_hintLabel->setContentsMargins(6, 0, 6, 0);
+    m_hintLabel->setMinimumWidth(100);
+    m_positionLabel = new QLabel(this);
+    m_positionLabel->setContentsMargins(8, 0, 8, 0);
+    auto indicator = [this](QAction *action) {
+        auto *button = new QToolButton(this);
+        button->setAutoRaise(true);
+        button->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+        button->setIconSize(QSize(44, 20));
+        button->setToolTip(action->toolTip());
+        connect(button, &QToolButton::clicked, action, &QAction::trigger);
+        return button;
+    };
+    m_fillIndicator = indicator(m_fillAction);
+    m_outlineIndicator = indicator(m_outlineAction);
+    m_outlineIndicator->setToolTip(tr("Outline colour (Shift+F12)"));
+    statusBar()->addWidget(m_hintLabel, 1);
+    statusBar()->addPermanentWidget(m_positionLabel);
+    statusBar()->addPermanentWidget(m_fillIndicator);
+    statusBar()->addPermanentWidget(m_outlineIndicator);
+}
+
+// The colours in use on the current page, for the document palette.
+void MainWindow::updateDocumentPalette()
+{
+    QList<QColor> colors;
+    auto add = [&colors](QColor color) {
+        if (color.alpha() == 0 || colors.size() >= 64)
+            return;
+        color.setAlpha(255);
+        if (!colors.contains(color))
+            colors.append(color);
+    };
+    for (const auto &layer : m_document->currentPage()->layers) {
+        for (const auto &shape : layer->shapes) {
+            shape->forEachLeaf([&add](Shape &leaf) {
+                const Style &style = leaf.style();
+                if (style.gradient) {
+                    for (const GradientStop &stop : style.gradient->stops)
+                        add(stop.color);
+                } else if (!style.pattern && leaf.kind() != ShapeKind::Image) {
+                    add(style.fill);
+                }
+                if (style.hasStroke())
+                    add(style.stroke);
+            });
+        }
+    }
+    m_documentPalette->setColors(colors);
+}
+
+QString MainWindow::documentName() const
+{
+    return m_sourcePath.isEmpty() ? tr("Untitled") : QFileInfo(m_sourcePath).fileName();
+}
+
+QString MainWindow::toolHint() const
+{
+    switch (m_canvas->tool()) {
+    case CanvasWidget::Tool::Select:
+        return tr("Click an object to select it; Shift+click adds to the selection; drag on empty space to select "
+                  "objects inside a rectangle");
+    case CanvasWidget::Tool::Node:
+        return tr("Click a curve to edit its nodes; double-click a segment to add a node, a node to delete it");
+    case CanvasWidget::Tool::Zoom:
+        return tr("Click to zoom in; Shift+click or right-click to zoom out; drag to zoom to an area");
+    case CanvasWidget::Tool::Pan:
+        return tr("Drag to move the view");
+    case CanvasWidget::Tool::Freehand:
+        return tr("Drag to draw; end near the start to close the shape");
+    case CanvasWidget::Tool::Bezier:
+        return tr("Click for a corner node, drag for a smooth node; click the first node to close, Enter to finish");
+    case CanvasWidget::Tool::Rectangle:
+        return tr("Drag to draw a rectangle; hold Shift for a square");
+    case CanvasWidget::Tool::Ellipse:
+        return tr("Drag to draw an ellipse; hold Shift for a circle");
+    case CanvasWidget::Tool::Text:
+        return tr("Click to place text and type; Esc finishes");
+    }
+    return {};
+}
+
+void MainWindow::import()
+{
+    QStringList filters{kSvgFilter};
+    if (cdr::isAvailable()) {
+        filters.prepend(tr("All supported files (*.svg *.cdr *.cdt)"));
+        filters << tr("CorelDRAW (*.cdr *.cdt)");
+    }
+    const QString path = QFileDialog::getOpenFileName(this, tr("Import"), QString(), filters.join(QStringLiteral(";;")));
+    if (path.isEmpty())
+        return;
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) {
+        QMessageBox::warning(this, tr("Import"), tr("Could not open %1:\n%2").arg(path, file.errorString()));
+        return;
+    }
+    const QString suffix = QFileInfo(path).suffix().toLower();
+    std::vector<std::unique_ptr<Shape>> shapes;
+    if (suffix == u"cdr" || suffix == u"cdt") {
+        Document imported;
+        QString error;
+        if (!cdr::read(file.readAll(), imported, &error)) {
+            QMessageBox::warning(this, tr("Import"), tr("Could not read %1:\n%2").arg(path, error));
+            return;
+        }
+        auto pages = imported.releasePages();
+        for (auto &layer : pages.front()->layers) {
+            for (auto &shape : layer->shapes)
+                shapes.push_back(std::move(shape));
+        }
+    } else {
+        shapes = svg::readShapes(file.readAll());
+    }
+    if (shapes.empty()) {
+        QMessageBox::information(this, tr("Import"), tr("%1 contains nothing OpenDraw can import.").arg(path));
+        return;
+    }
+    m_canvas->addShapes(std::move(shapes), QPointF(), tr("Import"));
 }
 
 void MainWindow::newDocument()
@@ -571,28 +814,10 @@ bool MainWindow::writeFile(const QString &path)
     return true;
 }
 
-void MainWindow::syncPageTabs()
-{
-    m_updatingPageTabs = true;
-    while (m_pageTabs->count() > m_document->pageCount())
-        m_pageTabs->removeTab(m_pageTabs->count() - 1);
-    for (int i = 0; i < m_document->pageCount(); ++i) {
-        const QString name = m_document->pages()[i]->name;
-        if (i < m_pageTabs->count())
-            m_pageTabs->setTabText(i, name);
-        else
-            m_pageTabs->addTab(name);
-    }
-    m_pageTabs->setCurrentIndex(m_document->currentPageIndex());
-    if (m_deletePageAction)
-        m_deletePageAction->setEnabled(m_document->pageCount() > 1);
-    m_updatingPageTabs = false;
-}
-
-void MainWindow::insertPage()
+void MainWindow::insertPage(int index)
 {
     m_canvas->finishTextEdit();
-    m_undoStack->push(new AddPageCommand(m_document, m_document->currentPageIndex() + 1));
+    m_undoStack->push(new AddPageCommand(m_document, index));
 }
 
 void MainWindow::deletePage()
@@ -802,10 +1027,12 @@ void MainWindow::createTextBar()
     m_textBar->addSeparator();
 
     auto *alignGroup = new QActionGroup(this);
-    const std::pair<QString, TextAlign> aligns[] = {
-        {tr("Left"), TextAlign::Left}, {tr("Center"), TextAlign::Center}, {tr("Right"), TextAlign::Right}};
-    for (const auto &[text, align] : aligns) {
+    const std::tuple<QString, TextAlign, Icon> aligns[] = {{tr("Left"), TextAlign::Left, Icon::AlignLeft},
+                                                           {tr("Center"), TextAlign::Center, Icon::AlignCenter},
+                                                           {tr("Right"), TextAlign::Right, Icon::AlignRight}};
+    for (const auto &[text, align, iconId] : aligns) {
         QAction *action = addToggle(text, tr("Align text: %1").arg(text));
+        action->setIcon(icon(iconId));
         action->setData(int(align));
         alignGroup->addAction(action);
         m_textAlignActions << action;
@@ -875,16 +1102,24 @@ void MainWindow::updateStyleIndicators()
 {
     Shape *selected = m_canvas->selectedShape();
     const Style &style = displayedStyle();
-    m_fillAction->setIcon(fillSwatchIcon(style));
-    m_outlineAction->setIcon(swatchIcon(style.hasStroke() ? style.stroke : QColor(Qt::transparent), true));
 
-    const QString outline = style.hasStroke()
-                                ? tr("%1, %2 mm").arg(describeColor(style.stroke))
-                                      .arg(style.strokeWidth / kUnitsPerMm, 0, 'f', 2)
-                                : tr("none");
-    QString prefix = tr("New shapes");
-    if (m_canvas->selection().size() > 1)
-        prefix = tr("%n objects selected", nullptr, int(m_canvas->selection().size()));
+    // Status bar indicators: fill and outline of the selection, or of new shapes.
+    const QRectF swatchBox(24.5, 2.5, 18, 15);
+    m_fillIndicator->setIcon(indicatorIcon(icon(Icon::FillBucket), render::fillBrush(style, swatchBox), !style.hasFill()));
+    m_fillIndicator->setText(style.hasFill() ? describeFill(style) : tr("None"));
+    m_outlineIndicator->setIcon(indicatorIcon(icon(Icon::OutlinePen), QBrush(style.stroke), !style.hasStroke()));
+    const Units &units = Units::instance();
+    m_outlineIndicator->setText(style.hasStroke() ? QStringLiteral("%1  %2 %3")
+                                                        .arg(describeColor(style.stroke))
+                                                        .arg(units.toDisplay(style.strokeWidth), 0, 'f', units.decimals())
+                                                        .arg(units.suffix())
+                                                  : tr("None"));
+
+    if (m_canvas->selection().empty()) {
+        m_hintLabel->setText(toolHint());
+        return;
+    }
+    QString prefix = tr("%n objects selected", nullptr, int(m_canvas->selection().size()));
     if (selected) {
         switch (selected->kind()) {
         case ShapeKind::Rectangle:
@@ -913,10 +1148,12 @@ void MainWindow::updateStyleIndicators()
             break;
         }
     }
-    QString text = tr("%1 — Fill: %2   Outline: %3").arg(prefix, describeFill(style), outline);
-    if (style.opacity < 1.0)
+    QString text = prefix;
+    if (const Layer *layer = m_document->layerOf(m_canvas->selection().front()); layer && selected)
+        text = tr("%1 on %2").arg(prefix, layer->name);
+    if (selected && style.opacity < 1.0)
         text += tr("   Opacity: %1%").arg(qRound(style.opacity * 100));
-    m_styleLabel->setText(text);
+    m_hintLabel->setText(text);
 }
 
 void MainWindow::about()
@@ -939,9 +1176,11 @@ void MainWindow::setFilePath(const QString &path, const QString &sourcePath)
 
 void MainWindow::updateTitle()
 {
-    const QString name = m_sourcePath.isEmpty() ? tr("Untitled") : QFileInfo(m_sourcePath).fileName();
+    const QString name = documentName();
     setWindowTitle(QStringLiteral("%1[*] — OpenDraw").arg(name));
     setWindowModified(!m_undoStack->isClean());
+    m_documentTabs->setTabText(0, m_undoStack->isClean() ? name : name + QLatin1Char('*'));
+    m_documentTabs->setTabToolTip(0, m_sourcePath.isEmpty() ? name : QDir::toNativeSeparators(m_sourcePath));
 }
 
 } // namespace opendraw

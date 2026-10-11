@@ -6,6 +6,7 @@
 
 #include <QPointF>
 #include <QRectF>
+#include <QTransform>
 #include <QWidget>
 
 #include <array>
@@ -24,7 +25,7 @@ class CanvasWidget : public QWidget {
     Q_OBJECT
 
 public:
-    enum class Tool { Select, Node, Freehand, Bezier, Rectangle, Ellipse, Text };
+    enum class Tool { Select, Node, Zoom, Pan, Freehand, Bezier, Rectangle, Ellipse, Text };
 
     CanvasWidget(Document *document, QUndoStack *undoStack, QWidget *parent = nullptr);
 
@@ -41,7 +42,20 @@ public:
     const Style &defaultStyle() const { return m_defaultStyle; }
     void setDefaultStyle(const Style &style) { m_defaultStyle = style; }
 
+    // Arrow keys move the selection by this much (document units); Shift moves ten times further.
+    double nudgeDistance() const { return m_nudge; }
+    void setNudgeDistance(double distance) { m_nudge = distance; }
+    QPointF duplicateOffset() const { return m_duplicateOffset; }
+    void setDuplicateOffset(const QPointF &offset) { m_duplicateOffset = offset; }
+
     double zoom() const { return m_zoom; }
+    // Widget position of the document origin.
+    QPointF pan() const { return m_pan; }
+    void setPan(const QPointF &pan);
+    // Document → widget coordinates.
+    QTransform viewTransform() const;
+    // The part of the document currently visible.
+    QRectF visibleDocumentRect() const;
 
     bool hasActiveNode() const { return activeNodeIsValid(); }
     bool hasNodePairToJoin() const;
@@ -53,11 +67,28 @@ public:
 
     QPointF documentToWidget(const QPointF &documentPosition) const { return toWidget(documentPosition); }
 
+    // Adds shapes to the active layer as one undoable step and selects them.
+    void addShapes(std::vector<std::unique_ptr<Shape>> shapes, const QPointF &offset, const QString &text);
+
 public slots:
     void zoomIn();
     void zoomOut();
     void zoomToActualSize();
     void fitPage();
+    void fitPageWidth();
+    void fitPageHeight();
+    void zoomToSelection();
+    // Zoom factor (1 = 100 %), keeping the centre of the view in place.
+    void setZoom(double zoom);
+    void zoomToRect(const QRectF &documentRect);
+
+    void cutSelection();
+    void copySelection();
+    void paste();
+    // Copies the selection, offset by duplicateOffset(), and selects the copies.
+    void duplicateSelection();
+    void mirrorSelection(Qt::Orientation orientation);
+    void nudgeSelection(const QPointF &offset);
 
     void selectAll();
     // Deletes the selected node (shape tool), the last node of a curve being drawn, or the selection.
@@ -93,6 +124,9 @@ public slots:
 
 signals:
     void zoomChanged(double zoom);
+    // Zoom or scroll position changed.
+    void viewChanged();
+    void toolChanged(opendraw::CanvasWidget::Tool tool);
     void cursorMoved(const QPointF &documentPosition);
     void selectionChanged();
     void nodeSelectionChanged();
@@ -111,7 +145,7 @@ protected:
     void keyReleaseEvent(QKeyEvent *event) override;
 
 private:
-    enum class Drag { None, Pan, Move, Resize, Marquee, Create, NodeMove, NodeHandle, BezierHandle, Freehand };
+    enum class Drag { None, Pan, Move, Resize, Marquee, Create, NodeMove, NodeHandle, BezierHandle, Freehand, ZoomBox };
     enum class NodeHandle { In, Out };
 
     struct NodeRef {
@@ -120,7 +154,7 @@ private:
         bool isValid() const { return subpath >= 0 && node >= 0; }
     };
 
-    QTransform viewTransform() const;
+    void viewUpdated(bool zoomChanged);
     QPointF toDocument(const QPointF &widgetPosition) const;
     QPointF toWidget(const QPointF &documentPosition) const;
     void zoomAround(const QPointF &widgetPosition, double factor);
@@ -173,6 +207,8 @@ private:
     Tool m_tool = Tool::Select;
     std::vector<Shape *> m_selection;
     Style m_defaultStyle;
+    double m_nudge = kUnitsPerMm;               // 1 mm
+    QPointF m_duplicateOffset{5 * kUnitsPerMm, 5 * kUnitsPerMm};
 
     double m_zoom = 1.0;
     QPointF m_pan; // widget position of the document origin
@@ -186,6 +222,7 @@ private:
     QPointF m_cursor;    // document coordinates, last known mouse position
     QRectF m_creating;   // rectangle/ellipse being drawn
     QRectF m_marquee;    // rubber-band selection, document coordinates
+    QRectF m_zoomBox;    // zoom tool rectangle, document coordinates
     bool m_marqueeAdds = false;
     int m_resizeHandle = -1;
     QRectF m_resizeOriginal;                // selection bounds when the resize started
