@@ -130,15 +130,43 @@ struct SubPath {
 
 using PathData = std::vector<SubPath>;
 
-enum class TextAlign { Left, Center, Right };
+// Justify stretches the spaces of wrapped lines of paragraph text to fill the frame (the last
+// line of each paragraph stays left-aligned); artistic text treats it as Left.
+enum class TextAlign { Left, Center, Right, Justify };
 
 struct TextFormat {
     QString family = QStringLiteral("Arial");
     double size = 32.0; // document units (px); 24 pt
     bool bold = false;
     bool italic = false;
+    // The rest applies to the whole text.
     TextAlign align = TextAlign::Left;
     double lineSpacing = 1.2; // multiple of the font size
+    double spaceBefore = 0.0; // extra space above each paragraph but the first, multiple of the font size
+    double spaceAfter = 0.0;  // extra space below each paragraph but the last, multiple of the font size
+    // Paragraph text only, in document units from the frame's edges: the first line of each
+    // paragraph starts at firstIndent, the others at leftIndent.
+    double firstIndent = 0.0;
+    double leftIndent = 0.0;
+    double rightIndent = 0.0;
+
+    // Copies the settings that apply to the whole text (alignment, spacing, indents).
+    void setParagraphFormat(const TextFormat &other)
+    {
+        align = other.align;
+        lineSpacing = other.lineSpacing;
+        spaceBefore = other.spaceBefore;
+        spaceAfter = other.spaceAfter;
+        firstIndent = other.firstIndent;
+        leftIndent = other.leftIndent;
+        rightIndent = other.rightIndent;
+    }
+    bool sameParagraphFormat(const TextFormat &other) const
+    {
+        return align == other.align && lineSpacing == other.lineSpacing && spaceBefore == other.spaceBefore
+               && spaceAfter == other.spaceAfter && firstIndent == other.firstIndent && leftIndent == other.leftIndent
+               && rightIndent == other.rightIndent;
+    }
 
     bool operator==(const TextFormat &) const = default;
 };

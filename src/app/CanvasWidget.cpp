@@ -900,18 +900,15 @@ void CanvasWidget::setTextFormat(const TextFormat &format)
     if (!change.isEmpty())
         applyCharFormat(change);
 
-    // Alignment and line spacing belong to whole texts.
-    if (format.align == current.align && format.lineSpacing == current.lineSpacing)
+    // Alignment, spacing and indents belong to whole texts.
+    if (format.sameParagraphFormat(current))
         return;
-    auto paragraphFormat = [&format](TextData &data) {
-        data.format.align = format.align;
-        data.format.lineSpacing = format.lineSpacing;
-    };
+    auto paragraphFormat = [&format](TextData &data) { data.format.setParagraphFormat(format); };
     if (m_editText) {
         TextData data = m_editText->textData();
         paragraphFormat(data);
         setEditedData(std::move(data), m_textCursor);
-        m_defaultTextFormat.align = format.align;
+        m_defaultTextFormat.setParagraphFormat(format);
         return;
     }
     std::vector<Shape *> texts;
@@ -922,8 +919,7 @@ void CanvasWidget::setTextFormat(const TextFormat &format)
         });
     }
     if (texts.empty()) {
-        m_defaultTextFormat.align = format.align;
-        m_defaultTextFormat.lineSpacing = format.lineSpacing;
+        m_defaultTextFormat.setParagraphFormat(format);
         return;
     }
     m_undoStack->beginMacro(tr("Text format"));

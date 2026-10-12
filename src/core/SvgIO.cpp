@@ -461,32 +461,47 @@ void writeShape(QXmlStreamWriter &w, const Shape &shape, int &gradientCount)
             w.writeAttribute(QStringLiteral("font-weight"), QStringLiteral("bold"));
         if (f.italic)
             w.writeAttribute(QStringLiteral("font-style"), QStringLiteral("italic"));
-        if (f.align != TextAlign::Left)
+        if (f.align == TextAlign::Center || f.align == TextAlign::Right)
             w.writeAttribute(QStringLiteral("text-anchor"),
                              f.align == TextAlign::Center ? QStringLiteral("middle") : QStringLiteral("end"));
+        if (f.align == TextAlign::Justify)
+            w.writeAttribute(ns, QStringLiteral("align"), QStringLiteral("justify"));
         w.writeAttribute(ns, QStringLiteral("line-spacing"), number(f.lineSpacing));
+        if (f.spaceBefore != 0.0 || f.spaceAfter != 0.0)
+            w.writeAttribute(ns, QStringLiteral("paragraph-spacing"),
+                             QStringLiteral("%1 %2").arg(number(f.spaceBefore), number(f.spaceAfter)));
+        if (f.firstIndent != 0.0 || f.leftIndent != 0.0 || f.rightIndent != 0.0)
+            w.writeAttribute(ns, QStringLiteral("indents"),
+                             QStringLiteral("%1 %2 %3").arg(number(f.firstIndent), number(f.leftIndent), number(f.rightIndent)));
         writeShapeTransform(w, shape);
         writeStyle(w, shape.style(), gradientId);
         writeEffects(w, shape.style(), effectIds);
 
         // Every laid-out line on its own baseline, so any viewer shows the same lines. Paragraph
         // text also records its frame and marks wrapped lines, to rebuild the paragraphs.
-        double anchorX = origin.x();
         if (data.isParagraph()) {
             w.writeAttribute(ns, QStringLiteral("frame"),
                              QStringLiteral("%1 %2 %3 %4").arg(number(origin.x()), number(origin.y()),
                                                                number(data.frame.width()), number(data.frame.height())));
-            if (f.align == TextAlign::Center)
-                anchorX += data.frame.width() / 2.0;
-            else if (f.align == TextAlign::Right)
-                anchorX += data.frame.width();
         }
         const std::vector<CharFormat> formats = richtext::perCharacter(data);
         const bool autoFormatting = w.autoFormatting();
         for (const textlayout::Line &line : textlayout::layout(data, origin).lines) {
+            // Artistic text lines share the origin; paragraph lines are placed one by one (the
+            // indents and the frame decide where each goes).
+            double anchorX = origin.x();
+            if (data.isParagraph()) {
+                anchorX = line.baselineStart.x();
+                if (f.align == TextAlign::Center)
+                    anchorX += line.width / 2.0;
+                else if (f.align == TextAlign::Right)
+                    anchorX += line.width;
+            }
             w.writeStartElement(QStringLiteral("tspan"));
             w.writeAttribute(QStringLiteral("x"), number(anchorX));
             w.writeAttribute(QStringLiteral("y"), number(line.baselineStart.y()));
+            if (line.wordSpacing > 0.0)
+                w.writeAttribute(QStringLiteral("word-spacing"), number(line.wordSpacing));
             if (line.softBreak)
                 w.writeAttribute(ns, QStringLiteral("soft"), QStringLiteral("true"));
             // No indenting inside a line: with xml:space="preserve" it would become text.
@@ -1382,6 +1397,19 @@ std::unique_ptr<Shape> readText(QXmlStreamReader &r, const Properties &props, co
         format.lineSpacing = spacing;
     else if (lineBaselines.size() >= 2 && format.size > 0.0)
         format.lineSpacing = (lineBaselines[1] - lineBaselines[0]) / format.size;
+    if (attributes.value(ns, QStringLiteral("align")) == u"justify")
+        format.align = TextAlign::Justify;
+    if (const std::vector<double> gaps = parseNumberList(attributes.value(ns, QStringLiteral("paragraph-spacing")));
+        gaps.size() == 2) {
+        format.spaceBefore = std::max(gaps[0], 0.0);
+        format.spaceAfter = std::max(gaps[1], 0.0);
+    }
+    if (const std::vector<double> indents = parseNumberList(attributes.value(ns, QStringLiteral("indents")));
+        indents.size() == 3) {
+        format.firstIndent = indents[0];
+        format.leftIndent = indents[1];
+        format.rightIndent = indents[2];
+    }
 
     const QTransform &t = context.transform;
     QPointF position(x.value_or(0.0), y.value_or(0.0));
@@ -1403,6 +1431,9 @@ std::unique_ptr<Shape> readText(QXmlStreamReader &r, const Properties &props, co
     }
     const double scale = std::sqrt(std::abs(t.determinant()));
     text.format.size *= scale;
+    text.format.firstIndent *= scale;
+    text.format.leftIndent *= scale;
+    text.format.rightIndent *= scale;
     for (TextRun &run : text.runs) {
         if (run.format.size)
             *run.format.size *= scale;

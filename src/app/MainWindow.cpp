@@ -494,6 +494,16 @@ void MainWindow::createActions()
 
     // Text
     QMenu *textMenu = menuBar()->addMenu(tr("Te&xt"));
+    textMenu->addAction(tr("&Paragraph Formatting"), QKeySequence(Qt::CTRL | Qt::Key_T), this, [this] {
+        // The Properties docker, open at its Paragraph section.
+        if (auto *panel = findChild<PropertiesPanel *>()) {
+            panel->showSection(PropertiesPanel::Section::Paragraph);
+            if (auto *dock = qobject_cast<QDockWidget *>(panel->parentWidget())) {
+                dock->show();
+                dock->raise();
+            }
+        }
+    });
     textMenu->addAction(tr("&Convert to Paragraph/Artistic Text"), QKeySequence(Qt::CTRL | Qt::Key_F8), m_canvas,
                         &CanvasWidget::convertTextKind);
 
@@ -1207,7 +1217,8 @@ void MainWindow::createTextBar()
     auto *alignGroup = new QActionGroup(this);
     const std::tuple<QString, TextAlign, Icon> aligns[] = {{tr("Left"), TextAlign::Left, Icon::AlignLeft},
                                                            {tr("Center"), TextAlign::Center, Icon::AlignCenter},
-                                                           {tr("Right"), TextAlign::Right, Icon::AlignRight}};
+                                                           {tr("Right"), TextAlign::Right, Icon::AlignRight},
+                                                           {tr("Justify"), TextAlign::Justify, Icon::AlignJustify}};
     for (const auto &[text, align, iconId] : aligns) {
         QAction *action = addToggle(text, tr("Align text: %1").arg(text));
         action->setIcon(icon(iconId));

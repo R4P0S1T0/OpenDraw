@@ -22,16 +22,16 @@ class CanvasWidget;
 class ColorPalette;
 class Document;
 
-// The Properties docker: fill, outline and transparency of the selection, applied as they are
-// changed (each change one undoable step). With nothing selected it edits the style new
-// shapes get.
+// The Properties docker: fill, outline and transparency of the selection, and the paragraph
+// format of texts, applied as they are changed (each change one undoable step). With nothing
+// selected it edits the style and text format new objects get.
 class PropertiesPanel : public QWidget {
     Q_OBJECT
 
 public:
     PropertiesPanel(Document *document, CanvasWidget *canvas, QWidget *parent = nullptr);
 
-    enum class Section { Outline, Fill, Transparency };
+    enum class Section { Outline, Fill, Transparency, Paragraph };
     void showSection(Section section);
 
     // Dash patterns offered in the outline style list, in multiples of the outline width.
@@ -46,8 +46,11 @@ private:
     QWidget *createFillPage();
     QWidget *createOutlinePage();
     QWidget *createTransparencyPage();
+    QWidget *createParagraphPage();
     QToolButton *colorButton(const QString &toolTip);
     void apply(const QString &text, const std::function<void(Style &)> &change);
+    // Changes the alignment, spacing or indents of the selected or edited text (or of new text).
+    void applyParagraph(const std::function<void(TextFormat &)> &change);
     void setFillType(int type);
     void chooseFillColor(bool second);
     void updateUnits();
@@ -83,6 +86,15 @@ private:
     // Transparency
     QSlider *m_transparencySlider;
     QSpinBox *m_transparency;
+
+    // Paragraph
+    QButtonGroup *m_aligns;
+    QSpinBox *m_lineSpacing;
+    QSpinBox *m_spaceBefore;
+    QSpinBox *m_spaceAfter;
+    QDoubleSpinBox *m_firstIndent;
+    QDoubleSpinBox *m_leftIndent;
+    QDoubleSpinBox *m_rightIndent;
 };
 
 } // namespace opendraw

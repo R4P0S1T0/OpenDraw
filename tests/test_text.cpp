@@ -33,6 +33,10 @@ private slots:
     void svgRoundTrip();
     void importsTspansAndInheritedFont();
     void undoTextChange();
+    void justifiedLinesFillTheFrame();
+    void indentsMoveAndNarrowLines();
+    void paragraphSpacing();
+    void paragraphFormatSurvivesSvg();
 };
 
 void TextTests::boundsGrowWithText()
@@ -158,6 +162,132 @@ void TextTests::undoTextChange()
     stack.undo();
     QCOMPARE(text->textData().text, QStringLiteral("old"));
     QVERIFY(!text->textData().format.bold);
+}
+
+namespace {
+const QString kLongText = QStringLiteral("The quick brown fox jumps over the lazy dog and keeps running far "
+                                         "across the wide green field until the evening comes.");
+
+TextData paragraphText(const QString &text, double width = 300)
+{
+    TextData data{text, {}};
+    data.format.size = 20;
+    data.frame = QSizeF(width, 400);
+    return data;
+}
+} // namespace
+
+void TextTests::justifiedLinesFillTheFrame()
+{
+    TextData data = paragraphText(kLongText + QStringLiteral("\nShort."));
+    data.format.align = TextAlign::Justify;
+    const QPointF origin(10, 10);
+    const textlayout::Layout l = textlayout::layout(data, origin);
+    QVERIFY(l.lines.size() >= 3);
+    int justified = 0;
+    for (const textlayout::Line &line : l.lines) {
+        if (line.softBreak) {
+            // Wrapped lines reach both edges of the frame.
+            QVERIFY(qAbs(line.baselineStart.x() - 10) < 1e-6);
+            QVERIFY(qAbs(line.width - 300) < 0.5);
+            QVERIFY(line.wordSpacing > 0.0);
+            // The caret at the end of the line is at the right edge, and the last word's
+            // letters end there too.
+            const QLineF caret = textlayout::caret(data, origin, line.start + int(line.text.size()));
+            QVERIFY(qAbs(caret.x1() - 310) < 0.5);
+            const textlayout::Piece &last = line.pieces.back();
+            QVERIFY(qAbs(last.x + last.width - 310) < 0.5);
+            ++justified;
+        } else {
+            QCOMPARE(line.wordSpacing, 0.0); // ends of paragraphs stay as they are
+            QVERIFY(line.width < 300);
+        }
+    }
+    QVERIFY(justified >= 2);
+    // Clicking a letter of a justified line finds that letter.
+    const textlayout::Line &first = l.lines.front();
+    const int target = first.start + int(first.text.size()) - 2;
+    const QLineF at = textlayout::caret(data, origin, target);
+    QCOMPARE(textlayout::indexAt(data, origin, QPointF(at.x1() + 1, at.y1() + 5)), target);
+
+    // Artistic text is never stretched.
+    TextData artistic{kLongText, {}};
+    artistic.format.align = TextAlign::Justify;
+    QCOMPARE(textlayout::layout(artistic, origin).lines.front().wordSpacing, 0.0);
+}
+
+void TextTests::indentsMoveAndNarrowLines()
+{
+    TextData plain = paragraphText(kLongText);
+    TextData indented = plain;
+    indented.format.firstIndent = 40;
+    indented.format.leftIndent = 15;
+    indented.format.rightIndent = 60;
+    const textlayout::Layout a = textlayout::layout(plain, QPointF(0, 0));
+    const textlayout::Layout b = textlayout::layout(indented, QPointF(0, 0));
+    QVERIFY(b.lines.size() > a.lines.size()); // less room, more lines
+    QCOMPARE(b.lines[0].baselineStart.x(), 40.0);
+    QCOMPARE(b.lines[1].baselineStart.x(), 15.0);
+    for (const textlayout::Line &line : b.lines)
+        QVERIFY(line.baselineStart.x() + line.width <= 300 - 60 + 0.5);
+
+    // Right-aligned lines end at the right indent.
+    indented.format.align = TextAlign::Right;
+    const textlayout::Layout c = textlayout::layout(indented, QPointF(0, 0));
+    QVERIFY(qAbs(c.lines[1].baselineStart.x() + c.lines[1].width - 240) < 1e-6);
+
+    // Scaling the text scales its indents.
+    Shape shape(indented, QPointF(0, 0), Style{});
+    shape.transform(QTransform::fromScale(2, 2));
+    QCOMPARE(shape.textData().format.firstIndent, 80.0);
+    QCOMPARE(shape.textData().format.rightIndent, 120.0);
+}
+
+void TextTests::paragraphSpacing()
+{
+    for (bool paragraph : {false, true}) {
+        TextData data = paragraphText(QStringLiteral("One\nTwo"));
+        if (!paragraph)
+            data.frame = QSizeF();
+        const textlayout::Layout plain = textlayout::layout(data, QPointF(0, 0));
+        data.format.spaceBefore = 0.5;
+        data.format.spaceAfter = 0.25;
+        const textlayout::Layout spaced = textlayout::layout(data, QPointF(0, 0));
+        const double gapPlain = plain.lines[1].baselineStart.y() - plain.lines[0].baselineStart.y();
+        const double gapSpaced = spaced.lines[1].baselineStart.y() - spaced.lines[0].baselineStart.y();
+        QVERIFY(qAbs(gapSpaced - gapPlain - 0.75 * 20) < 1e-6);
+        // Nothing above the first paragraph.
+        QCOMPARE(spaced.lines[0].baselineStart.y(), plain.lines[0].baselineStart.y());
+    }
+    // Wrapped lines inside a paragraph keep the normal line spacing.
+    TextData data = paragraphText(kLongText);
+    data.format.spaceBefore = 2.0;
+    const textlayout::Layout l = textlayout::layout(data, QPointF(0, 0));
+    QVERIFY(qAbs(l.lines[1].baselineStart.y() - l.lines[0].baselineStart.y() - 20 * data.format.lineSpacing) < 1e-6);
+}
+
+void TextTests::paragraphFormatSurvivesSvg()
+{
+    Document original;
+    TextData data = paragraphText(kLongText + QStringLiteral("\nSecond paragraph."));
+    data.format.align = TextAlign::Justify;
+    data.format.spaceBefore = 0.3;
+    data.format.spaceAfter = 0.6;
+    data.format.firstIndent = 25;
+    data.format.leftIndent = 5;
+    data.format.rightIndent = 12.5;
+    original.insertShape(-1, std::make_unique<Shape>(data, QPointF(30, 40), Style{QColor(Qt::black), {}, 0}));
+
+    QBuffer buffer;
+    QVERIFY(buffer.open(QIODevice::ReadWrite));
+    QVERIFY(svg::write(original, &buffer));
+    QVERIFY(buffer.data().contains("word-spacing="));
+    buffer.seek(0);
+    Document loaded;
+    QVERIFY(svg::read(&buffer, loaded));
+    const TextData &read = loaded.shapes()[0]->textData();
+    QCOMPARE(read.text, data.text);
+    QVERIFY(read.format.sameParagraphFormat(data.format));
 }
 
 QTEST_MAIN(TextTests)

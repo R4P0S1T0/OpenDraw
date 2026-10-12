@@ -233,6 +233,9 @@ void Shape::transform(const QTransform &t)
         const double scale = std::sqrt(std::abs(t.determinant()));
         if (scale > 0.0) {
             m_text.format.size *= scale;
+            m_text.format.firstIndent *= scale;
+            m_text.format.leftIndent *= scale;
+            m_text.format.rightIndent *= scale;
             for (TextRun &run : m_text.runs) {
                 if (run.format.size)
                     *run.format.size *= scale;

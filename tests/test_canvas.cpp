@@ -126,6 +126,7 @@ private slots:
     void spaceTogglesThePickTool();
     void secondClickRotatesAndSkews();
     void propertiesDockerAppliesStyles();
+    void propertiesDockerFormatsParagraphs();
     void textToolDrawsParagraphFrames();
     void formatPartOfAText();
     void shadowAndTransparencyTools();
@@ -782,7 +783,9 @@ void CanvasTests::mainWindowWorkspace()
     // Picking a tool from the toolbox (including one inside a flyout) switches the canvas tool.
     QAction *pan = nullptr;
     for (QAction *action : window.findChildren<QAction *>()) {
-        if (action->data().toInt() == int(CanvasWidget::Tool::Pan) && action->isCheckable())
+        // (Text alignments are numbered too.)
+        if (action->data().toInt() == int(CanvasWidget::Tool::Pan) && action->isCheckable()
+            && !action->toolTip().startsWith(QStringLiteral("Align text")))
             pan = action;
     }
     QVERIFY(pan);
@@ -925,6 +928,30 @@ void CanvasTests::mainWindowWorkspace()
             properties->showSection(PropertiesPanel::Section::Outline);
         QTest::qWait(150);
         QVERIFY(window.grab().save(dir + QStringLiteral("/window-arrows.png")));
+
+        // Justified paragraph text with an indented first line and space between paragraphs.
+        canvas->selectAll();
+        canvas->deleteSelection();
+        TextData story{QStringLiteral("OpenDraw lays out paragraph text inside its frame. Justified lines stretch "
+                                      "their spaces so both edges are straight, as in a newspaper column.\n"
+                                      "A new paragraph starts lower and its first line is indented, like this one, "
+                                      "while the last line stays as it is."),
+                       {}};
+        story.format.size = 22;
+        story.format.align = TextAlign::Justify;
+        story.format.firstIndent = 30;
+        story.format.spaceBefore = 0.6;
+        story.frame = QSizeF(500, 420);
+        Style ink;
+        ink.fill = QColor(0x21, 0x21, 0x21);
+        ink.stroke = Qt::transparent;
+        Shape *storyShape = doc->insertShape(-1, std::make_unique<Shape>(story, QPointF(140, 160), ink));
+        canvas->setSelectedShape(storyShape);
+        if (auto *properties = window.findChild<PropertiesPanel *>())
+            properties->showSection(PropertiesPanel::Section::Paragraph);
+        canvas->zoomToSelection();
+        QTest::qWait(150);
+        QVERIFY(window.grab().save(dir + QStringLiteral("/window-paragraph.png")));
         theme::apply(ColorScheme::Light);
     }
 }
@@ -1150,7 +1177,7 @@ void CanvasTests::propertiesDockerAppliesStyles()
     };
     auto spin = [&panel](const QString &suffix) {
         for (QSpinBox *b : panel.findChildren<QSpinBox *>()) {
-            if (b->suffix() == suffix)
+            if (b->suffix() == suffix && b->maximum() == 100) // the transparency, not paragraph spacing
                 return b;
         }
         return static_cast<QSpinBox *>(nullptr);
@@ -1168,11 +1195,19 @@ void CanvasTests::propertiesDockerAppliesStyles()
     QVERIFY(!rect->style().hasFill());
 
     // Outline: width (in the display unit), dashes, ends and corners.
-    auto *width = panel.findChild<QDoubleSpinBox *>();
+    QDoubleSpinBox *width = nullptr;
+    for (QDoubleSpinBox *b : panel.findChildren<QDoubleSpinBox *>()) {
+        if (b->toolTip() == QStringLiteral("Outline width (0 = no outline)"))
+            width = b;
+    }
     QVERIFY(width);
     width->setValue(Units::instance().toDisplay(4.0));
     QVERIFY(std::abs(rect->style().strokeWidth - 4.0) < 0.05);
-    auto *dashes = panel.findChild<QComboBox *>();
+    QComboBox *dashes = nullptr;
+    for (QComboBox *b : panel.findChildren<QComboBox *>()) {
+        if (b->toolTip() == QStringLiteral("Line style"))
+            dashes = b;
+    }
     QVERIFY(dashes);
     dashes->setCurrentIndex(1);
     emit dashes->activated(1);
@@ -1199,6 +1234,38 @@ void CanvasTests::propertiesDockerAppliesStyles()
     button(QStringLiteral("Square ends"))->click();
     QCOMPARE(m_canvas->defaultStyle().cap, LineCap::Square);
     QCOMPARE(m_undo->index(), before); // not an undoable document change
+}
+
+void CanvasTests::propertiesDockerFormatsParagraphs()
+{
+    PropertiesPanel panel(m_doc, m_canvas);
+    TextData data{QStringLiteral("Some words to wrap inside a narrow frame."), {}};
+    data.frame = QSizeF(150, 200);
+    Shape *text = m_doc->insertShape(-1, std::make_unique<Shape>(data, QPointF(10, 10), Style{}));
+    m_canvas->setSelectedShape(text);
+    const int before = m_undo->index();
+
+    for (QToolButton *b : panel.findChildren<QToolButton *>()) {
+        if (b->toolTip() == QStringLiteral("Justify (paragraph text)"))
+            b->click();
+    }
+    QCOMPARE(text->textData().format.align, TextAlign::Justify);
+    for (QSpinBox *b : panel.findChildren<QSpinBox *>()) {
+        if (b->toolTip().startsWith(QStringLiteral("Extra space above")))
+            b->setValue(50);
+    }
+    QCOMPARE(text->textData().format.spaceBefore, 0.5);
+    for (QDoubleSpinBox *b : panel.findChildren<QDoubleSpinBox *>()) {
+        if (b->toolTip().startsWith(QStringLiteral("Where the first line")))
+            b->setValue(Units::instance().toDisplay(20.0));
+    }
+    QVERIFY(std::abs(text->textData().format.firstIndent - 20.0) < 0.05);
+    QCOMPARE(m_undo->index(), before + 3);
+    m_undo->undo();
+    m_undo->undo();
+    m_undo->undo();
+    QCOMPARE(text->textData().format.align, TextAlign::Left);
+    QCOMPARE(text->textData().format.firstIndent, 0.0);
 }
 
 void CanvasTests::textToolDrawsParagraphFrames()

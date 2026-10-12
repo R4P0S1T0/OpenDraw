@@ -110,14 +110,16 @@ struct Span {
     int next;   // where the following line starts
 };
 
-// Greedy wrapping of one paragraph to `width`: lines break after spaces; a word wider than
-// the frame is broken between characters.
-std::vector<Span> wrap(const QString &paragraph, const std::function<double(int, int)> &advance, double width)
+// Greedy wrapping of one paragraph: lines break after spaces; a word wider than the line is
+// broken between characters. `widthOf(i)` is the room for the paragraph's line i.
+std::vector<Span> wrap(const QString &paragraph, const std::function<double(int, int)> &advance,
+                       const std::function<double(int)> &widthOf)
 {
     std::vector<Span> spans;
     const int n = int(paragraph.size());
     int start = 0;
     while (start < n) {
+        const double width = std::max(widthOf(int(spans.size())), 1.0);
         int fit = -1;
         for (int j = start; j <= n; ++j) {
             if (j < n && paragraph[j] != QLatin1Char(' '))
@@ -147,6 +149,23 @@ std::vector<Span> wrap(const QString &paragraph, const std::function<double(int,
     return spans;
 }
 
+int countSpaces(const QString &text, int from, int to)
+{
+    int count = 0;
+    for (int i = std::max(from, 0); i < std::min(to, int(text.size())); ++i) {
+        if (text[i] == QLatin1Char(' '))
+            ++count;
+    }
+    return count;
+}
+
+// Position on the page of the caret before character `index` of `line`.
+double xAt(Measurer &measure, const QString &text, const Line &line, int index)
+{
+    return line.baselineStart.x() + measure.advance(line.start, index)
+           + line.wordSpacing * countSpaces(text, line.start, index);
+}
+
 } // namespace
 
 Layout layout(const TextData &text, const QPointF &origin)
@@ -158,6 +177,14 @@ Layout layout(const TextData &text, const QPointF &origin)
     const double frameWidth = text.frame.width();
     const double frameBottom = origin.y() + text.frame.height();
 
+    const TextFormat &f0 = text.format;
+    // Where lines of paragraph text may go, relative to the frame's left edge.
+    auto lineLeft = [&](std::size_t lineInParagraph) { return lineInParagraph == 0 ? f0.firstIndent : f0.leftIndent; };
+    auto lineRoom = [&](std::size_t lineInParagraph) {
+        return frameWidth - lineLeft(lineInParagraph) - f0.rightIndent;
+    };
+    const double paragraphGap = (f0.spaceBefore + f0.spaceAfter) * f0.size;
+
     const QStringList paragraphs = text.text.split(QLatin1Char('\n'));
     int offset = 0; // index of the paragraph's first character in the whole text
     double baseline = 0.0;
@@ -166,7 +193,7 @@ Layout layout(const TextData &text, const QPointF &origin)
         std::vector<Span> spans;
         if (paragraph) {
             auto advance = [&](int from, int count) { return measure.advance(offset + from, offset + from + count); };
-            spans = wrap(para, advance, frameWidth);
+            spans = wrap(para, advance, [&](int i) { return lineRoom(std::size_t(i)); });
         } else {
             spans.push_back({0, int(para.size()), int(para.size())});
         }
@@ -209,14 +236,52 @@ Layout layout(const TextData &text, const QPointF &origin)
             if (result.lines.empty())
                 baseline = paragraph ? origin.y() + line.ascent : origin.y();
             else
-                baseline += size * text.format.lineSpacing;
+                baseline += size * f0.lineSpacing + (s == 0 ? paragraphGap : 0.0);
 
             double left = origin.x();
-            if (text.format.align == TextAlign::Center)
-                left += paragraph ? (frameWidth - line.width) / 2.0 : -line.width / 2.0;
-            else if (text.format.align == TextAlign::Right)
-                left += paragraph ? frameWidth - line.width : -line.width;
+            if (paragraph) {
+                const double room = lineRoom(s);
+                left += lineLeft(s);
+                if (f0.align == TextAlign::Center)
+                    left += (room - line.width) / 2.0;
+                else if (f0.align == TextAlign::Right)
+                    left += room - line.width;
+                else if (f0.align == TextAlign::Justify && line.softBreak) {
+                    // Wrapped lines fill the room by widening their spaces.
+                    const int spaces = countSpaces(text.text, line.start, end);
+                    if (spaces > 0 && room > line.width)
+                        line.wordSpacing = (room - line.width) / spaces;
+                }
+            } else if (f0.align == TextAlign::Center) {
+                left -= line.width / 2.0;
+            } else if (f0.align == TextAlign::Right) {
+                left -= line.width;
+            }
             line.baselineStart = QPointF(left, baseline);
+            if (line.wordSpacing > 0.0) {
+                // Each word becomes its own piece, moved right by the widened spaces before it.
+                std::vector<Piece> words;
+                for (const Piece &piece : line.pieces) {
+                    int a = piece.start;
+                    const int b = piece.start + piece.length;
+                    while (a < b) {
+                        int c = a;
+                        while (c < b && text.text[c] != QLatin1Char(' '))
+                            ++c;
+                        if (c < b)
+                            ++c; // the space ends the word
+                        Piece word = piece;
+                        word.start = a;
+                        word.length = c - a;
+                        word.x = xAt(measure, text.text, line, a) - left;
+                        word.width = measure.advance(a, c);
+                        words.push_back(word);
+                        a = c;
+                    }
+                }
+                line.pieces = std::move(words);
+                line.width += line.wordSpacing * countSpaces(text.text, line.start, end);
+            }
             for (Piece &piece : line.pieces)
                 piece.x += left;
             if (paragraph && text.frame.height() > 0.0 && baseline + line.descent > frameBottom + 1e-6) {
@@ -228,9 +293,9 @@ Layout layout(const TextData &text, const QPointF &origin)
                 // An empty line still gets some width so the text box stays visible and clickable.
                 const double boxWidth = std::max(line.width, size * 0.3);
                 double boxLeft = left;
-                if (line.width < boxWidth && text.format.align == TextAlign::Center)
+                if (line.width < boxWidth && f0.align == TextAlign::Center)
                     boxLeft = origin.x() - boxWidth / 2.0;
-                else if (line.width < boxWidth && text.format.align == TextAlign::Right)
+                else if (line.width < boxWidth && f0.align == TextAlign::Right)
                     boxLeft = origin.x() - boxWidth;
                 const QRectF box(boxLeft, baseline - line.ascent, boxWidth, line.ascent + line.descent);
                 result.bounds = result.bounds.isNull() ? box : result.bounds.united(box);
@@ -309,8 +374,8 @@ std::vector<QRectF> selectionRects(const TextData &text, const QPointF &origin, 
         const bool breakSelected = end > lineEnd && start <= lineEnd;
         if (a > b || (a == b && !breakSelected))
             continue;
-        const double x1 = line.baselineStart.x() + measure.advance(line.start, a);
-        double x2 = line.baselineStart.x() + measure.advance(line.start, b);
+        const double x1 = xAt(measure, text.text, line, a);
+        double x2 = xAt(measure, text.text, line, b);
         if (breakSelected)
             x2 += (line.ascent + line.descent) * 0.25;
         rects.emplace_back(QPointF(x1, line.baselineStart.y() - line.ascent),
@@ -326,7 +391,7 @@ QLineF caret(const TextData &text, const QPointF &origin, int index)
     index = std::clamp(index, 0, int(text.text.size()));
     const Line &line = l.lines[lineOf(l, index)];
     const int inLine = std::clamp(index, line.start, line.start + int(line.text.size()));
-    const double x = line.baselineStart.x() + measure.advance(line.start, inLine);
+    const double x = xAt(measure, text.text, line, inLine);
     const double y = line.baselineStart.y();
     return QLineF(x, y - line.ascent, x, y + line.descent);
 }
@@ -352,7 +417,7 @@ int indexAt(const TextData &text, const QPointF &origin, const QPointF &point)
     int index = best->start;
     double nearest = 1e300;
     for (int k = 0; k <= int(best->text.size()); ++k) {
-        const double x = best->baselineStart.x() + measure.advance(best->start, best->start + k);
+        const double x = xAt(measure, text.text, *best, best->start + k);
         if (std::abs(x - point.x()) < nearest) {
             nearest = std::abs(x - point.x());
             index = best->start + k;

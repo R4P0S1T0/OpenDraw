@@ -851,6 +851,10 @@ Clique esquerdo: preenchimento · Clique direito: contorno</translation>
         <translation>&amp;Texto</translation>
     </message>
     <message>
+        <source>&amp;Paragraph Formatting</source>
+        <translation>Formatação de &amp;parágrafo</translation>
+    </message>
+    <message>
         <source>&amp;Convert to Paragraph/Artistic Text</source>
         <translation>&amp;Converter em texto de parágrafo/artístico</translation>
     </message>
@@ -1294,6 +1298,10 @@ Clique esquerdo: preenchimento · Clique direito: contorno</translation>
         <translation>Direita</translation>
     </message>
     <message>
+        <source>Justify</source>
+        <translation>Justificar</translation>
+    </message>
+    <message>
         <source>Align text: %1</source>
         <translation>Alinhar texto: %1</translation>
     </message>
@@ -1587,6 +1595,10 @@ Clique esquerdo: preenchimento · Clique direito: contorno</translation>
         <translation>Transparência</translation>
     </message>
     <message>
+        <source>Paragraph</source>
+        <translation>Parágrafo</translation>
+    </message>
+    <message>
         <source>No fill</source>
         <translation>Sem preenchimento</translation>
     </message>
@@ -1749,6 +1761,74 @@ Clique esquerdo: preenchimento · Clique direito: contorno</translation>
     <message>
         <source>0 % is solid, 100 % invisible. Applies to the whole object, fill and outline.</source>
         <translation>0 % é sólido, 100 % invisível. Vale para o objeto inteiro, preenchimento e contorno.</translation>
+    </message>
+    <message>
+        <source>Align left</source>
+        <translation>Alinhar à esquerda</translation>
+    </message>
+    <message>
+        <source>Center</source>
+        <translation>Centro</translation>
+    </message>
+    <message>
+        <source>Align right</source>
+        <translation>Alinhar à direita</translation>
+    </message>
+    <message>
+        <source>Justify (paragraph text)</source>
+        <translation>Justificar (texto de parágrafo)</translation>
+    </message>
+    <message>
+        <source>Distance between lines, in percent of the font size</source>
+        <translation>Distância entre linhas, em porcentagem do tamanho da fonte</translation>
+    </message>
+    <message>
+        <source>Extra space above each paragraph, in percent of the font size</source>
+        <translation>Espaço extra acima de cada parágrafo, em porcentagem do tamanho da fonte</translation>
+    </message>
+    <message>
+        <source>Extra space below each paragraph, in percent of the font size</source>
+        <translation>Espaço extra abaixo de cada parágrafo, em porcentagem do tamanho da fonte</translation>
+    </message>
+    <message>
+        <source>Line spacing:</source>
+        <translation>Entrelinhas:</translation>
+    </message>
+    <message>
+        <source>Before paragraph:</source>
+        <translation>Antes do parágrafo:</translation>
+    </message>
+    <message>
+        <source>After paragraph:</source>
+        <translation>Depois do parágrafo:</translation>
+    </message>
+    <message>
+        <source>Where the first line of each paragraph starts, from the left of the frame</source>
+        <translation>Onde começa a primeira linha de cada parágrafo, a partir da esquerda do quadro</translation>
+    </message>
+    <message>
+        <source>Where the other lines start, from the left of the frame</source>
+        <translation>Onde começam as demais linhas, a partir da esquerda do quadro</translation>
+    </message>
+    <message>
+        <source>Space kept free at the right of the frame</source>
+        <translation>Espaço livre à direita do quadro</translation>
+    </message>
+    <message>
+        <source>First line indent:</source>
+        <translation>Recuo da primeira linha:</translation>
+    </message>
+    <message>
+        <source>Left indent:</source>
+        <translation>Recuo à esquerda:</translation>
+    </message>
+    <message>
+        <source>Right indent:</source>
+        <translation>Recuo à direita:</translation>
+    </message>
+    <message>
+        <source>Indents and justification apply to paragraph text (a frame drawn with the Text tool).</source>
+        <translation>Recuos e justificação valem para texto de parágrafo (um quadro desenhado com a ferramenta Texto).</translation>
     </message>
 </context>
 <context>

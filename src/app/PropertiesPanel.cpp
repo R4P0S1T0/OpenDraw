@@ -148,6 +148,7 @@ PropertiesPanel::PropertiesPanel(Document *document, CanvasWidget *canvas, QWidg
         {Icon::OutlinePen, tr("Outline"), Section::Outline},
         {Icon::FillBucket, tr("Fill"), Section::Fill},
         {Icon::Transparency, tr("Transparency"), Section::Transparency},
+        {Icon::AlignJustify, tr("Paragraph"), Section::Paragraph},
     };
     for (const auto &[iconId, text, section] : sections) {
         QToolButton *button = iconButton(iconId, text, this);
@@ -161,6 +162,7 @@ PropertiesPanel::PropertiesPanel(Document *document, CanvasWidget *canvas, QWidg
     m_pages->addWidget(createOutlinePage());
     m_pages->addWidget(createFillPage());
     m_pages->addWidget(createTransparencyPage());
+    m_pages->addWidget(createParagraphPage());
 
     auto *layout = new QVBoxLayout(this);
     layout->setContentsMargins(6, 6, 6, 6);
@@ -174,6 +176,7 @@ PropertiesPanel::PropertiesPanel(Document *document, CanvasWidget *canvas, QWidg
     connect(m_canvas, &CanvasWidget::selectionChanged, this, &PropertiesPanel::refresh);
     connect(m_canvas, &CanvasWidget::defaultStyleChanged, this, &PropertiesPanel::refresh);
     connect(m_document, &Document::changed, this, &PropertiesPanel::refresh);
+    connect(m_canvas, &CanvasWidget::textEditingChanged, this, &PropertiesPanel::refresh);
     connect(&Units::instance(), &Units::unitChanged, this, &PropertiesPanel::updateUnits);
     updateUnits();
     refresh();
@@ -489,12 +492,103 @@ QWidget *PropertiesPanel::createTransparencyPage()
     return page;
 }
 
+QWidget *PropertiesPanel::createParagraphPage()
+{
+    auto *page = new QWidget(this);
+    auto *layout = new QVBoxLayout(page);
+    layout->setContentsMargins(0, 6, 0, 0);
+    layout->addWidget(caption(tr("Paragraph"), page));
+
+    m_aligns = new QButtonGroup(this);
+    auto *alignRow = new QHBoxLayout;
+    const std::tuple<Icon, QString, TextAlign> aligns[] = {
+        {Icon::AlignLeft, tr("Align left"), TextAlign::Left},
+        {Icon::AlignCenter, tr("Center"), TextAlign::Center},
+        {Icon::AlignRight, tr("Align right"), TextAlign::Right},
+        {Icon::AlignJustify, tr("Justify (paragraph text)"), TextAlign::Justify},
+    };
+    for (const auto &[iconId, text, align] : aligns) {
+        QToolButton *button = iconButton(iconId, text, page);
+        m_aligns->addButton(button, int(align));
+        alignRow->addWidget(button);
+    }
+    alignRow->addStretch();
+    layout->addLayout(alignRow);
+
+    auto *form = new QFormLayout;
+    auto percentBox = [page](double maximum, const QString &tip) {
+        auto *box = new QSpinBox(page);
+        box->setRange(0, int(maximum));
+        box->setSuffix(QStringLiteral(" %"));
+        box->setKeyboardTracking(false);
+        box->setToolTip(tip);
+        return box;
+    };
+    m_lineSpacing = percentBox(1000, tr("Distance between lines, in percent of the font size"));
+    m_lineSpacing->setMinimum(10);
+    m_spaceBefore = percentBox(1000, tr("Extra space above each paragraph, in percent of the font size"));
+    m_spaceAfter = percentBox(1000, tr("Extra space below each paragraph, in percent of the font size"));
+    form->addRow(tr("Line spacing:"), m_lineSpacing);
+    form->addRow(tr("Before paragraph:"), m_spaceBefore);
+    form->addRow(tr("After paragraph:"), m_spaceAfter);
+    auto lengthBox = [page](const QString &tip) {
+        auto *box = new QDoubleSpinBox(page);
+        box->setRange(-100000.0, 100000.0);
+        box->setKeyboardTracking(false);
+        box->setToolTip(tip);
+        return box;
+    };
+    m_firstIndent = lengthBox(tr("Where the first line of each paragraph starts, from the left of the frame"));
+    m_leftIndent = lengthBox(tr("Where the other lines start, from the left of the frame"));
+    m_rightIndent = lengthBox(tr("Space kept free at the right of the frame"));
+    form->addRow(tr("First line indent:"), m_firstIndent);
+    form->addRow(tr("Left indent:"), m_leftIndent);
+    form->addRow(tr("Right indent:"), m_rightIndent);
+    layout->addLayout(form);
+    auto *hint = new QLabel(tr("Indents and justification apply to paragraph text (a frame drawn with the Text tool)."), page);
+    hint->setWordWrap(true);
+    layout->addWidget(hint);
+
+    connect(m_aligns, &QButtonGroup::idClicked, this,
+            [this](int id) { applyParagraph([id](TextFormat &f) { f.align = TextAlign(id); }); });
+    connect(m_lineSpacing, &QSpinBox::valueChanged, this,
+            [this](int v) { applyParagraph([v](TextFormat &f) { f.lineSpacing = v / 100.0; }); });
+    connect(m_spaceBefore, &QSpinBox::valueChanged, this,
+            [this](int v) { applyParagraph([v](TextFormat &f) { f.spaceBefore = v / 100.0; }); });
+    connect(m_spaceAfter, &QSpinBox::valueChanged, this,
+            [this](int v) { applyParagraph([v](TextFormat &f) { f.spaceAfter = v / 100.0; }); });
+    const std::pair<QDoubleSpinBox *, double TextFormat::*> indents[] = {
+        {m_firstIndent, &TextFormat::firstIndent},
+        {m_leftIndent, &TextFormat::leftIndent},
+        {m_rightIndent, &TextFormat::rightIndent},
+    };
+    for (const auto &[box, field] : indents) {
+        connect(box, &QDoubleSpinBox::valueChanged, this, [this, field = field](double value) {
+            const double length = Units::instance().fromDisplay(value);
+            applyParagraph([field, length](TextFormat &f) { f.*field = length; });
+        });
+    }
+    return page;
+}
+
+void PropertiesPanel::applyParagraph(const std::function<void(TextFormat &)> &change)
+{
+    if (m_updating)
+        return;
+    TextFormat format = m_canvas->currentTextFormat();
+    change(format);
+    m_canvas->setTextFormat(format);
+    refresh();
+}
+
 void PropertiesPanel::updateUnits()
 {
     const Units &units = Units::instance();
-    m_outlineWidth->setSuffix(QLatin1Char(' ') + units.suffix());
-    m_outlineWidth->setDecimals(units.decimals());
-    m_outlineWidth->setSingleStep(units.unit() == Unit::Inches || units.unit() == Unit::Centimeters ? 0.01 : 0.1);
+    for (QDoubleSpinBox *box : {m_outlineWidth, m_firstIndent, m_leftIndent, m_rightIndent}) {
+        box->setSuffix(QLatin1Char(' ') + units.suffix());
+        box->setDecimals(units.decimals());
+        box->setSingleStep(units.unit() == Unit::Inches || units.unit() == Unit::Centimeters ? 0.01 : 0.1);
+    }
     refresh();
 }
 
@@ -549,6 +643,17 @@ void PropertiesPanel::refresh()
     const int percent = int(std::lround((1.0 - style.opacity) * 100.0));
     m_transparencySlider->setValue(percent);
     m_transparency->setValue(percent);
+
+    // Paragraph
+    const TextFormat text = m_canvas->currentTextFormat();
+    m_aligns->button(int(text.align))->setChecked(true);
+    m_lineSpacing->setValue(int(std::lround(text.lineSpacing * 100.0)));
+    m_spaceBefore->setValue(int(std::lround(text.spaceBefore * 100.0)));
+    m_spaceAfter->setValue(int(std::lround(text.spaceAfter * 100.0)));
+    const Units &units = Units::instance();
+    m_firstIndent->setValue(units.toDisplay(text.firstIndent));
+    m_leftIndent->setValue(units.toDisplay(text.leftIndent));
+    m_rightIndent->setValue(units.toDisplay(text.rightIndent));
     m_updating = false;
 }
 

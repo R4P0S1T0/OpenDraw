@@ -15,7 +15,8 @@
 // Artistic text: `origin` is on the first baseline, at the left edge, centre or right edge
 // depending on the alignment; lines break only at '\n'.
 // Paragraph text: `origin` is the top-left corner of the frame; lines also wrap at spaces (or
-// inside a word too long for the frame) to fit its width.
+// inside a word too long for the frame) to fit its width, less the indents; justified lines
+// widen their spaces. Paragraphs of both kinds are apart by the space before and after them.
 // Parts of a text can have their own font, size, weight, slant and colour (TextData::runs);
 // a line is as tall as its largest letters.
 namespace opendraw::textlayout {
@@ -34,6 +35,7 @@ struct Line {
     QString text;          // what is drawn (without the spaces at a wrap)
     QPointF baselineStart; // left end of the baseline
     double width = 0.0;
+    double wordSpacing = 0.0; // added to each space of a justified line
     int start = 0;         // index of the line's first character in TextData::text
     int next = 0;          // index where the following line starts
     bool softBreak = false; // wrapped, rather than ended by '\n' or the end of the text

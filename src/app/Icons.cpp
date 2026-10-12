@@ -254,10 +254,13 @@ void draw(QPainter &p, Icon id, const QColor &ink, const QColor &accent, const Q
         break;
     case Icon::AlignLeft:
     case Icon::AlignCenter:
-    case Icon::AlignRight: {
+    case Icon::AlignRight:
+    case Icon::AlignJustify: {
         const double longLine = 16, shortLine = 10;
         for (int i = 0; i < 4; ++i) {
-            const double length = i % 2 ? shortLine : longLine;
+            // Justified: every line full width but the last.
+            const double length = id == Icon::AlignJustify ? (i < 3 ? longLine : shortLine)
+                                                           : (i % 2 ? shortLine : longLine);
             const double y = 6 + i * 4;
             double x = 4;
             if (id == Icon::AlignCenter)
