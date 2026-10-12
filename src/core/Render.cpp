@@ -4,8 +4,11 @@
 #include "core/Shape.h"
 #include "core/TextLayout.h"
 
+#include <QLineF>
 #include <QPainter>
+#include <QPainterPathStroker>
 #include <QPaintDevice>
+#include <QPolygonF>
 
 #include <algorithm>
 #include <cmath>
@@ -68,6 +71,116 @@ QPen outlinePen(const Style &style)
 
 namespace {
 
+// Size of arrowheads for an outline `width` wide: thin lines still get a visible arrow.
+double arrowUnit(double width)
+{
+    return 1.5 * std::max(width, 0.0) + 2.5;
+}
+
+} // namespace
+
+QPainterPath arrowheadShape(Arrowhead type, double width)
+{
+    const double u = arrowUnit(width);
+    QPainterPath path;
+    switch (type) {
+    case Arrowhead::None:
+        break;
+    case Arrowhead::Triangle:
+        path.addPolygon(QPolygonF{QPointF(0, -u), QPointF(2 * u, 0), QPointF(0, u), QPointF(0, -u)});
+        break;
+    case Arrowhead::Stealth:
+        path.addPolygon(QPolygonF{QPointF(-0.5 * u, -u), QPointF(2 * u, 0), QPointF(-0.5 * u, u), QPointF(0, 0),
+                                  QPointF(-0.5 * u, -u)});
+        break;
+    case Arrowhead::Open: {
+        // Two strokes meeting at the end of the line.
+        QPainterPath chevron;
+        chevron.moveTo(-1.6 * u, -u);
+        chevron.lineTo(0, 0);
+        chevron.lineTo(-1.6 * u, u);
+        QPainterPathStroker stroker;
+        stroker.setWidth(std::max(width, 0.5));
+        stroker.setJoinStyle(Qt::MiterJoin);
+        stroker.setMiterLimit(10.0);
+        stroker.setCapStyle(Qt::FlatCap);
+        path = stroker.createStroke(chevron).simplified();
+        break;
+    }
+    case Arrowhead::Circle:
+        path.addEllipse(QPointF(0, 0), 0.9 * u, 0.9 * u);
+        break;
+    case Arrowhead::Square:
+        path.addRect(QRectF(-0.8 * u, -0.8 * u, 1.6 * u, 1.6 * u));
+        break;
+    case Arrowhead::Diamond:
+        path.addPolygon(QPolygonF{QPointF(-1.2 * u, 0), QPointF(0, -u), QPointF(1.2 * u, 0), QPointF(0, u),
+                                  QPointF(-1.2 * u, 0)});
+        break;
+    case Arrowhead::Bar: {
+        const double t = std::max(width, 0.4 * u);
+        path.addRect(QRectF(-t / 2.0, -1.2 * u, t, 2.4 * u));
+        break;
+    }
+    }
+    path.setFillRule(Qt::WindingFill);
+    return path;
+}
+
+QPainterPath arrowheadPath(Arrowhead type, const QPointF &end, const QPointF &direction, double width)
+{
+    if (type == Arrowhead::None || direction.isNull())
+        return {};
+    QTransform t;
+    t.translate(end.x(), end.y());
+    t.rotateRadians(std::atan2(direction.y(), direction.x()));
+    return t.map(arrowheadShape(type, width));
+}
+
+QPainterPath arrowheads(const Shape &shape)
+{
+    const Style &style = shape.style();
+    if (shape.kind() != ShapeKind::Path || !style.hasStroke()
+        || (style.startArrow == Arrowhead::None && style.endArrow == Arrowhead::None))
+        return {};
+    const PathData &data = shape.pathData();
+    if (data.empty())
+        return {};
+    // Direction in which the path leaves `node`, looking at the first point of the curve
+    // towards `next` that is not on the node itself.
+    auto away = [](const QPointF &node, std::initializer_list<QPointF> towards) {
+        for (const QPointF &p : towards) {
+            if (QLineF(node, p).length() > 1e-9)
+                return node - p;
+        }
+        return QPointF();
+    };
+    QPainterPath result;
+    result.setFillRule(Qt::WindingFill);
+    const SubPath &first = data.front();
+    if (style.startArrow != Arrowhead::None && !first.closed && first.nodes.size() > 1) {
+        const PathNode &a = first.nodes[0], &b = first.nodes[1];
+        result.addPath(arrowheadPath(style.startArrow, a.point, away(a.point, {a.out, b.in, b.point}), style.strokeWidth));
+    }
+    const SubPath &last = data.back();
+    if (style.endArrow != Arrowhead::None && !last.closed && last.nodes.size() > 1) {
+        const PathNode &z = last.nodes.back(), &y = last.nodes[last.nodes.size() - 2];
+        result.addPath(arrowheadPath(style.endArrow, z.point, away(z.point, {z.in, y.out, y.point}), style.strokeWidth));
+    }
+    return result;
+}
+
+double outlineReach(const Style &style)
+{
+    if (!style.hasStroke())
+        return 0.0;
+    if (style.startArrow == Arrowhead::None && style.endArrow == Arrowhead::None)
+        return style.strokeWidth;
+    return std::max(style.strokeWidth, 2.2 * arrowUnit(style.strokeWidth));
+}
+
+namespace {
+
 // The shape itself: fill and outline (no opacity, shadow or transparency).
 void paintBody(QPainter &painter, const Shape &shape)
 {
@@ -88,47 +201,59 @@ void paintBody(QPainter &painter, const Shape &shape)
     }
     painter.save();
     const QTransform own = shape.shapeTransform();
-    if (shape.kind() == ShapeKind::Text) {
-        const TextData &data = shape.textData();
-        const bool colored = std::any_of(data.runs.begin(), data.runs.end(),
-                                         [](const TextRun &run) { return run.format.color.has_value(); });
-        if (colored) {
-            // Letters with their own colour; the rest take the text's fill.
+    auto paintFill = [&] {
+        if (shape.kind() == ShapeKind::Text) {
+            const TextData &data = shape.textData();
+            const bool colored = std::any_of(data.runs.begin(), data.runs.end(),
+                                             [](const TextRun &run) { return run.format.color.has_value(); });
+            if (colored) {
+                // Letters with their own colour; the rest take the text's fill.
+                painter.save();
+                painter.setTransform(own, true);
+                painter.setPen(Qt::NoPen);
+                for (const textlayout::ColoredPath &part : textlayout::coloredOutline(data, shape.textOrigin())) {
+                    painter.setBrush(part.color ? QBrush(*part.color) : fillBrush(style, shape.localBounds()));
+                    painter.drawPath(part.path);
+                }
+                painter.restore();
+                return;
+            }
+        }
+        if (!style.hasFill())
+            return;
+        painter.setPen(Qt::NoPen);
+        if (own.isIdentity()) {
+            painter.setBrush(fillBrush(style, shape.bounds()));
+            painter.drawPath(shape.path());
+        } else {
+            // Rotated or skewed: the fill (gradient, texture) turns with the shape; the outline
+            // keeps its width, as for any other shape.
             painter.save();
             painter.setTransform(own, true);
-            painter.setPen(Qt::NoPen);
-            for (const textlayout::ColoredPath &part : textlayout::coloredOutline(data, shape.textOrigin())) {
-                painter.setBrush(part.color ? QBrush(*part.color) : fillBrush(style, shape.localBounds()));
-                painter.drawPath(part.path);
-            }
+            painter.setBrush(fillBrush(style, shape.localBounds()));
+            painter.drawPath(shape.localPath());
             painter.restore();
-            if (style.hasStroke()) {
-                painter.setBrush(Qt::NoBrush);
-                painter.setPen(outlinePen(style));
-                painter.drawPath(shape.path());
-            }
-            painter.restore();
-            return;
         }
-    }
-    if (own.isIdentity()) {
-        painter.setBrush(fillBrush(style, shape.bounds()));
+    };
+    auto paintOutline = [&] {
+        if (!style.hasStroke())
+            return;
+        painter.setBrush(Qt::NoBrush);
         painter.setPen(outlinePen(style));
         painter.drawPath(shape.path());
-    } else {
-        // Rotated or skewed: the fill (gradient, texture) turns with the shape; the outline
-        // keeps its width, as for any other shape.
-        painter.save();
-        painter.setTransform(own, true);
-        painter.setPen(Qt::NoPen);
-        painter.setBrush(fillBrush(style, shape.localBounds()));
-        painter.drawPath(shape.localPath());
-        painter.restore();
-        if (style.hasStroke()) {
-            painter.setBrush(Qt::NoBrush);
-            painter.setPen(outlinePen(style));
-            painter.drawPath(shape.path());
+        const QPainterPath arrows = arrowheads(shape);
+        if (!arrows.isEmpty()) {
+            painter.setPen(Qt::NoPen);
+            painter.setBrush(style.stroke);
+            painter.drawPath(arrows);
         }
+    };
+    if (style.strokeBehind) {
+        paintOutline();
+        paintFill();
+    } else {
+        paintFill();
+        paintOutline();
     }
     painter.restore();
 }
@@ -192,7 +317,7 @@ void paintWithEffects(QPainter &painter, const Shape &shape)
     // (resetTransform() below keeps that offset, so it must not be counted twice).
     const QTransform device = painter.combinedTransform();
     const double unit = std::sqrt(std::abs(device.determinant())); // device pixels per document unit
-    const double margin = style.hasStroke() ? style.strokeWidth : 1.0;
+    const double margin = std::max(outlineReach(style), 1.0);
     const QRectF body = device.mapRect(shape.bounds().adjusted(-margin, -margin, margin, margin));
     QPointF offset;
     double blur = 0.0;

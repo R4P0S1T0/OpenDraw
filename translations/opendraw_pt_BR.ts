@@ -191,6 +191,10 @@
         <translation>máscara (mostrada sem ela)</translation>
     </message>
     <message>
+        <source>marker (drawn as a triangle arrowhead)</source>
+        <translation>marcador (desenhado como ponta de seta triangular)</translation>
+    </message>
+    <message>
         <source>Layer</source>
         <translation>Camada</translation>
     </message>
@@ -1136,7 +1140,7 @@ Clique esquerdo: preenchimento · Clique direito: contorno</translation>
     </message>
     <message>
         <source>Open</source>
-        <translation>Abrir</translation>
+        <translation>Aberta</translation>
     </message>
     <message>
         <source>This file was saved by a newer OpenDraw (format %1; this version reads format %2).</source>
@@ -1531,6 +1535,46 @@ Clique esquerdo: preenchimento · Clique direito: contorno</translation>
 <context>
     <name>opendraw::PropertiesPanel</name>
     <message>
+        <source>None</source>
+        <translation>Nenhum</translation>
+    </message>
+    <message>
+        <source>Triangle</source>
+        <translation>Triângulo</translation>
+    </message>
+    <message>
+        <source>Notched</source>
+        <translation>Entalhada</translation>
+    </message>
+    <message>
+        <source>Open</source>
+        <translation>Aberta</translation>
+    </message>
+    <message>
+        <source>Circle</source>
+        <translation>Círculo</translation>
+    </message>
+    <message>
+        <source>Square</source>
+        <translation>Quadrado</translation>
+    </message>
+    <message>
+        <source>Diamond</source>
+        <translation>Losango</translation>
+    </message>
+    <message>
+        <source>Bar</source>
+        <translation>Barra</translation>
+    </message>
+    <message>
+        <source>Start arrowhead</source>
+        <translation>Ponta de seta inicial</translation>
+    </message>
+    <message>
+        <source>End arrowhead</source>
+        <translation>Ponta de seta final</translation>
+    </message>
+    <message>
         <source>Outline</source>
         <translation>Contorno</translation>
     </message>
@@ -1655,6 +1699,26 @@ Clique esquerdo: preenchimento · Clique direito: contorno</translation>
         <translation>Cantos:</translation>
     </message>
     <message>
+        <source>Arrows:</source>
+        <translation>Setas:</translation>
+    </message>
+    <message>
+        <source>Behind fill</source>
+        <translation>Atrás do preenchimento</translation>
+    </message>
+    <message>
+        <source>Draw the outline under the fill, which hides its inner half</source>
+        <translation>Desenha o contorno sob o preenchimento, que esconde a metade interna dele</translation>
+    </message>
+    <message>
+        <source>Scale with object</source>
+        <translation>Dimensionar com o objeto</translation>
+    </message>
+    <message>
+        <source>Resizing the object resizes its outline too</source>
+        <translation>Redimensionar o objeto também redimensiona o contorno</translation>
+    </message>
+    <message>
         <source>Click a colour for the outline</source>
         <translation>Clique numa cor para o contorno</translation>
     </message>
@@ -1669,6 +1733,18 @@ Clique esquerdo: preenchimento · Clique direito: contorno</translation>
     <message>
         <source>Line corners</source>
         <translation>Cantos da linha</translation>
+    </message>
+    <message>
+        <source>Arrowhead</source>
+        <translation>Ponta de seta</translation>
+    </message>
+    <message>
+        <source>Outline behind fill</source>
+        <translation>Contorno atrás do preenchimento</translation>
+    </message>
+    <message>
+        <source>Scale outline with object</source>
+        <translation>Dimensionar contorno com o objeto</translation>
     </message>
     <message>
         <source>0 % is solid, 100 % invisible. Applies to the whole object, fill and outline.</source>
@@ -1800,6 +1876,10 @@ Clique esquerdo: preenchimento · Clique direito: contorno</translation>
     <message>
         <source>Outline width (0 = no outline)</source>
         <translation>Largura do contorno (0 = sem contorno)</translation>
+    </message>
+    <message>
+        <source>Arrowhead</source>
+        <translation>Ponta de seta</translation>
     </message>
     <message>
         <source>Opacity</source>

@@ -1,5 +1,6 @@
 #include "core/Document.h"
 #include "core/Export.h"
+#include "core/Render.h"
 #include "core/SvgIO.h"
 
 #include <QBuffer>
@@ -73,6 +74,10 @@ private slots:
     void dropShadowRendersBehind();
     void transparencyGradientFades();
     void effectsSurviveSvg();
+    void arrowheadsFollowTheLine();
+    void outlineBehindFill();
+    void outlineScalesWithObject();
+    void outlineSettingsSurviveSvg();
 };
 
 void GradientTests::linearGradientAngles()
@@ -275,6 +280,134 @@ void GradientTests::effectsSurviveSvg()
     Document otherDoc;
     svg::ReadReport report;
     svg::read(&otherBuffer, otherDoc, nullptr, &report);
+    QCOMPARE(report.skippedCount(), 1);
+}
+
+namespace {
+PathData line(const QPointF &from, const QPointF &to)
+{
+    SubPath sub;
+    sub.nodes = {PathNode::corner(from), PathNode::corner(to)};
+    return {sub};
+}
+} // namespace
+
+// Arrowheads sit at the open ends, point away from the line and take the outline colour.
+void GradientTests::arrowheadsFollowTheLine()
+{
+    Style style;
+    style.stroke = Qt::red;
+    style.strokeWidth = 2.0;
+    style.endArrow = Arrowhead::Triangle;
+    Shape shape(line(QPointF(20, 50), QPointF(120, 50)), style);
+    const QRectF arrow = render::arrowheads(shape).boundingRect();
+    QVERIFY(arrow.left() >= 119.0 && arrow.right() > 125.0); // beyond the end, pointing right
+    QVERIFY(arrow.top() < 47.0 && arrow.bottom() > 53.0);    // wider than the line
+
+    style.endArrow = Arrowhead::None;
+    style.startArrow = Arrowhead::Triangle;
+    shape.setStyle(style);
+    const QRectF start = render::arrowheads(shape).boundingRect();
+    QVERIFY(start.right() <= 21.0 && start.left() < 15.0); // pointing left from the first node
+
+    // Closed paths and shapes without an outline have none.
+    PathData closed = line(QPointF(0, 0), QPointF(10, 10));
+    closed.front().closed = true;
+    QVERIFY(render::arrowheads(Shape(closed, style)).isEmpty());
+    style.stroke = Qt::transparent;
+    QVERIFY(render::arrowheads(Shape(line(QPointF(0, 0), QPointF(10, 0)), style)).isEmpty());
+
+    // Drawn: the arrow tip past the end of the line is red.
+    style.stroke = Qt::red;
+    style.startArrow = Arrowhead::None;
+    style.endArrow = Arrowhead::Triangle;
+    Document doc;
+    doc.setPageSize(QSizeF(160, 100));
+    doc.insertShape(-1, std::make_unique<Shape>(line(QPointF(20, 50), QPointF(120, 50)), style));
+    exporter::ImageOptions options;
+    options.dpi = 96;
+    const QImage image = exporter::renderImage(doc, options);
+    QVERIFY(closeTo(image.pixelColor(123, 50), Qt::red));
+    QVERIFY(closeTo(image.pixelColor(121, 47), Qt::red)); // the wide back of the arrow
+    QVERIFY(closeTo(image.pixelColor(100, 47), Qt::white));
+}
+
+// Behind the fill, the inner half of a thick outline is hidden.
+void GradientTests::outlineBehindFill()
+{
+    Style style;
+    style.fill = Qt::blue;
+    style.stroke = Qt::red;
+    style.strokeWidth = 10.0;
+    QImage front = renderOne(style, QRectF(20, 20, 60, 60));
+    QVERIFY(closeTo(front.pixelColor(23, 50), Qt::red)); // inside the edge: outline on top
+    style.strokeBehind = true;
+    QImage behind = renderOne(style, QRectF(20, 20, 60, 60));
+    QVERIFY(closeTo(behind.pixelColor(23, 50), Qt::blue)); // now the fill covers it
+    QVERIFY(closeTo(behind.pixelColor(17, 50), Qt::red));  // the outer half still shows
+}
+
+void GradientTests::outlineScalesWithObject()
+{
+    Style style;
+    style.strokeWidth = 2.0;
+    Shape fixed(ShapeKind::Rectangle, QRectF(0, 0, 10, 10), style);
+    fixed.setBounds(QRectF(0, 0, 30, 30));
+    QCOMPARE(fixed.style().strokeWidth, 2.0);
+
+    style.scaleStroke = true;
+    Shape rect(ShapeKind::Rectangle, QRectF(0, 0, 10, 10), style);
+    rect.setBounds(QRectF(0, 0, 30, 30));
+    QCOMPARE(rect.style().strokeWidth, 6.0);
+    Shape path(line(QPointF(0, 0), QPointF(10, 10)), style);
+    path.transform(QTransform::fromScale(2, 2));
+    QCOMPARE(path.style().strokeWidth, 4.0);
+    path.transform(QTransform::fromScale(0.5, 0.5));
+    QCOMPARE(path.style().strokeWidth, 2.0);
+    // Turning does not change the size, there and back.
+    Shape ellipse(ShapeKind::Ellipse, QRectF(0, 0, 20, 10), style);
+    ellipse.transform(QTransform().rotate(30));
+    ellipse.transform(QTransform().rotate(-30));
+    QVERIFY(std::abs(ellipse.style().strokeWidth - 2.0) < 1e-9);
+}
+
+void GradientTests::outlineSettingsSurviveSvg()
+{
+    Style style;
+    style.stroke = QColor(0, 128, 0);
+    style.strokeWidth = 3.0;
+    style.startArrow = Arrowhead::Circle;
+    style.endArrow = Arrowhead::Stealth;
+    style.strokeBehind = true;
+    style.scaleStroke = true;
+    Document doc;
+    doc.insertShape(-1, std::make_unique<Shape>(line(QPointF(10, 10), QPointF(90, 40)), style));
+    QByteArray data;
+    QBuffer buffer(&data);
+    buffer.open(QIODevice::WriteOnly);
+    svg::write(doc, &buffer);
+    QVERIFY(data.contains("<marker"));
+    QVERIFY(data.contains("marker-end="));
+    QVERIFY(data.contains("paint-order=\"stroke\""));
+    auto copy = readSvg(data);
+    const Style &read = copy->shapes().front()->style();
+    QCOMPARE(read.startArrow, Arrowhead::Circle);
+    QCOMPARE(read.endArrow, Arrowhead::Stealth);
+    QVERIFY(read.strokeBehind);
+    QVERIFY(read.scaleStroke);
+
+    // Another program's markers become triangles (reported); paint-order in a style attribute.
+    QByteArray other(R"svg(<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">
+        <path d="M 0 0 L 50 50" stroke="black" style="marker-end:url(#a);paint-order:stroke fill"/></svg>)svg");
+    QBuffer otherBuffer(&other);
+    otherBuffer.open(QIODevice::ReadOnly);
+    Document otherDoc;
+    svg::ReadReport report;
+    svg::read(&otherBuffer, otherDoc, nullptr, &report);
+    const Style &foreign = otherDoc.shapes().front()->style();
+    QCOMPARE(foreign.endArrow, Arrowhead::Triangle);
+    QCOMPARE(foreign.startArrow, Arrowhead::None);
+    QVERIFY(foreign.strokeBehind);
     QCOMPARE(report.skippedCount(), 1);
 }
 

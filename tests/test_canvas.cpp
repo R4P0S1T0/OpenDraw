@@ -908,6 +908,23 @@ void CanvasTests::mainWindowWorkspace()
         doc->notifyShapeChanged(nullptr);
         QTest::qWait(150);
         QVERIFY(window.grab().save(dir + QStringLiteral("/window-effects.png")));
+
+        // A curve with arrowheads: the property bar offers them, as does the Outline docker.
+        Style arrowStyle;
+        arrowStyle.fill = Qt::transparent;
+        arrowStyle.stroke = QColor(0xe5, 0x39, 0x35);
+        arrowStyle.strokeWidth = 4;
+        arrowStyle.startArrow = Arrowhead::Circle;
+        arrowStyle.endArrow = Arrowhead::Triangle;
+        SubPath curve;
+        curve.nodes = {PathNode::corner(QPointF(120, 980)), PathNode{QPointF(520, 960), QPointF(300, 1100), QPointF(520, 960)}};
+        Shape *arrow = doc->insertShape(-1, std::make_unique<Shape>(PathData{curve}, arrowStyle));
+        canvas->setTool(CanvasWidget::Tool::Select);
+        canvas->setSelectedShape(arrow);
+        if (auto *properties = window.findChild<PropertiesPanel *>())
+            properties->showSection(PropertiesPanel::Section::Outline);
+        QTest::qWait(150);
+        QVERIFY(window.grab().save(dir + QStringLiteral("/window-arrows.png")));
         theme::apply(ColorScheme::Light);
     }
 }

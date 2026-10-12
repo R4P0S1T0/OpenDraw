@@ -7,6 +7,7 @@
 #include <functional>
 
 class QButtonGroup;
+class QCheckBox;
 class QComboBox;
 class QDoubleSpinBox;
 class QLabel;
@@ -35,6 +36,8 @@ public:
 
     // Dash patterns offered in the outline style list, in multiples of the outline width.
     static const std::vector<std::vector<double>> &dashPresets();
+    // Fills `box` with the arrowheads (item data: the Arrowhead), drawn at the start or end of a line.
+    static void addArrowheads(QComboBox *box, bool atStart);
 
 public slots:
     void refresh();
@@ -71,6 +74,10 @@ private:
     QComboBox *m_dashes;
     QButtonGroup *m_caps;
     QButtonGroup *m_joins;
+    QComboBox *m_startArrow;
+    QComboBox *m_endArrow;
+    QCheckBox *m_strokeBehind;
+    QCheckBox *m_scaleStroke;
     ColorPalette *m_outlinePalette;
 
     // Transparency

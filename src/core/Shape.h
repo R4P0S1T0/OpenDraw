@@ -68,6 +68,8 @@ struct DropShadow {
 enum class LineCap { Butt, Round, Square };
 // How outlines turn at corners (SVG stroke-linejoin).
 enum class LineJoin { Miter, Round, Bevel };
+// Shape drawn at an end of an open outline, in the outline's colour and sized by its width.
+enum class Arrowhead { None, Triangle, Stealth, Open, Circle, Square, Diamond, Bar };
 
 struct Style {
     QColor fill = QColor(0x4a, 0x90, 0xd9);
@@ -80,6 +82,14 @@ struct Style {
     std::vector<double> dashes;
     LineCap cap = LineCap::Butt;
     LineJoin join = LineJoin::Miter;
+    // At the first node of a path (if its first subpath is open) and at its last node (if the
+    // last subpath is open), as SVG markers are.
+    Arrowhead startArrow = Arrowhead::None;
+    Arrowhead endArrow = Arrowhead::None;
+    // The outline is drawn under the fill, which hides its inner half (SVG paint-order).
+    bool strokeBehind = false;
+    // Resizing the object resizes its outline width too.
+    bool scaleStroke = false;
     std::optional<DropShadow> shadow;
     // Transparency that changes across the object (as the fill's gradient does): the alpha of
     // each stop's colour is how solid the object is there (255 = solid, 0 = invisible).

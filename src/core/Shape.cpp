@@ -151,6 +151,8 @@ void Shape::setBounds(const QRectF &bounds)
     }
     if ((m_kind == ShapeKind::Rectangle || m_kind == ShapeKind::Ellipse) && !m_style.pattern
         && m_shapeTransform.isIdentity()) {
+        if (m_style.scaleStroke && m_bounds.width() > 0.0 && m_bounds.height() > 0.0)
+            m_style.strokeWidth *= std::sqrt(target.width() * target.height() / (m_bounds.width() * m_bounds.height()));
         m_bounds = target;
         return;
     }
@@ -177,6 +179,13 @@ void Shape::transform(const QTransform &t)
     const bool boxed = m_kind == ShapeKind::Rectangle || m_kind == ShapeKind::Ellipse || m_kind == ShapeKind::Text;
     const bool direct = !boxed || (m_shapeTransform.isIdentity() && t.type() <= QTransform::TxScale);
 
+    // An outline set to scale with the object follows the overall change of size.
+    if (m_style.scaleStroke && m_kind != ShapeKind::Group) {
+        const double scale = std::sqrt(std::abs(t.determinant()));
+        if (scale > 0.0)
+            m_style.strokeWidth *= scale;
+    }
+
     // A texture fill scales along with the shape it fills (under shapeTransform() the
     // painter scales it already).
     if (m_style.pattern && direct) {
@@ -194,8 +203,10 @@ void Shape::transform(const QTransform &t)
                                                        : m_shapeTransform.type() <= QTransform::TxScale;
         if (upright) {
             const QTransform fold = m_shapeTransform;
+            const double width = m_style.strokeWidth; // already scaled above
             m_shapeTransform = QTransform();
             transform(fold);
+            m_style.strokeWidth = width;
         }
         return;
     }

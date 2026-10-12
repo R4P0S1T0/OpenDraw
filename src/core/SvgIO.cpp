@@ -2,12 +2,14 @@
 
 #include "core/Document.h"
 #include "core/PathOps.h"
+#include "core/Render.h"
 #include "core/RichText.h"
 #include "core/TextLayout.h"
 
 #include <QBuffer>
 #include <QCoreApplication>
 #include <QHash>
+#include <QPainterPath>
 #include <QRegularExpression>
 #include <QTransform>
 #include <QXmlStreamReader>
@@ -146,8 +148,105 @@ void writeStyle(QXmlStreamWriter &w, const Style &style, const QString &gradient
             w.writeAttribute(QStringLiteral("stroke-linejoin"),
                              style.join == LineJoin::Round ? QStringLiteral("round") : QStringLiteral("bevel"));
     }
+    if (style.strokeBehind && style.hasStroke())
+        w.writeAttribute(QStringLiteral("paint-order"), QStringLiteral("stroke"));
+    if (style.scaleStroke)
+        w.writeAttribute(QString::fromLatin1(kNamespace), QStringLiteral("scale-stroke"), QStringLiteral("true"));
     if (style.opacity < 1.0)
         w.writeAttribute(QStringLiteral("opacity"), number(std::clamp(style.opacity, 0.0, 1.0)));
+}
+
+// --- Arrowheads: SVG markers, plus OpenDraw attributes naming them.
+
+const char *const kArrowNames[] = {"none", "triangle", "notched", "open", "circle", "square", "diamond", "bar"};
+
+QString arrowName(Arrowhead type)
+{
+    return QString::fromLatin1(kArrowNames[int(type)]);
+}
+
+std::optional<Arrowhead> parseArrow(QStringView name)
+{
+    for (int i = 0; i < int(std::size(kArrowNames)); ++i) {
+        if (name == QLatin1String(kArrowNames[i]))
+            return Arrowhead(i);
+    }
+    return std::nullopt;
+}
+
+QString pathText(const QPainterPath &path)
+{
+    QStringList parts;
+    for (int i = 0; i < path.elementCount(); ++i) {
+        const QPainterPath::Element e = path.elementAt(i);
+        switch (e.type) {
+        case QPainterPath::MoveToElement:
+            parts << QStringLiteral("M %1 %2").arg(number(e.x), number(e.y));
+            break;
+        case QPainterPath::LineToElement:
+            parts << QStringLiteral("L %1 %2").arg(number(e.x), number(e.y));
+            break;
+        case QPainterPath::CurveToElement: {
+            const QPainterPath::Element c2 = path.elementAt(i + 1), to = path.elementAt(i + 2);
+            parts << QStringLiteral("C %1 %2 %3 %4 %5 %6")
+                         .arg(number(e.x), number(e.y), number(c2.x), number(c2.y), number(to.x), number(to.y));
+            i += 2;
+            break;
+        }
+        case QPainterPath::CurveToDataElement:
+            break;
+        }
+    }
+    parts << QStringLiteral("Z");
+    return parts.join(QLatin1Char(' '));
+}
+
+// Writes markers for the arrowheads a path shows (before the element); returns their ids.
+std::pair<QString, QString> writeMarkers(QXmlStreamWriter &w, const Shape &shape, int &count)
+{
+    const Style &style = shape.style();
+    std::pair<QString, QString> ids;
+    if (shape.kind() != ShapeKind::Path || !style.hasStroke() || shape.pathData().empty())
+        return ids;
+    auto marker = [&](Arrowhead type, bool start) {
+        const QString id = QStringLiteral("arrow%1").arg(++count);
+        w.writeStartElement(QStringLiteral("marker"));
+        w.writeAttribute(QStringLiteral("id"), id);
+        w.writeAttribute(QStringLiteral("markerUnits"), QStringLiteral("userSpaceOnUse"));
+        w.writeAttribute(QStringLiteral("orient"), QStringLiteral("auto"));
+        w.writeAttribute(QStringLiteral("overflow"), QStringLiteral("visible"));
+        w.writeAttribute(QStringLiteral("refX"), QStringLiteral("0"));
+        w.writeAttribute(QStringLiteral("refY"), QStringLiteral("0"));
+        // "auto" points the marker along the path; at the start the arrow faces the other way.
+        QPainterPath outline = render::arrowheadShape(type, style.strokeWidth);
+        if (start)
+            outline = QTransform().rotate(180).map(outline);
+        w.writeEmptyElement(QStringLiteral("path"));
+        w.writeAttribute(QStringLiteral("d"), pathText(outline));
+        writePaint(w, QStringLiteral("fill"), style.stroke, true);
+        w.writeEndElement();
+        return id;
+    };
+    const SubPath &first = shape.pathData().front(), &last = shape.pathData().back();
+    if (style.startArrow != Arrowhead::None && !first.closed && first.nodes.size() > 1)
+        ids.first = marker(style.startArrow, true);
+    if (style.endArrow != Arrowhead::None && !last.closed && last.nodes.size() > 1)
+        ids.second = marker(style.endArrow, false);
+    return ids;
+}
+
+void writeArrows(QXmlStreamWriter &w, const Style &style, const std::pair<QString, QString> &ids)
+{
+    // The setting is kept even where nothing shows (a closed path), as it is in OpenDraw.
+    const QString ns = QString::fromLatin1(kNamespace);
+    if (!ids.first.isEmpty())
+        w.writeAttribute(QStringLiteral("marker-start"), QStringLiteral("url(#%1)").arg(ids.first));
+    if (!ids.second.isEmpty())
+        w.writeAttribute(QStringLiteral("marker-end"), QStringLiteral("url(#%1)").arg(ids.second));
+    if (style.startArrow != Arrowhead::None)
+        w.writeAttribute(ns, QStringLiteral("start-arrow"), arrowName(style.startArrow));
+    if (style.endArrow != Arrowhead::None)
+        w.writeAttribute(ns, QStringLiteral("end-arrow"), arrowName(style.endArrow));
 }
 
 // --- Effects: drop shadow (an SVG filter) and transparency gradient (an SVG mask). Other
@@ -306,6 +405,7 @@ void writeShape(QXmlStreamWriter &w, const Shape &shape, int &gradientCount)
     std::pair<QString, QString> effectIds;
     if (shape.kind() != ShapeKind::Group && shape.kind() != ShapeKind::Image)
         effectIds = writeEffectDefinitions(w, shape.style(), gradientCount);
+    const std::pair<QString, QString> markerIds = writeMarkers(w, shape, gradientCount);
 
     switch (shape.kind()) {
     case ShapeKind::Image:
@@ -430,6 +530,7 @@ void writeShape(QXmlStreamWriter &w, const Shape &shape, int &gradientCount)
     writeShapeTransform(w, shape);
     writeStyle(w, shape.style(), gradientId);
     writeEffects(w, shape.style(), effectIds);
+    writeArrows(w, shape.style(), markerIds);
     w.writeEndElement();
 }
 
@@ -547,6 +648,7 @@ const QString kInheritedProperties[] = {
     QStringLiteral("font-family"), QStringLiteral("font-size"),   QStringLiteral("font-weight"),
     QStringLiteral("font-style"),  QStringLiteral("text-anchor"), QStringLiteral("xml:space"),
     QStringLiteral("stroke-dasharray"), QStringLiteral("stroke-linecap"), QStringLiteral("stroke-linejoin"),
+    QStringLiteral("paint-order"),   QStringLiteral("marker-start"), QStringLiteral("marker-end"),
 };
 
 // Elements whose children are never drawn directly.
@@ -646,6 +748,13 @@ public:
         style.cap = cap == u"round" ? LineCap::Round : cap == u"square" ? LineCap::Square : LineCap::Butt;
         const QString join = value(QStringLiteral("stroke-linejoin")).trimmed();
         style.join = join == u"round" ? LineJoin::Round : join == u"bevel" ? LineJoin::Bevel : LineJoin::Miter;
+        // paint-order lists what is painted first; what it leaves out follows in the normal order.
+        QStringList order = value(QStringLiteral("paint-order")).simplified().split(QLatin1Char(' '), Qt::SkipEmptyParts);
+        for (const QString &part : {QStringLiteral("fill"), QStringLiteral("stroke")}) {
+            if (!order.contains(part))
+                order << part;
+        }
+        style.strokeBehind = order.indexOf(QStringLiteral("stroke")) < order.indexOf(QStringLiteral("fill"));
         bool ok = false;
         const double opacity = own(QStringLiteral("opacity")).toDouble(&ok);
         if (ok)
@@ -1038,6 +1147,28 @@ void applyEffects(Shape &shape, const QXmlStreamAttributes &attributes, ReadRepo
         return;
     style.shadow = shadow;
     style.transparency = transparency;
+    shape.setStyle(style);
+}
+
+// Arrowheads (OpenDraw's names, or a triangle for another program's marker) and the
+// scale-with-object setting.
+void applyOutlineExtras(Shape &shape, const Properties &props, const QXmlStreamAttributes &attributes,
+                        ReadReport &report)
+{
+    const QString ns = QString::fromLatin1(kNamespace);
+    Style style = shape.style();
+    style.scaleStroke = attributes.value(ns, QStringLiteral("scale-stroke")) == u"true";
+    auto arrow = [&](const QString &ownName, const QString &marker) {
+        if (const auto named = parseArrow(attributes.value(ns, ownName)))
+            return *named;
+        const QString value = props.value(marker).trimmed();
+        if (shape.kind() != ShapeKind::Path || value.isEmpty() || value == u"none")
+            return Arrowhead::None;
+        ++report.skippedElements[QCoreApplication::translate("SvgIO", "marker (drawn as a triangle arrowhead)")];
+        return Arrowhead::Triangle;
+    };
+    style.startArrow = arrow(QStringLiteral("start-arrow"), QStringLiteral("marker-start"));
+    style.endArrow = arrow(QStringLiteral("end-arrow"), QStringLiteral("marker-end"));
     shape.setStyle(style);
 }
 
@@ -1567,6 +1698,7 @@ bool read(QIODevice *device, Document &document, QString *errorMessage, ReadRepo
                 applyFillPaint(*text, props, context.transform, paintServers, localReport);
                 text->setName(attributes.value(QString::fromLatin1(kInkscapeNamespace), QStringLiteral("label")).toString());
                 applyEffects(*text, attributes, localReport);
+                applyOutlineExtras(*text, props, attributes, localReport);
                 containers.back().push_back(std::move(text));
             }
             continue; // readText consumed the whole element, end tag included
@@ -1647,6 +1779,7 @@ bool read(QIODevice *device, Document &document, QString *errorMessage, ReadRepo
                 applyFillPaint(*shape, props, t, paintServers, localReport);
                 shape->setName(attributes.value(QString::fromLatin1(kInkscapeNamespace), QStringLiteral("label")).toString());
                 applyEffects(*shape, attributes, localReport);
+                applyOutlineExtras(*shape, props, attributes, localReport);
                 containers.back().push_back(std::move(shape));
             }
 

@@ -8,6 +8,7 @@
 #include "core/Render.h"
 
 #include <QButtonGroup>
+#include <QCheckBox>
 #include <QColorDialog>
 #include <QComboBox>
 #include <QDoubleSpinBox>
@@ -70,6 +71,23 @@ QIcon dashIcon(const std::vector<double> &dashes, const QColor &ink)
     return QIcon(pixmap);
 }
 
+// A short line with an arrowhead at one end, for the arrowhead lists.
+QIcon arrowIcon(Arrowhead type, bool atStart, const QColor &ink)
+{
+    QPixmap pixmap(64, 16);
+    pixmap.fill(Qt::transparent);
+    QPainter p(&pixmap);
+    p.setRenderHint(QPainter::Antialiasing);
+    const double width = 1.5;
+    const QPointF from(atStart ? 50 : 6, 8), to(atStart ? 18 : 46, 8);
+    p.setPen(QPen(ink, width, Qt::SolidLine, Qt::FlatCap));
+    p.drawLine(from, to);
+    p.setPen(Qt::NoPen);
+    p.setBrush(ink);
+    p.drawPath(render::arrowheadPath(type, to, to - from, width));
+    return QIcon(pixmap);
+}
+
 QToolButton *iconButton(Icon id, const QString &toolTip, QWidget *parent)
 {
     auto *button = new QToolButton(parent);
@@ -98,6 +116,23 @@ const std::vector<std::vector<double>> &PropertiesPanel::dashPresets()
         {}, {4, 2}, {1, 2}, {4, 2, 1, 2}, {4, 2, 1, 2, 1, 2}, {8, 3},
     };
     return presets;
+}
+
+void PropertiesPanel::addArrowheads(QComboBox *box, bool atStart)
+{
+    const std::pair<Arrowhead, QString> kinds[] = {
+        {Arrowhead::None, tr("None")},         {Arrowhead::Triangle, tr("Triangle")},
+        {Arrowhead::Stealth, tr("Notched")},   {Arrowhead::Open, tr("Open")},
+        {Arrowhead::Circle, tr("Circle")},     {Arrowhead::Square, tr("Square")},
+        {Arrowhead::Diamond, tr("Diamond")},   {Arrowhead::Bar, tr("Bar")},
+    };
+    box->setIconSize(QSize(64, 16));
+    const QColor ink = box->palette().color(QPalette::WindowText);
+    for (const auto &[type, name] : kinds) {
+        box->addItem(arrowIcon(type, atStart, ink), QString(), int(type));
+        box->setItemData(box->count() - 1, name, Qt::ToolTipRole);
+    }
+    box->setToolTip(atStart ? tr("Start arrowhead") : tr("End arrowhead"));
 }
 
 PropertiesPanel::PropertiesPanel(Document *document, CanvasWidget *canvas, QWidget *parent)
@@ -338,7 +373,24 @@ QWidget *PropertiesPanel::createOutlinePage()
     addChoice(m_joins, joinRow, Icon::JoinBevel, tr("Bevelled corners"), int(LineJoin::Bevel));
     joinRow->addStretch();
     form->addRow(tr("Corners:"), joinRow);
+
+    m_startArrow = new QComboBox(page);
+    m_endArrow = new QComboBox(page);
+    addArrowheads(m_startArrow, true);
+    addArrowheads(m_endArrow, false);
+    auto *arrowRow = new QHBoxLayout;
+    arrowRow->addWidget(m_startArrow);
+    arrowRow->addWidget(m_endArrow);
+    arrowRow->addStretch();
+    form->addRow(tr("Arrows:"), arrowRow);
     layout->addLayout(form);
+
+    m_strokeBehind = new QCheckBox(tr("Behind fill"), page);
+    m_strokeBehind->setToolTip(tr("Draw the outline under the fill, which hides its inner half"));
+    m_scaleStroke = new QCheckBox(tr("Scale with object"), page);
+    m_scaleStroke->setToolTip(tr("Resizing the object resizes its outline too"));
+    layout->addWidget(m_strokeBehind);
+    layout->addWidget(m_scaleStroke);
 
     m_outlinePalette = new ColorPalette(Qt::Horizontal, page);
     m_outlinePalette->setColors(ColorPalette::defaultColors());
@@ -382,6 +434,20 @@ QWidget *PropertiesPanel::createOutlinePage()
     });
     connect(m_joins, &QButtonGroup::idClicked, this, [this](int id) {
         apply(tr("Line corners"), [id](Style &style) { style.join = LineJoin(id); });
+    });
+    connect(m_startArrow, &QComboBox::activated, this, [this](int index) {
+        const auto type = Arrowhead(m_startArrow->itemData(index).toInt());
+        apply(tr("Arrowhead"), [type](Style &style) { style.startArrow = type; });
+    });
+    connect(m_endArrow, &QComboBox::activated, this, [this](int index) {
+        const auto type = Arrowhead(m_endArrow->itemData(index).toInt());
+        apply(tr("Arrowhead"), [type](Style &style) { style.endArrow = type; });
+    });
+    connect(m_strokeBehind, &QCheckBox::toggled, this, [this](bool on) {
+        apply(tr("Outline behind fill"), [on](Style &style) { style.strokeBehind = on; });
+    });
+    connect(m_scaleStroke, &QCheckBox::toggled, this, [this](bool on) {
+        apply(tr("Scale outline with object"), [on](Style &style) { style.scaleStroke = on; });
     });
     return page;
 }
@@ -474,6 +540,10 @@ void PropertiesPanel::refresh()
     m_dashes->setCurrentIndex(dashIndex);
     m_caps->button(int(style.cap))->setChecked(true);
     m_joins->button(int(style.join))->setChecked(true);
+    m_startArrow->setCurrentIndex(m_startArrow->findData(int(style.startArrow)));
+    m_endArrow->setCurrentIndex(m_endArrow->findData(int(style.endArrow)));
+    m_strokeBehind->setChecked(style.strokeBehind);
+    m_scaleStroke->setChecked(style.scaleStroke);
 
     // Transparency
     const int percent = int(std::lround((1.0 - style.opacity) * 100.0));

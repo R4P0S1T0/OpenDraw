@@ -1,6 +1,7 @@
 #include "PropertyBar.h"
 
 #include "Icons.h"
+#include "PropertiesPanel.h"
 #include "Units.h"
 #include "core/Commands.h"
 #include "core/Document.h"
@@ -116,6 +117,23 @@ PropertyBar::PropertyBar(Document *document, QUndoStack *undoStack, QWidget *par
     QToolButton *mirrorV = addButton(icon(Icon::MirrorVertical), tr("Mirror vertically"), m_objectActions);
     m_objectActions << addSeparator();
     m_outline = addField(tr("Outline"), tr("Outline width (0 = no outline)"), 0.0, m_objectActions);
+    m_startArrow = new QComboBox(this);
+    m_endArrow = new QComboBox(this);
+    PropertiesPanel::addArrowheads(m_startArrow, true);
+    PropertiesPanel::addArrowheads(m_endArrow, false);
+    m_lineActions << addWidget(m_startArrow) << addWidget(m_endArrow);
+    m_objectActions << m_lineActions;
+    for (QComboBox *box : {m_startArrow, m_endArrow}) {
+        connect(box, &QComboBox::activated, this, [this, box](int index) {
+            if (!m_canvas)
+                return;
+            const auto type = Arrowhead(box->itemData(index).toInt());
+            const bool start = box == m_startArrow;
+            m_canvas->restyle(tr("Arrowhead"), [type, start](Style &style) {
+                (start ? style.startArrow : style.endArrow) = type;
+            });
+        });
+    }
     m_objectActions << addSeparator();
     m_opacity = addField(tr("Opacity"), tr("Opacity of the whole object (100 = solid)"), 0.0, m_objectActions);
     m_opacity->setRange(0.0, 100.0);
@@ -521,6 +539,9 @@ void PropertyBar::updateMode()
     const bool rectangle = m_shape && m_shape->kind() == ShapeKind::Rectangle;
     for (QAction *action : std::as_const(m_cornerActions))
         action->setVisible(showObject && rectangle);
+    const bool curve = m_shape && m_shape->kind() == ShapeKind::Path;
+    for (QAction *action : std::as_const(m_lineActions))
+        action->setVisible(showObject && curve);
     refresh();
 }
 
@@ -605,6 +626,9 @@ void PropertyBar::refresh()
     setValueQuietly(m_angle, m_shownAngle);
     if (m_shape->kind() == ShapeKind::Rectangle)
         setValueQuietly(m_cornerRadius, units().toDisplay(m_shape->cornerRadius()));
+    const QSignalBlocker b1(m_startArrow), b2(m_endArrow);
+    m_startArrow->setCurrentIndex(m_startArrow->findData(int(m_shape->style().startArrow)));
+    m_endArrow->setCurrentIndex(m_endArrow->findData(int(m_shape->style().endArrow)));
 }
 
 void PropertyBar::applyPageSize(const QSizeF &size)
