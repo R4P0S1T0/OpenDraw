@@ -55,6 +55,11 @@ public:
     static QString describe(const Shape &shape);
 
 private:
+    static QString describeAlone(const Shape &shape);
+
+public:
+
+private:
     void connectDocument();
     enum class Kind { Page, Layer, Shape };
 

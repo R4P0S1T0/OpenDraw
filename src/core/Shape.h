@@ -352,6 +352,14 @@ public:
     // The shapes between the two ends of a blend (empty for anything else).
     std::vector<std::unique_ptr<Shape>> blendIntermediates() const;
 
+    // PowerClip: objects placed inside this one (a rectangle, ellipse, curve or text), drawn
+    // only where they fall within its outline, between its fill and its outline. They move,
+    // scale and turn with it. In page coordinates, like any other shape.
+    static bool canHoldContents(ShapeKind kind) { return canHaveEnvelope(kind); }
+    const std::vector<std::unique_ptr<Shape>> &clippedContents() const { return m_clipped; }
+    std::vector<std::unique_ptr<Shape>> takeClippedContents() { return std::move(m_clipped); }
+    void setClippedContents(std::vector<std::unique_ptr<Shape>> contents) { m_clipped = std::move(contents); }
+
     // Outline of a single shape; for a group, the union of its children's outlines.
     QPainterPath path() const;
 
@@ -381,6 +389,7 @@ private:
     std::vector<std::unique_ptr<Shape>> m_children; // groups
     int m_blendSteps = 0;                           // groups
     std::optional<Envelope> m_envelope;             // see canHaveEnvelope()
+    std::vector<std::unique_ptr<Shape>> m_clipped;  // PowerClip contents
     TextData m_text;                                // text
     QPointF m_textOrigin;                           // text
     QImage m_image;                                 // image

@@ -404,6 +404,42 @@ private:
     QTransform m_oldTransform;
 };
 
+// PowerClip: puts shapes inside a frame (after any it holds already), keeping their stacking order.
+class PowerClipCommand : public QUndoCommand {
+public:
+    PowerClipCommand(Document *document, Shape *frame, std::vector<Shape *> contents, QUndoCommand *parent = nullptr);
+
+    void redo() override;
+    void undo() override;
+
+private:
+    struct Position {
+        Shape *shape;
+        Layer *layer;
+        int layerIndex;
+        int index;
+    };
+    Document *m_document;
+    Shape *m_frame;
+    std::vector<Position> m_positions; // bottom to top
+};
+
+// Takes the contents out of a PowerClip frame, onto its layer just above it.
+class ExtractContentsCommand : public QUndoCommand {
+public:
+    ExtractContentsCommand(Document *document, Shape *frame, QUndoCommand *parent = nullptr);
+
+    const std::vector<Shape *> &contents() const { return m_contents; }
+
+    void redo() override;
+    void undo() override;
+
+private:
+    Document *m_document;
+    Shape *m_frame;
+    std::vector<Shape *> m_contents;
+};
+
 // Changes the number of steps of a blend.
 class SetBlendStepsCommand : public QUndoCommand {
 public:

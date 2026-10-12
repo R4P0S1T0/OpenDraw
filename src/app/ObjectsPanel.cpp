@@ -91,6 +91,15 @@ void ObjectsTree::dropEvent(QDropEvent *event)
 
 QString ObjectsPanel::describe(const Shape &shape)
 {
+    if (!shape.clippedContents().empty()) {
+        const QString frame = describeAlone(shape);
+        return tr("%1 (PowerClip of %n object(s))", nullptr, int(shape.clippedContents().size())).arg(frame);
+    }
+    return describeAlone(shape);
+}
+
+QString ObjectsPanel::describeAlone(const Shape &shape)
+{
     if (!shape.name().isEmpty())
         return shape.name();
     switch (shape.kind()) {

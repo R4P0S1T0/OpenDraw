@@ -179,8 +179,20 @@ QRectF Shape::bounds() const
 void Shape::setBounds(const QRectF &bounds)
 {
     const QRectF target = bounds.normalized();
+    // PowerClip contents are stretched along with the frame.
+    auto stretchContents = [this](const QRectF &from, const QRectF &to) {
+        if (m_clipped.empty() || from.width() <= 0.0 || from.height() <= 0.0)
+            return;
+        QTransform t;
+        t.translate(to.left(), to.top());
+        t.scale(to.width() / from.width(), to.height() / from.height());
+        t.translate(-from.left(), -from.top());
+        for (auto &content : m_clipped)
+            content->transform(t);
+    };
     if (m_kind == ShapeKind::Text && m_text.isParagraph() && m_shapeTransform.isIdentity() && !m_envelope) {
         // Resizing a paragraph frame reflows the text instead of scaling it.
+        stretchContents(QRectF(m_textOrigin, m_text.frame), target);
         m_textOrigin = target.topLeft();
         m_text.frame = target.size();
         return;
@@ -189,6 +201,7 @@ void Shape::setBounds(const QRectF &bounds)
         && m_shapeTransform.isIdentity() && !m_envelope) {
         if (m_style.scaleStroke && m_bounds.width() > 0.0 && m_bounds.height() > 0.0)
             m_style.strokeWidth *= std::sqrt(target.width() * target.height() / (m_bounds.width() * m_bounds.height()));
+        stretchContents(m_bounds, target);
         m_bounds = target;
         return;
     }
@@ -225,6 +238,10 @@ void Shape::transform(const QTransform &t)
         m_envelope = envelope::transformed(*m_envelope, flip);
     }
 
+    // PowerClip contents go wherever the frame goes.
+    for (auto &content : m_clipped)
+        content->transform(t);
+
     // An outline set to scale with the object follows the overall change of size.
     if (m_style.scaleStroke && m_kind != ShapeKind::Group) {
         const double scale = std::sqrt(std::abs(t.determinant()));
@@ -250,9 +267,11 @@ void Shape::transform(const QTransform &t)
         if (upright) {
             const QTransform fold = m_shapeTransform;
             const double width = m_style.strokeWidth; // already scaled above
+            auto contents = std::move(m_clipped);     // already moved above
             m_shapeTransform = QTransform();
             transform(fold);
             m_style.strokeWidth = width;
+            m_clipped = std::move(contents);
         }
         return;
     }
@@ -367,6 +386,9 @@ bool Shape::contains(const QPointF &point, double tolerance) const
         const auto steps = blendIntermediates();
         return std::any_of(steps.begin(), steps.end(), hit);
     }
+    // A PowerClip frame is clickable all over, where its contents show.
+    if (!m_clipped.empty() && path().contains(point))
+        return true;
     if (m_kind == ShapeKind::Text) { // letters are thin: the whole text box is clickable
         const QRectF box = localBounds().adjusted(-tolerance, -tolerance, tolerance, tolerance);
         if (m_envelope) {

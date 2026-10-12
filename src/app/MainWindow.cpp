@@ -522,6 +522,10 @@ void MainWindow::createActions()
     objectMenu->addAction(tr("&Break Blend Apart"), QKeySequence(Qt::CTRL | Qt::Key_K), m_canvas,
                           &CanvasWidget::breakBlendApart);
     objectMenu->addAction(tr("&Remove Envelope"), m_canvas, &CanvasWidget::removeEnvelope);
+    QMenu *powerClipMenu = objectMenu->addMenu(tr("&PowerClip"));
+    powerClipMenu->addAction(tr("&Place Inside Frame (the object selected last)"), m_canvas,
+                             &CanvasWidget::placeInsideFrame);
+    powerClipMenu->addAction(tr("&Extract Contents"), m_canvas, &CanvasWidget::extractContents);
     objectMenu->addSeparator();
 
     QMenu *orderMenu = objectMenu->addMenu(tr("&Order"));

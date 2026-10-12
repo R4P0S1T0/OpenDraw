@@ -137,6 +137,7 @@ private slots:
     void smartFillToolMakesAreas();
     void textFitsToPathAndBack();
     void severalDrawingsInTabs();
+    void powerClipFromTheSelection();
     void textToolDrawsParagraphFrames();
     void formatPartOfAText();
     void shadowAndTransparencyTools();
@@ -1091,6 +1092,44 @@ void CanvasTests::mainWindowWorkspace()
         canvas->fitPage();
         QTest::qWait(150);
         QVERIFY(window.grab().save(dir + QStringLiteral("/window-textpath.png")));
+
+        // PowerClip: stripes and a star inside a word and inside a circle.
+        canvas->selectAll();
+        canvas->deleteSelection();
+        auto stripes = [&](const QRectF &area, const QColor &a, const QColor &b) {
+            std::vector<Shape *> made;
+            for (int i = 0; i < 12; ++i) {
+                Style s;
+                s.fill = i % 2 ? a : b;
+                s.stroke = Qt::transparent;
+                made.push_back(doc->insertShape(-1, std::make_unique<Shape>(
+                    ShapeKind::Rectangle, QRectF(area.left() + i * area.width() / 12, area.top(), area.width() / 12, area.height()), s)));
+            }
+            return made;
+        };
+        std::vector<Shape *> inside = stripes(QRectF(100, 150, 600, 200), QColor(0xe5, 0x39, 0x35), QColor(0xfd, 0xd8, 0x35));
+        TextData clipWord{QStringLiteral("PowerClip"), {}};
+        clipWord.format.size = 130;
+        clipWord.format.bold = true;
+        Style wordFrame;
+        wordFrame.fill = Qt::transparent;
+        wordFrame.stroke = QColor(0x3e, 0x27, 0x23);
+        wordFrame.strokeWidth = 2;
+        inside.push_back(doc->insertShape(-1, std::make_unique<Shape>(clipWord, QPointF(110, 300), wordFrame)));
+        canvas->setSelection(inside);
+        canvas->placeInsideFrame();
+        std::vector<Shape *> second = stripes(QRectF(250, 450, 300, 300), QColor(0x1e, 0x88, 0xe5), QColor(0xbb, 0xde, 0xfb));
+        Style circleFrame;
+        circleFrame.fill = Qt::white;
+        circleFrame.stroke = QColor(0x0d, 0x47, 0xa1);
+        circleFrame.strokeWidth = 5;
+        second.push_back(doc->insertShape(-1, std::make_unique<Shape>(ShapeKind::Ellipse, QRectF(300, 480, 220, 220), circleFrame)));
+        canvas->setSelection(second);
+        canvas->placeInsideFrame();
+        canvas->setTool(CanvasWidget::Tool::Select);
+        canvas->fitPage();
+        QTest::qWait(150);
+        QVERIFY(window.grab().save(dir + QStringLiteral("/window-powerclip.png")));
         theme::apply(ColorScheme::Light);
     }
 }
@@ -1555,6 +1594,25 @@ void CanvasTests::textFitsToPathAndBack()
         m_undo->undo();
     QVERIFY(!text->textData().path);
     QCOMPARE(text->textOrigin(), QPointF(400, 400));
+}
+
+void CanvasTests::powerClipFromTheSelection()
+{
+    Shape *photo = m_doc->insertShape(-1, std::make_unique<Shape>(ShapeKind::Rectangle, QRectF(0, 0, 300, 300)));
+    Shape *frame = m_doc->insertShape(-1, std::make_unique<Shape>(ShapeKind::Ellipse, QRectF(50, 50, 100, 100)));
+    const int before = m_undo->index();
+    m_canvas->setSelection({photo, frame}); // the frame last
+    m_canvas->placeInsideFrame();
+    QCOMPARE(m_doc->count(), 1);
+    QCOMPARE(m_canvas->selectedShape(), frame);
+    QCOMPARE(frame->clippedContents().front().get(), photo);
+    m_canvas->extractContents();
+    QCOMPARE(m_doc->count(), 2);
+    QCOMPARE(m_canvas->selectedShape(), photo);
+    while (m_undo->index() > before)
+        m_undo->undo();
+    QCOMPARE(m_doc->count(), 2);
+    QVERIFY(frame->clippedContents().empty());
 }
 
 void CanvasTests::severalDrawingsInTabs()

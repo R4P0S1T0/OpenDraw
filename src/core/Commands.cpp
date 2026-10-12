@@ -550,6 +550,74 @@ void SetCornerRadiusCommand::undo()
     m_document->notifyShapeChanged(m_shape);
 }
 
+PowerClipCommand::PowerClipCommand(Document *document, Shape *frame, std::vector<Shape *> contents,
+                                   QUndoCommand *parent)
+    : QUndoCommand(QCoreApplication::translate("Commands", "Place inside frame"), parent)
+    , m_document(document)
+    , m_frame(frame)
+{
+    for (Shape *shape : contents) {
+        Layer *layer = document->layerOf(shape);
+        m_positions.push_back({shape, layer, document->indexOfLayer(layer), document->indexOf(shape)});
+    }
+    std::sort(m_positions.begin(), m_positions.end(), [](const Position &a, const Position &b) {
+        return a.layerIndex != b.layerIndex ? a.layerIndex < b.layerIndex : a.index < b.index;
+    });
+}
+
+void PowerClipCommand::redo()
+{
+    ShapeList contents = m_frame->takeClippedContents();
+    for (const Position &p : m_positions)
+        contents.push_back(m_document->takeShape(p.shape));
+    m_frame->setClippedContents(std::move(contents));
+    m_document->notifyShapeChanged(m_frame);
+}
+
+void PowerClipCommand::undo()
+{
+    ShapeList contents = m_frame->takeClippedContents();
+    std::vector<std::unique_ptr<Shape>> placed;
+    for (const Position &p : m_positions) {
+        const auto it = std::find_if(contents.begin(), contents.end(),
+                                     [&p](const std::unique_ptr<Shape> &s) { return s.get() == p.shape; });
+        placed.push_back(std::move(*it));
+        contents.erase(it);
+    }
+    m_frame->setClippedContents(std::move(contents));
+    // Ascending positions per layer, so every shape lands where it was.
+    for (std::size_t i = 0; i < placed.size(); ++i)
+        m_document->insertShape(m_positions[i].layer, m_positions[i].index, std::move(placed[i]));
+}
+
+ExtractContentsCommand::ExtractContentsCommand(Document *document, Shape *frame, QUndoCommand *parent)
+    : QUndoCommand(QCoreApplication::translate("Commands", "Extract contents"), parent)
+    , m_document(document)
+    , m_frame(frame)
+{
+    for (const auto &content : frame->clippedContents())
+        m_contents.push_back(content.get());
+}
+
+void ExtractContentsCommand::redo()
+{
+    Layer *layer = m_document->layerOf(m_frame);
+    const int index = m_document->indexOf(m_frame);
+    ShapeList contents = m_frame->takeClippedContents();
+    for (std::size_t i = 0; i < contents.size(); ++i)
+        m_document->insertShape(layer, index + 1 + int(i), std::move(contents[i]));
+    m_document->notifyShapeChanged(m_frame);
+}
+
+void ExtractContentsCommand::undo()
+{
+    ShapeList contents;
+    for (Shape *shape : m_contents)
+        contents.push_back(m_document->takeShape(shape));
+    m_frame->setClippedContents(std::move(contents));
+    m_document->notifyShapeChanged(m_frame);
+}
+
 SetEnvelopeCommand::SetEnvelopeCommand(Document *document, Shape *shape, std::optional<Envelope> envelope,
                                        QUndoCommand *parent)
     : QUndoCommand(envelope ? QCoreApplication::translate("Commands", "Envelope")

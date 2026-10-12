@@ -754,6 +754,39 @@ void CanvasWidget::dragEnvelopeHandle(const QPointF &documentPosition)
     m_document->notifyShapeChanged(shape);
 }
 
+void CanvasWidget::placeInsideFrame()
+{
+    finishTextEdit();
+    // The object selected last is the frame; the others go inside it.
+    if (m_selection.size() < 2 || !Shape::canHoldContents(m_selection.back()->kind()))
+        return;
+    Shape *frame = m_selection.back();
+    std::vector<Shape *> contents(m_selection.begin(), m_selection.end() - 1);
+    m_undoStack->push(new PowerClipCommand(m_document, frame, std::move(contents)));
+    setSelectedShape(frame);
+}
+
+void CanvasWidget::extractContents()
+{
+    finishTextEdit();
+    std::vector<Shape *> frames;
+    for (Shape *shape : m_selection) {
+        if (!shape->clippedContents().empty())
+            frames.push_back(shape);
+    }
+    if (frames.empty())
+        return;
+    std::vector<Shape *> extracted;
+    m_undoStack->beginMacro(tr("Extract contents"));
+    for (Shape *frame : frames) {
+        auto *command = new ExtractContentsCommand(m_document, frame);
+        extracted.insert(extracted.end(), command->contents().begin(), command->contents().end());
+        m_undoStack->push(command);
+    }
+    m_undoStack->endMacro();
+    setSelection(std::move(extracted));
+}
+
 void CanvasWidget::fitTextToPath()
 {
     finishTextEdit();

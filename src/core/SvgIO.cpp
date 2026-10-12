@@ -477,9 +477,53 @@ std::optional<Envelope> parseEnvelope(QStringView text)
 }
 
 void writeShapeElement(QXmlStreamWriter &w, const Shape &shape, int &gradientCount, bool original = false);
+void writeShapeItself(QXmlStreamWriter &w, const Shape &shape, int &gradientCount);
+
+// A shape and, for a PowerClip frame, its contents: clipped to the frame's outline (SVG
+// clip-path), with the frame's outline drawn again over them for other programs.
+void writeShape(QXmlStreamWriter &w, const Shape &shape, int &gradientCount)
+{
+    if (shape.clippedContents().empty()) {
+        writeShapeItself(w, shape, gradientCount);
+        return;
+    }
+    const QString ns = QString::fromLatin1(kNamespace);
+    w.writeStartElement(QStringLiteral("g"));
+    w.writeAttribute(ns, QStringLiteral("powerclip"), QStringLiteral("true"));
+    writeShapeItself(w, shape, gradientCount);
+    const QString clipId = QStringLiteral("clip%1").arg(++gradientCount);
+    const QPainterPath outline = shape.path();
+    w.writeStartElement(QStringLiteral("clipPath"));
+    w.writeAttribute(QStringLiteral("id"), clipId);
+    w.writeEmptyElement(QStringLiteral("path"));
+    w.writeAttribute(QStringLiteral("d"), pathText(outline));
+    if (outline.fillRule() == Qt::OddEvenFill)
+        w.writeAttribute(QStringLiteral("clip-rule"), QStringLiteral("evenodd"));
+    w.writeEndElement();
+    w.writeStartElement(QStringLiteral("g"));
+    w.writeAttribute(QStringLiteral("clip-path"), QStringLiteral("url(#%1)").arg(clipId));
+    for (const auto &content : shape.clippedContents())
+        writeShape(w, *content, gradientCount);
+    w.writeEndElement();
+    if (shape.style().hasStroke()) {
+        w.writeStartElement(QStringLiteral("g"));
+        w.writeAttribute(ns, QStringLiteral("generated"), QStringLiteral("true"));
+        Style outlineOnly = shape.style();
+        outlineOnly.fill = Qt::transparent;
+        outlineOnly.gradient.reset();
+        outlineOnly.pattern.reset();
+        outlineOnly.shadow.reset();
+        outlineOnly.contour.reset();
+        outlineOnly.extrusion.reset();
+        outlineOnly.transparency.reset();
+        writeShapeItself(w, Shape(pathops::fromPainterPath(outline), outlineOnly), gradientCount);
+        w.writeEndElement();
+    }
+    w.writeEndElement();
+}
 
 // An element, with its contour rings under it (outside) or over it (inside).
-void writeShape(QXmlStreamWriter &w, const Shape &shape, int &gradientCount)
+void writeShapeItself(QXmlStreamWriter &w, const Shape &shape, int &gradientCount)
 {
     if (shape.envelope()) {
         // Other programs get the object bent, as a curve; OpenDraw reads back the object
@@ -910,7 +954,21 @@ struct Context {
     QString label;          // for Role::Group: the name the group was given
     int blendSteps = 0;     // for Role::Group: a blend's steps (opendraw:blend)
     std::optional<Envelope> envelope; // for Role::Group: the envelope of the object inside
+    bool powerClip = false;           // for Role::Group: a PowerClip frame and its contents
+    std::optional<PathData> clip;     // another program's clip-path on this element, on the page
 };
+
+// What an element clipped by another program's clip-path becomes: a PowerClip frame with no
+// fill or outline of its own, holding the element.
+std::unique_ptr<Shape> clipFrame(const PathData &outline, std::vector<std::unique_ptr<Shape>> contents)
+{
+    Style invisible;
+    invisible.fill = Qt::transparent;
+    invisible.stroke = Qt::transparent;
+    auto frame = std::make_unique<Shape>(outline, invisible);
+    frame->setClippedContents(std::move(contents));
+    return frame;
+}
 
 // The presentation properties of one element: style attribute, then attributes, then inherited values.
 class Properties {
@@ -1111,6 +1169,7 @@ struct PaintServers {
     GradientDefs gradients;
     QHash<QString, PatternDef> patterns;
     QHash<QString, QString> paths; // path data of <path> elements with an id (for <textPath>)
+    QHash<QString, PathData> clips; // outlines of <clipPath> elements
 };
 
 // Uncompressed 32-bit BMPs often carry alpha in the fourth byte (libcdr writes bitmaps that
@@ -1187,11 +1246,46 @@ PaintServers collectPaintServers(const QByteArray &data)
     QXmlStreamReader r(data);
     QString current;
     QString currentPattern;
+    QString currentClip;
     while (!r.atEnd()) {
         r.readNext();
         if (r.isEndElement() && (r.name() == u"linearGradient" || r.name() == u"radialGradient")) {
             current.clear();
             continue;
+        }
+        if (r.isEndElement() && r.name() == u"clipPath") {
+            currentClip.clear();
+            continue;
+        }
+        if (r.isStartElement() && r.name() == u"clipPath") {
+            // Clipping in the user space of the clipped element (the default) is read; clipping
+            // relative to its bounding box is not.
+            const bool userSpace = r.attributes().value(QStringLiteral("clipPathUnits")) != u"objectBoundingBox";
+            currentClip = userSpace ? r.attributes().value(QStringLiteral("id")).toString() : QString();
+            continue;
+        }
+        if (r.isStartElement() && !currentClip.isEmpty() && !servers.clips.contains(currentClip)) {
+            // The first shape of a clip path is its outline.
+            const QXmlStreamAttributes a = r.attributes();
+            auto length = [&a](const char *name) { return parseLength(a.value(QString::fromLatin1(name))).value_or(0.0); };
+            QPainterPath outline;
+            if (r.name() == u"path") {
+                if (auto path = pathops::fromSvg(a.value(QStringLiteral("d"))))
+                    outline = pathops::toPainterPath(*path);
+            } else if (r.name() == u"rect") {
+                outline.addRect(QRectF(length("x"), length("y"), length("width"), length("height")));
+            } else if (r.name() == u"circle") {
+                const double radius = length("r");
+                outline.addEllipse(QPointF(length("cx"), length("cy")), radius, radius);
+            } else if (r.name() == u"ellipse") {
+                outline.addEllipse(QPointF(length("cx"), length("cy")), length("rx"), length("ry"));
+            }
+            if (!outline.isEmpty()) {
+                const QStringView transform = a.value(QStringLiteral("transform"));
+                if (!transform.isEmpty())
+                    outline = parseTransform(transform).map(outline);
+                servers.clips.insert(currentClip, pathops::fromPainterPath(outline));
+            }
         }
         if (r.isEndElement() && r.name() == u"pattern") {
             currentPattern.clear();
@@ -1875,7 +1969,16 @@ bool read(QIODevice *device, Document &document, QString *errorMessage, ReadRepo
                 case Role::Group: {
                     ShapeList children = std::move(containers.back());
                     containers.pop_back();
-                    if (const auto &envelope = stack.back().envelope; envelope && children.size() == 1
+                    if (stack.back().clip && !children.empty()) {
+                        containers.back().push_back(clipFrame(*stack.back().clip, std::move(children)));
+                    } else if (stack.back().powerClip && !children.empty()
+                        && Shape::canHoldContents(children.front()->kind())) {
+                        // The frame, then a group of what is inside it.
+                        std::unique_ptr<Shape> frame = std::move(children.front());
+                        if (children.size() > 1 && children[1]->kind() == ShapeKind::Group)
+                            frame->setClippedContents(children[1]->takeChildren());
+                        containers.back().push_back(std::move(frame));
+                    } else if (const auto &envelope = stack.back().envelope; envelope && children.size() == 1
                                                                        && Shape::canHaveEnvelope(children.front()->kind())) {
                         // An envelope's group holds just the bent object.
                         children.front()->setEnvelope(envelope);
@@ -1946,6 +2049,20 @@ bool read(QIODevice *device, Document &document, QString *errorMessage, ReadRepo
         if (hidden && !isPage && !isLayer && !original)
             context.rendering = false;
         context.envelope = name == u"g" ? parseEnvelope(attributes.value(ns, QStringLiteral("envelope"))) : std::nullopt;
+        context.powerClip = name == u"g" && attributes.value(ns, QStringLiteral("powerclip")) == u"true";
+        context.clip.reset();
+        if (const QString clipRef = props.own(QStringLiteral("clip-path")).trimmed();
+            clipRef.startsWith(u"url(") && !parent.powerClip && context.rendering) {
+            static const QRegularExpression url(QStringLiteral(R"(^url\(\s*['"]?#([^)'"\s]+))"));
+            const QRegularExpressionMatch match = url.match(clipRef);
+            if (match.hasMatch() && paintServers.clips.contains(match.captured(1))) {
+                PathData outline = paintServers.clips.value(match.captured(1));
+                pathops::transform(outline, context.transform);
+                context.clip = std::move(outline);
+            } else {
+                ++localReport.skippedElements[QCoreApplication::translate("SvgIO", "clip path (shown without it)")];
+            }
+        }
         // Steps of a blend, worked out again from its ends.
         if (attributes.value(ns, QStringLiteral("generated")) == u"true")
             context.rendering = false;
@@ -2014,7 +2131,13 @@ bool read(QIODevice *device, Document &document, QString *errorMessage, ReadRepo
                 text->setName(attributes.value(QString::fromLatin1(kInkscapeNamespace), QStringLiteral("label")).toString());
                 applyEffects(*text, attributes, localReport);
                 applyOutlineExtras(*text, props, attributes, localReport);
-                containers.back().push_back(std::move(text));
+                if (context.clip) {
+                    std::vector<std::unique_ptr<Shape>> clipped;
+                    clipped.push_back(std::move(text));
+                    containers.back().push_back(clipFrame(*context.clip, std::move(clipped)));
+                } else {
+                    containers.back().push_back(std::move(text));
+                }
             }
             continue; // readText consumed the whole element, end tag included
         } else if (context.rendering) {
@@ -2102,7 +2225,13 @@ bool read(QIODevice *device, Document &document, QString *errorMessage, ReadRepo
                 shape->setName(attributes.value(QString::fromLatin1(kInkscapeNamespace), QStringLiteral("label")).toString());
                 applyEffects(*shape, attributes, localReport);
                 applyOutlineExtras(*shape, props, attributes, localReport);
-                containers.back().push_back(std::move(shape));
+                if (context.clip) {
+                    std::vector<std::unique_ptr<Shape>> clipped;
+                    clipped.push_back(std::move(shape));
+                    containers.back().push_back(clipFrame(*context.clip, std::move(clipped)));
+                } else {
+                    containers.back().push_back(std::move(shape));
+                }
             }
 
             if (name == u"g") {

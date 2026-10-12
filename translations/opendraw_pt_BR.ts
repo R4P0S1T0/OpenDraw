@@ -111,6 +111,14 @@
         <translation>Raio do canto</translation>
     </message>
     <message>
+        <source>Place inside frame</source>
+        <translation>Colocar dentro da moldura</translation>
+    </message>
+    <message>
+        <source>Extract contents</source>
+        <translation>Extrair conteúdo</translation>
+    </message>
+    <message>
         <source>Envelope</source>
         <translation>Envelope</translation>
     </message>
@@ -219,6 +227,10 @@
         <translation>Camada</translation>
     </message>
     <message>
+        <source>clip path (shown without it)</source>
+        <translation>recorte (mostrado sem ele)</translation>
+    </message>
+    <message>
         <source>&lt;image&gt; linked to a separate file</source>
         <translation>&lt;image&gt; vinculada a um arquivo separado</translation>
     </message>
@@ -267,6 +279,10 @@
     <message>
         <source>Transparency</source>
         <translation>Transparência</translation>
+    </message>
+    <message>
+        <source>Extract contents</source>
+        <translation>Extrair conteúdo</translation>
     </message>
     <message>
         <source>Fit text to path</source>
@@ -769,6 +785,18 @@ Clique esquerdo: preenchimento · Clique direito: contorno</translation>
     <message>
         <source>&amp;Remove Envelope</source>
         <translation>&amp;Remover envelope</translation>
+    </message>
+    <message>
+        <source>&amp;PowerClip</source>
+        <translation>&amp;PowerClip</translation>
+    </message>
+    <message>
+        <source>&amp;Place Inside Frame (the object selected last)</source>
+        <translation>&amp;Colocar dentro da moldura (o objeto selecionado por último)</translation>
+    </message>
+    <message>
+        <source>&amp;Extract Contents</source>
+        <translation>&amp;Extrair conteúdo</translation>
     </message>
     <message>
         <source>&amp;Order</source>
@@ -1496,6 +1524,13 @@ Clique esquerdo: preenchimento · Clique direito: contorno</translation>
 </context>
 <context>
     <name>opendraw::ObjectsPanel</name>
+    <message numerus="yes">
+        <source>%1 (PowerClip of %n object(s))</source>
+        <translation>
+            <numerusform>%1 (PowerClip com %n objeto)</numerusform>
+            <numerusform>%1 (PowerClip com %n objetos)</numerusform>
+        </translation>
+    </message>
     <message>
         <source>Rectangle</source>
         <translation>Retângulo</translation>

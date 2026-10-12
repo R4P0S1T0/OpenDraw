@@ -283,11 +283,23 @@ void paintBody(QPainter &painter, const Shape &shape)
             painter.drawPath(arrows);
         }
     };
+    // PowerClip contents: over the fill, under the outline, only inside the frame.
+    auto paintContents = [&] {
+        if (shape.clippedContents().empty())
+            return;
+        painter.save();
+        painter.setClipPath(shape.path(), Qt::IntersectClip);
+        for (const auto &content : shape.clippedContents())
+            paintShape(painter, *content);
+        painter.restore();
+    };
     if (style.strokeBehind) {
         paintOutline();
         paintFill();
+        paintContents();
     } else {
         paintFill();
+        paintContents();
         paintOutline();
     }
     painter.restore();

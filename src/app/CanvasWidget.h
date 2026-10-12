@@ -152,6 +152,10 @@ public slots:
     void breakBlendApart();
     // Takes the envelope off the selected objects.
     void removeEnvelope();
+    // PowerClip: the objects selected before the last one go inside it (a rectangle, ellipse,
+    // curve or text), and back out of selected frames.
+    void placeInsideFrame();
+    void extractContents();
     // With a text and another object selected, the text follows that object's outline.
     void fitTextToPath();
     // Selected texts on curves go back to straight lines.

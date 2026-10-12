@@ -28,6 +28,7 @@ Rough order of work. Items move as contributors pick them up.
 - [x] Contour tool: rings outside, inside or to the centre of an object, colours running to a chosen fill and outline, live; saved with the rings as real SVG shapes for other programs
 - [x] Envelope tool: bend rectangles, ellipses, curves and texts by dragging the corners and edge handles of a frame; live (the objects stay editable and the envelope moves, scales, turns and mirrors with them); saved bent for other programs, with the object itself kept for OpenDraw
 - [x] Extrude tool: depth towards a vanishing point, sides shaded by a light from the top left (or one colour), live; saved with the sides as real SVG shapes for other programs
+- [x] PowerClip: objects placed inside a rectangle, ellipse, curve or text, shown only within its outline and moving with it; Extract Contents; saved as SVG clip-path, and clip paths from other programs are read as PowerClips
 - [x] Smart fill tool: a click inside an area enclosed by overlapping objects makes a new object of exactly that shape
 - [x] Objects docker: pages, layers and objects as a tree, selection in both directions, renaming (object names saved as Inkscape labels), drag and drop to restack or change layers
 - [x] Properties docker: outline (colour, width, dashes, ends, corners), fill (none, uniform, linear, radial) and transparency, applied live; dashes, line ends and corners saved in SVG and read from other files
@@ -56,7 +57,7 @@ Rough order of work. Items move as contributors pick them up.
 ## 0.4 — No more locked files
 
 - [x] CorelDRAW (`.cdr`, `.cdt`) import through libcdr: all pages, curves, groups, colours, gradients, bitmaps and texture fills, text (checked against the 134 sample files shipped with CorelDRAW 2026; none fails)
-- [ ] CorelDRAW import gaps, mostly in libcdr itself: PowerClip clipping, transparency effects, lenses, paragraph text frames
+- [ ] CorelDRAW import gaps, in libcdr itself (it passes on no PowerClip, transparency effect, lens or paragraph formatting data): OpenDraw can show all of these, but cannot learn them from the files yet
 - [x] Bitmaps (SVG `<image>` with embedded data) and bitmap pattern fills
 - [x] PDF export (vector, exact page size) and PNG export (dpi, transparency, selection only)
 - [ ] PDF with selectable text, CMYK and bleed for print shops
