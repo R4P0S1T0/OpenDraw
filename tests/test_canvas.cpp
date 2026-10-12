@@ -128,6 +128,7 @@ private slots:
     void propertiesDockerAppliesStyles();
     void propertiesDockerFormatsParagraphs();
     void blendToolJoinsTwoObjects();
+    void contourToolDragsRings();
     void textToolDrawsParagraphFrames();
     void formatPartOfAText();
     void shadowAndTransparencyTools();
@@ -971,6 +972,40 @@ void CanvasTests::mainWindowWorkspace()
         canvas->zoomToSelection();
         QTest::qWait(150);
         QVERIFY(window.grab().save(dir + QStringLiteral("/window-blend.png")));
+
+        // Contours: rings around a word and to the centre of a star.
+        canvas->selectAll();
+        canvas->deleteSelection();
+        TextData word{QStringLiteral("OpenDraw"), {}};
+        word.format.size = 110;
+        word.format.bold = true;
+        Style wordStyle;
+        wordStyle.fill = QColor(0x1e, 0x88, 0xe5);
+        wordStyle.stroke = Qt::transparent;
+        Contour around;
+        around.steps = 4;
+        around.offset = 6;
+        around.fill = QColor(0xe3, 0xf2, 0xfd);
+        around.stroke = QColor(0x0d, 0x47, 0xa1);
+        wordStyle.contour = around;
+        doc->insertShape(-1, std::make_unique<Shape>(word, QPointF(120, 300), wordStyle));
+        Style starRings;
+        starRings.fill = QColor(0xe5, 0x39, 0x35);
+        starRings.stroke = QColor(0x5d, 0x40, 0x37);
+        Contour inward;
+        inward.direction = Contour::Direction::ToCenter;
+        inward.offset = 12;
+        inward.fill = QColor(0xff, 0xeb, 0x3b);
+        inward.stroke = QColor(0x5d, 0x40, 0x37);
+        starRings.contour = inward;
+        Shape *ringedStar = doc->insertShape(-1, std::make_unique<Shape>(generators::star(QRectF(260, 400, 300, 300), 5, 45), starRings));
+        canvas->setTool(CanvasWidget::Tool::Contour);
+        canvas->setSelectedShape(ringedStar);
+        canvas->zoomToSelection();
+        canvas->setSelection({});
+        canvas->fitPage();
+        QTest::qWait(150);
+        QVERIFY(window.grab().save(dir + QStringLiteral("/window-contour.png")));
         theme::apply(ColorScheme::Light);
     }
 }
@@ -1316,6 +1351,29 @@ void CanvasTests::blendToolJoinsTwoObjects()
     // Dragging onto empty space does nothing.
     dragFromTo(m_canvas, m_canvas->documentToWidget(a->bounds().center()), {700, 50});
     QCOMPARE(m_doc->count(), 2);
+    m_canvas->setTool(CanvasWidget::Tool::Select);
+}
+
+void CanvasTests::contourToolDragsRings()
+{
+    m_canvas->setZoom(1.0);
+    Style style;
+    style.fill = Qt::yellow;
+    Shape *rect = m_doc->insertShape(-1, std::make_unique<Shape>(ShapeKind::Rectangle, QRectF(100, 100, 200, 200), style));
+    const int before = m_undo->index();
+    m_canvas->setTool(CanvasWidget::Tool::Contour);
+    // From the right edge outwards by 60: three rings 20 apart, outside.
+    dragFromTo(m_canvas, m_canvas->documentToWidget({299, 200}), m_canvas->documentToWidget({359, 200}));
+    QVERIFY(rect->style().contour);
+    QCOMPARE(rect->style().contour->direction, Contour::Direction::Outside);
+    QVERIFY(std::abs(rect->style().contour->offset - 20.0) < 0.5);
+    QCOMPARE(m_undo->index(), before + 1);
+    // Back inside: the rings go inside.
+    dragFromTo(m_canvas, m_canvas->documentToWidget({299, 200}), m_canvas->documentToWidget({239, 200}));
+    QCOMPARE(rect->style().contour->direction, Contour::Direction::Inside);
+    m_undo->undo();
+    m_undo->undo();
+    QVERIFY(!rect->style().contour);
     m_canvas->setTool(CanvasWidget::Tool::Select);
 }
 

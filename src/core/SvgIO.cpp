@@ -1,5 +1,6 @@
 #include "core/SvgIO.h"
 
+#include "core/ContourEffect.h"
 #include "core/Document.h"
 #include "core/PathOps.h"
 #include "core/Render.h"
@@ -174,6 +175,7 @@ std::optional<Arrowhead> parseArrow(QStringView name)
     return std::nullopt;
 }
 
+// Path data of a QPainterPath made of closed outlines.
 QString pathText(const QPainterPath &path)
 {
     QStringList parts;
@@ -181,6 +183,8 @@ QString pathText(const QPainterPath &path)
         const QPainterPath::Element e = path.elementAt(i);
         switch (e.type) {
         case QPainterPath::MoveToElement:
+            if (i > 0)
+                parts << QStringLiteral("Z");
             parts << QStringLiteral("M %1 %2").arg(number(e.x), number(e.y));
             break;
         case QPainterPath::LineToElement:
@@ -365,9 +369,13 @@ std::pair<QString, QString> writeEffectDefinitions(QXmlStreamWriter &w, const St
     return {filterId, maskId};
 }
 
+QString contourText(const Contour &c);
+
 void writeEffects(QXmlStreamWriter &w, const Style &style, const std::pair<QString, QString> &ids)
 {
     const QString ns = QString::fromLatin1(kNamespace);
+    if (style.contour)
+        w.writeAttribute(ns, QStringLiteral("contour"), contourText(*style.contour));
     if (style.shadow) {
         w.writeAttribute(QStringLiteral("filter"), QStringLiteral("url(#%1)").arg(ids.first));
         w.writeAttribute(ns, QStringLiteral("shadow"), shadowText(*style.shadow));
@@ -389,7 +397,66 @@ void writeShapeTransform(QXmlStreamWriter &w, const Shape &shape)
         w.writeAttribute(QStringLiteral("vector-effect"), QStringLiteral("non-scaling-stroke"));
 }
 
+QString contourText(const Contour &c)
+{
+    static const char *const directions[] = {"outside", "inside", "center"};
+    return QStringLiteral("%1 %2 %3 %4 %5 %6 %7")
+        .arg(QString::fromLatin1(directions[int(c.direction)]), QString::number(c.steps), number(c.offset),
+             c.fill.name(), number(c.fill.alphaF()), c.stroke.name(), number(c.stroke.alphaF()));
+}
+
+std::optional<Contour> parseContour(QStringView text)
+{
+    const QStringList parts = text.toString().split(QLatin1Char(' '), Qt::SkipEmptyParts);
+    if (parts.size() != 7)
+        return std::nullopt;
+    Contour c;
+    c.direction = parts[0] == u"inside"   ? Contour::Direction::Inside
+                  : parts[0] == u"center" ? Contour::Direction::ToCenter
+                                          : Contour::Direction::Outside;
+    c.steps = std::clamp(parts[1].toInt(), 1, 100);
+    c.offset = std::max(parts[2].toDouble(), 0.0);
+    c.fill = QColor::fromString(parts[3]);
+    c.stroke = QColor::fromString(parts[5]);
+    if (!c.fill.isValid() || !c.stroke.isValid())
+        return std::nullopt;
+    c.fill.setAlphaF(std::clamp(parts[4].toDouble(), 0.0, 1.0));
+    c.stroke.setAlphaF(std::clamp(parts[6].toDouble(), 0.0, 1.0));
+    return c;
+}
+
+// Contour rings as plain shapes, for other programs; OpenDraw skips them when reading.
+void writeContourRings(QXmlStreamWriter &w, const std::vector<contour::Ring> &rings)
+{
+    if (rings.empty())
+        return;
+    w.writeStartElement(QStringLiteral("g"));
+    w.writeAttribute(QString::fromLatin1(kNamespace), QStringLiteral("generated"), QStringLiteral("true"));
+    for (const contour::Ring &ring : rings) {
+        w.writeEmptyElement(QStringLiteral("path"));
+        w.writeAttribute(QStringLiteral("d"), pathText(ring.path));
+        if (ring.path.fillRule() == Qt::OddEvenFill)
+            w.writeAttribute(QStringLiteral("fill-rule"), QStringLiteral("evenodd"));
+        writeStyle(w, ring.style, QString());
+    }
+    w.writeEndElement();
+}
+
+void writeShapeElement(QXmlStreamWriter &w, const Shape &shape, int &gradientCount);
+
+// An element, with its contour rings under it (outside) or over it (inside).
 void writeShape(QXmlStreamWriter &w, const Shape &shape, int &gradientCount)
+{
+    const std::vector<contour::Ring> rings = contour::rings(shape);
+    const bool under = shape.style().contour && shape.style().contour->direction == Contour::Direction::Outside;
+    if (under)
+        writeContourRings(w, rings);
+    writeShapeElement(w, shape, gradientCount);
+    if (!under)
+        writeContourRings(w, rings);
+}
+
+void writeShapeElement(QXmlStreamWriter &w, const Shape &shape, int &gradientCount)
 {
     // A gradient is written right before the element that uses it.
     QString gradientId;
@@ -1174,10 +1241,12 @@ void applyEffects(Shape &shape, const QXmlStreamAttributes &attributes, ReadRepo
         ++report.skippedElements[QCoreApplication::translate("SvgIO", "filter effect (shown without it)")];
     if (!transparency && attributes.hasAttribute(QStringLiteral("mask")))
         ++report.skippedElements[QCoreApplication::translate("SvgIO", "mask (shown without it)")];
-    if (!shadow && !transparency)
+    const auto contour = parseContour(attributes.value(ns, QStringLiteral("contour")));
+    if (!shadow && !transparency && !contour)
         return;
     style.shadow = shadow;
     style.transparency = transparency;
+    style.contour = contour;
     shape.setStyle(style);
 }
 

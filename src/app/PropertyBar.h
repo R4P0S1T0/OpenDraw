@@ -67,6 +67,7 @@ private:
     void createEffectFields();
     void refreshEffects();
     void applyShadow(const std::function<void(DropShadow &)> &change);
+    void applyContour(const std::function<void(Contour &)> &change);
     void applyTransparency();
 
     Document *m_document;
@@ -90,6 +91,12 @@ private:
     QList<QAction *> m_transparencyActions;
     QList<QAction *> m_blendActions;
     QSpinBox *m_blendSteps;
+    QList<QAction *> m_contourActions;
+    QComboBox *m_contourDirection;
+    QSpinBox *m_contourSteps;
+    QDoubleSpinBox *m_contourOffset;
+    QToolButton *m_contourFill;
+    QToolButton *m_contourStroke;
     CanvasWidget *m_canvas = nullptr;
     bool m_updatingEffects = false;
     QDoubleSpinBox *m_shadowX;

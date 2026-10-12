@@ -469,6 +469,19 @@ void draw(QPainter &p, Icon id, const QColor &ink, const QColor &accent, const Q
         }
         break;
     }
+    case Icon::Contour: {
+        // Rounded squares one inside the other.
+        p.setBrush(Qt::NoBrush);
+        for (int i = 0; i < 3; ++i) {
+            QColor shade = i == 2 ? accent : ink;
+            if (i == 1)
+                shade.setAlpha(150);
+            p.setPen(QPen(shade, 1.3));
+            const double inset = 3 + i * 3.5;
+            p.drawRoundedRect(QRectF(inset, inset, 24 - 2 * inset, 24 - 2 * inset), 4 - i, 4 - i);
+        }
+        break;
+    }
     case Icon::FillNone:
         p.drawRect(QRectF(4, 4, 16, 16));
         p.setPen(QPen(QColor(0xd0, 0x30, 0x30), 1.8, Qt::SolidLine, Qt::RoundCap));

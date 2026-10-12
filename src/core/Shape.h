@@ -64,6 +64,18 @@ struct DropShadow {
     bool operator==(const DropShadow &) const = default;
 };
 
+// Rings drawn around (or inside) an object, each `offset` further from its outline, with
+// colours running from the object's own to `fill` and `stroke` at the last ring.
+struct Contour {
+    enum class Direction { Outside, Inside, ToCenter }; // ToCenter: inside, as many rings as fit
+    Direction direction = Direction::Outside;
+    int steps = 3;
+    double offset = 8.0; // document units between rings
+    QColor fill = QColor(255, 255, 255);
+    QColor stroke = QColor(0, 0, 0);
+    bool operator==(const Contour &) const = default;
+};
+
 // How the ends of open outlines and dashes look (SVG stroke-linecap).
 enum class LineCap { Butt, Round, Square };
 // How outlines turn at corners (SVG stroke-linejoin).
@@ -94,6 +106,7 @@ struct Style {
     // Transparency that changes across the object (as the fill's gradient does): the alpha of
     // each stop's colour is how solid the object is there (255 = solid, 0 = invisible).
     std::optional<Gradient> transparency;
+    std::optional<Contour> contour;
 
     bool hasFill() const { return pattern.has_value() || gradient.has_value() || fill.alpha() > 0; }
     bool hasStroke() const { return stroke.alpha() > 0 && strokeWidth > 0.0; }

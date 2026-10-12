@@ -11,6 +11,10 @@
 // they follow any change to either end.
 namespace opendraw::blend {
 
+// The colour a fraction `t` of the way from `a` to `b`. A fully transparent end takes the
+// other's hue, so fading in or out does not pass through grey.
+QColor mix(const QColor &a, const QColor &b, double t);
+
 // Rectangles, ellipses, curves and texts can blend; groups and bitmaps cannot.
 bool canBlend(const Shape &shape);
 

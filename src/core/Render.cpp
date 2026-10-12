@@ -1,5 +1,6 @@
 #include "core/Render.h"
 
+#include "core/ContourEffect.h"
 #include "core/Document.h"
 #include "core/Shape.h"
 #include "core/TextLayout.h"
@@ -177,6 +178,24 @@ double outlineReach(const Style &style)
     if (style.startArrow == Arrowhead::None && style.endArrow == Arrowhead::None)
         return style.strokeWidth;
     return std::max(style.strokeWidth, 2.2 * arrowUnit(style.strokeWidth));
+}
+
+QRectF paintedBounds(const Shape &shape)
+{
+    if (shape.kind() == ShapeKind::Group) {
+        QRectF united;
+        for (const auto &child : shape.children())
+            united = united.isNull() ? paintedBounds(*child) : united.united(paintedBounds(*child));
+        return united;
+    }
+    const Style &style = shape.style();
+    const double reach = std::max(outlineReach(style), contour::reach(style)); // generous for miters
+    QRectF area = shape.bounds().adjusted(-reach, -reach, reach, reach);
+    if (style.shadow) {
+        const double blur = std::max(style.shadow->blur, 0.0) * 1.5;
+        area = area.united(area.translated(style.shadow->offset).adjusted(-blur, -blur, blur, blur));
+    }
+    return area;
 }
 
 namespace {
@@ -398,10 +417,24 @@ void paintShape(QPainter &painter, const Shape &shape)
     const Style &style = shape.style();
     painter.save();
     painter.setOpacity(painter.opacity() * std::clamp(style.opacity, 0.0, 1.0));
+    // Contour rings: outside ones under the object, inside ones over it.
+    const std::vector<contour::Ring> rings = contour::rings(shape);
+    auto paintRings = [&] {
+        for (const contour::Ring &ring : rings) {
+            painter.setPen(outlinePen(ring.style));
+            painter.setBrush(ring.style.fill.alpha() > 0 ? QBrush(ring.style.fill) : QBrush(Qt::NoBrush));
+            painter.drawPath(ring.path);
+        }
+    };
+    const bool ringsUnder = style.contour && style.contour->direction == Contour::Direction::Outside;
+    if (ringsUnder)
+        paintRings();
     if (style.shadow || style.transparency)
         paintWithEffects(painter, shape);
     else
         paintBody(painter, shape);
+    if (!ringsUnder)
+        paintRings();
     painter.restore();
 }
 

@@ -35,6 +35,9 @@ QPainterPath arrowheadPath(Arrowhead type, const QPointF &end, const QPointF &di
 QPainterPath arrowheads(const Shape &shape);
 // How far the outline, arrowheads included, can reach outside the shape's bounds.
 double outlineReach(const Style &style);
+// The part of the page a shape paints on: its bounds grown by the outline, arrowheads,
+// contour rings and shadow.
+QRectF paintedBounds(const Shape &shape);
 
 void paintShape(QPainter &painter, const Shape &shape);
 // Every visible layer of the page, bottom to top.

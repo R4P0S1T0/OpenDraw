@@ -324,6 +324,43 @@ void PropertyBar::createEffectFields()
     m_transparencyEnd = addIntField(tr("End"), tr("Transparency where the gradient ends"), 0, 100, m_transparencyActions);
     m_transparencyStart->setSuffix(QStringLiteral(" %"));
     m_transparencyEnd->setSuffix(QStringLiteral(" %"));
+    // Contour tool
+    m_contourDirection = new QComboBox(this);
+    m_contourDirection->addItems({tr("Outside"), tr("Inside"), tr("To center")});
+    m_contourDirection->setToolTip(tr("Where the contour rings go"));
+    m_contourActions << addWidget(m_contourDirection);
+    m_contourSteps = addIntField(tr("Steps"), tr("Number of contour rings"), 1, 100, m_contourActions);
+    m_contourOffset = addField(tr("Offset"), tr("Distance between contour rings"), 0.0, m_contourActions);
+    m_contourFill = addButton(QIcon(), tr("Fill colour of the last ring"), m_contourActions);
+    m_contourStroke = addButton(QIcon(), tr("Outline colour of the last ring"), m_contourActions);
+    QToolButton *noContour = addButton(icon(Icon::FillNone), tr("Remove the contour"), m_contourActions);
+    connect(m_contourDirection, &QComboBox::activated, this, [this](int index) {
+        applyContour([index](Contour &c) { c.direction = Contour::Direction(index); });
+    });
+    connect(m_contourSteps, &QSpinBox::editingFinished, this, [this] {
+        const int steps = m_contourSteps->value();
+        applyContour([steps](Contour &c) { c.steps = steps; });
+    });
+    connect(m_contourOffset, &QDoubleSpinBox::editingFinished, this, [this] {
+        const double offset = units().fromDisplay(m_contourOffset->value());
+        applyContour([offset](Contour &c) { c.offset = offset; });
+    });
+    for (QToolButton *button : {m_contourFill, m_contourStroke}) {
+        connect(button, &QToolButton::clicked, this, [this, button] {
+            const bool fill = button == m_contourFill;
+            const Contour current = m_canvas ? m_canvas->currentStyle().contour.value_or(Contour{}) : Contour{};
+            const QColor color = QColorDialog::getColor(fill ? current.fill : current.stroke, this, button->toolTip(),
+                                                        QColorDialog::ShowAlphaChannel);
+            if (color.isValid())
+                applyContour([color, fill](Contour &c) { (fill ? c.fill : c.stroke) = color; });
+        });
+    }
+    connect(noContour, &QToolButton::clicked, this, [this] {
+        if (m_canvas)
+            m_canvas->restyle(tr("Remove contour"), [](Style &s) { s.contour.reset(); });
+        refreshEffects();
+    });
+
     // Blend tool: steps of new blends and of the selected one.
     m_blendSteps = addIntField(tr("Steps"), tr("Number of shapes between the two ends of the blend"), 1, 999,
                                m_blendActions);
@@ -361,6 +398,18 @@ void PropertyBar::applyShadow(const std::function<void(DropShadow &)> &change)
         DropShadow shadow = style.shadow.value_or(DropShadow{});
         change(shadow);
         style.shadow = shadow;
+    });
+    refreshEffects();
+}
+
+void PropertyBar::applyContour(const std::function<void(Contour &)> &change)
+{
+    if (!m_canvas || m_updatingEffects)
+        return;
+    m_canvas->restyle(tr("Contour"), [&change](Style &style) {
+        Contour contour = style.contour.value_or(Contour{});
+        change(contour);
+        style.contour = contour;
     });
     refreshEffects();
 }
@@ -436,6 +485,17 @@ void PropertyBar::refreshEffects()
     m_transparencyStart->setValue(start);
     m_transparencyEnd->setValue(end);
     m_transparencyEnd->setEnabled(type >= 2);
+
+    const Contour contour = style.contour.value_or(Contour{});
+    m_contourDirection->setCurrentIndex(int(contour.direction));
+    m_contourSteps->setValue(contour.steps);
+    m_contourSteps->setEnabled(contour.direction != Contour::Direction::ToCenter);
+    setValueQuietly(m_contourOffset, units().toDisplay(contour.offset));
+    for (auto [button, color] : {std::pair{m_contourFill, contour.fill}, std::pair{m_contourStroke, contour.stroke}}) {
+        QPixmap swatch(28, 16);
+        swatch.fill(color.alpha() > 0 ? QColor(color.red(), color.green(), color.blue()) : QColor(Qt::white));
+        button->setIcon(QIcon(swatch));
+    }
 
     const Shape *selected = m_canvas->selectedShape();
     m_blendSteps->setValue(selected && selected->isBlend() ? selected->blendSteps() : m_toolSettings.blendSteps);
@@ -517,6 +577,8 @@ QList<QAction *> *PropertyBar::toolGroup()
         return &m_transparencyActions;
     case CanvasWidget::Tool::Blend:
         return &m_blendActions;
+    case CanvasWidget::Tool::Contour:
+        return &m_contourActions;
     default:
         return nullptr;
     }
@@ -546,13 +608,13 @@ void PropertyBar::updateMode()
     QList<QAction *> *tool = toolGroup();
     // These tools act on the selection, so their options show with it.
     const bool always = tool == &m_eyedropperActions || tool == &m_shadowActions || tool == &m_transparencyActions
-                        || tool == &m_blendActions;
+                        || tool == &m_blendActions || tool == &m_contourActions;
     const bool showTool = tool && (always || !m_anySelected);
     const bool showObject = m_anySelected && !always;
     const bool showPage = !m_anySelected && !showTool;
     for (QList<QAction *> *group : {&m_rectangleToolActions, &m_polygonActions, &m_starActions, &m_spiralActions,
                                     &m_graphActions, &m_eyedropperActions, &m_shadowActions, &m_transparencyActions,
-                                    &m_blendActions}) {
+                                    &m_blendActions, &m_contourActions}) {
         for (QAction *action : std::as_const(*group))
             action->setVisible(showTool && group == tool);
     }
@@ -574,7 +636,8 @@ void PropertyBar::updateUnits()
 {
     const QString suffix = QLatin1Char(' ') + units().suffix();
     for (QDoubleSpinBox *box : {m_pageWidth, m_pageHeight, m_nudge, m_duplicateX, m_duplicateY, m_x, m_y, m_width,
-                                m_height, m_outline, m_cornerRadius, m_newCornerRadius, m_shadowX, m_shadowY, m_shadowBlur}) {
+                                m_height, m_outline, m_cornerRadius, m_newCornerRadius, m_shadowX, m_shadowY, m_shadowBlur,
+                                m_contourOffset}) {
         box->setSuffix(suffix);
         box->setDecimals(units().decimals());
     }

@@ -1,6 +1,7 @@
 #include "ExportImageDialog.h"
 
 #include "core/Document.h"
+#include "core/Render.h"
 #include "core/Shape.h"
 
 #include <QCheckBox>
@@ -66,10 +67,12 @@ exporter::ImageOptions ExportImageDialog::options() const
     if (m_selectedOnly->isChecked()) {
         options.shapes = m_selection;
         QRectF area;
-        for (const Shape *shape : m_selection)
-            area = area.isNull() ? shape->bounds() : area.united(shape->bounds());
-        // A little margin so outlines are not cut off at the edge.
-        const double margin = 2.0;
+        for (const Shape *shape : m_selection) {
+            const QRectF painted = render::paintedBounds(*shape);
+            area = area.isNull() ? painted : area.united(painted);
+        }
+        // A little margin for antialiased edges.
+        const double margin = 1.0;
         options.area = area.adjusted(-margin, -margin, margin, margin);
     }
     return options;

@@ -671,7 +671,8 @@ void MainWindow::createToolbox(QMenu *toolsMenu)
     m_toolbox->addAction(makeAction({CanvasWidget::Tool::Text, Icon::Text, tr("Text"), QKeySequence(Qt::Key_F8)}));
     m_toolbox->addSeparator();
     addFlyout({{CanvasWidget::Tool::DropShadow, Icon::Shadow, tr("Drop Shadow"), QKeySequence()},
-               {CanvasWidget::Tool::Blend, Icon::Blend, tr("Blend"), QKeySequence()}});
+               {CanvasWidget::Tool::Blend, Icon::Blend, tr("Blend"), QKeySequence()},
+               {CanvasWidget::Tool::Contour, Icon::Contour, tr("Contour"), QKeySequence(Qt::CTRL | Qt::Key_F9)}});
     m_toolbox->addAction(makeAction({CanvasWidget::Tool::Transparency, Icon::Transparency, tr("Transparency"), QKeySequence()}));
     m_toolbox->addAction(
         makeAction({CanvasWidget::Tool::Eyedropper, Icon::Eyedropper, tr("Color Eyedropper"), QKeySequence(Qt::Key_I)}));
@@ -866,6 +867,9 @@ QString MainWindow::toolHint() const
         return tr("Drag across an object: solid where you start, transparent where you end; drag the squares to adjust");
     case CanvasWidget::Tool::Blend:
         return tr("Drag from one object to another to blend them; click a blend to change its steps on the property bar");
+    case CanvasWidget::Tool::Contour:
+        return tr("Drag from an object outwards for rings around it, or inwards for rings inside it; the property bar "
+                  "sets their number, spacing and colours");
     case CanvasWidget::Tool::Eyedropper:
         return m_canvas->eyedropperColor()
                    ? tr("Click inside an object to fill it, on its outline to colour the outline; Shift+click or Esc "

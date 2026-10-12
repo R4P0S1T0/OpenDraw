@@ -19,16 +19,9 @@ double lerp(double a, double b, double t)
     return a + (b - a) * t;
 }
 
-// A colour that is fully transparent takes the other's hue, so fading in does not pass
-// through grey.
-QColor lerp(QColor a, QColor b, double t)
+QColor lerp(const QColor &a, const QColor &b, double t)
 {
-    if (a.alpha() == 0 && b.alpha() > 0)
-        a = QColor(b.red(), b.green(), b.blue(), 0);
-    if (b.alpha() == 0 && a.alpha() > 0)
-        b = QColor(a.red(), a.green(), a.blue(), 0);
-    return QColor::fromRgbF(float(lerp(a.redF(), b.redF(), t)), float(lerp(a.greenF(), b.greenF(), t)),
-                            float(lerp(a.blueF(), b.blueF(), t)), float(lerp(a.alphaF(), b.alphaF(), t)));
+    return mix(a, b, t);
 }
 
 double distance(const QPointF &a, const QPointF &b)
@@ -210,6 +203,17 @@ Style blendStyles(const Style &a, const Style &b, double t)
 }
 
 } // namespace
+
+QColor mix(const QColor &from, const QColor &to, double t)
+{
+    QColor a = from, b = to;
+    if (a.alpha() == 0 && b.alpha() > 0)
+        a = QColor(b.red(), b.green(), b.blue(), 0);
+    if (b.alpha() == 0 && a.alpha() > 0)
+        b = QColor(a.red(), a.green(), a.blue(), 0);
+    return QColor::fromRgbF(float(lerp(a.redF(), b.redF(), t)), float(lerp(a.greenF(), b.greenF(), t)),
+                            float(lerp(a.blueF(), b.blueF(), t)), float(lerp(a.alphaF(), b.alphaF(), t)));
+}
 
 bool canBlend(const Shape &shape)
 {

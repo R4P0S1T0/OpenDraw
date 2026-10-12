@@ -565,6 +565,18 @@ void CanvasWidget::applyEffectDrag(const QPointF &documentPosition, Qt::Keyboard
             DropShadow shadow = before.shadow.value_or(DropShadow{});
             shadow.offset = delta;
             style.shadow = shadow;
+        } else if (m_tool == Tool::Contour) {
+            // Out of the object: rings outside, as far as the pointer; into it: rings inside.
+            Contour c = before.contour.value_or(Contour{});
+            const bool inside = leaf->path().contains(m_dragStart + delta);
+            if (!inside)
+                c.direction = Contour::Direction::Outside;
+            else if (c.direction == Contour::Direction::Outside)
+                c.direction = Contour::Direction::Inside;
+            const double extent = std::hypot(delta.x(), delta.y());
+            const int rings = c.direction == Contour::Direction::ToCenter ? 1 : std::max(c.steps, 1);
+            c.offset = std::max(extent / rings, 0.5);
+            style.contour = c;
         } else {
             Gradient g = before.transparency.value_or(Gradient{});
             if (!before.transparency || g.stops.size() < 2) {
@@ -585,7 +597,9 @@ void CanvasWidget::commitEffectDrag()
 {
     if (m_effectBefore.empty())
         return;
-    const QString text = m_tool == Tool::DropShadow ? tr("Drop shadow") : tr("Transparency");
+    const QString text = m_tool == Tool::DropShadow ? tr("Drop shadow")
+                         : m_tool == Tool::Contour  ? tr("Contour")
+                                                    : tr("Transparency");
     m_undoStack->beginMacro(text);
     for (const auto &[leaf, before] : m_effectBefore) {
         const Style after = leaf->style();
@@ -630,7 +644,7 @@ int CanvasWidget::transparencyHandleAt(const QPointF &widgetPosition) const
 void CanvasWidget::paintEffectHandles(QPainter &painter)
 {
     // A line from where the drag started, while dragging a shadow or a blend.
-    if ((m_drag == Drag::Effect && m_tool == Tool::DropShadow) || m_drag == Drag::Blend) {
+    if ((m_drag == Drag::Effect && m_tool != Tool::Transparency) || m_drag == Drag::Blend) {
         painter.setPen(QPen(palette().color(QPalette::Highlight), 1, Qt::DashLine));
         painter.drawLine(toWidget(m_dragStart), toWidget(m_cursor));
     }
@@ -2291,6 +2305,7 @@ void CanvasWidget::mousePressEvent(QMouseEvent *event)
         break;
 
     case Tool::DropShadow:
+    case Tool::Contour:
     case Tool::Transparency: {
         if (const int handle = transparencyHandleAt(pos); handle >= 0) {
             m_effectHandle = handle;

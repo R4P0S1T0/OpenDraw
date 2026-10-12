@@ -245,6 +245,10 @@
         <translation>Sombra</translation>
     </message>
     <message>
+        <source>Contour</source>
+        <translation>Contorno concêntrico</translation>
+    </message>
+    <message>
         <source>Transparency</source>
         <translation>Transparência</translation>
     </message>
@@ -1007,6 +1011,10 @@ Clique esquerdo: preenchimento · Clique direito: contorno</translation>
         <translation>Mistura</translation>
     </message>
     <message>
+        <source>Contour</source>
+        <translation>Contorno concêntrico</translation>
+    </message>
+    <message>
         <source>Transparency</source>
         <translation>Transparência</translation>
     </message>
@@ -1137,6 +1145,10 @@ Clique esquerdo: preenchimento · Clique direito: contorno</translation>
     <message>
         <source>Drag from one object to another to blend them; click a blend to change its steps on the property bar</source>
         <translation>Arraste de um objeto até outro para misturá-los; clique numa mistura para mudar os passos na barra de propriedades</translation>
+    </message>
+    <message>
+        <source>Drag from an object outwards for rings around it, or inwards for rings inside it; the property bar sets their number, spacing and colours</source>
+        <translation>Arraste de um objeto para fora para criar anéis em volta dele, ou para dentro para anéis internos; a barra de propriedades define quantidade, espaçamento e cores</translation>
     </message>
     <message>
         <source>Click inside an object to fill it, on its outline to colour the outline; Shift+click or Esc picks another colour</source>
@@ -2156,8 +2168,52 @@ Clique esquerdo: preenchimento · Clique direito: contorno</translation>
         <translation>Transparência onde o degradê termina</translation>
     </message>
     <message>
+        <source>Outside</source>
+        <translation>Para fora</translation>
+    </message>
+    <message>
+        <source>Inside</source>
+        <translation>Para dentro</translation>
+    </message>
+    <message>
+        <source>To center</source>
+        <translation>Até o centro</translation>
+    </message>
+    <message>
+        <source>Where the contour rings go</source>
+        <translation>Para onde vão os anéis do contorno concêntrico</translation>
+    </message>
+    <message>
         <source>Steps</source>
         <translation>Passos</translation>
+    </message>
+    <message>
+        <source>Number of contour rings</source>
+        <translation>Número de anéis</translation>
+    </message>
+    <message>
+        <source>Offset</source>
+        <translation>Distância</translation>
+    </message>
+    <message>
+        <source>Distance between contour rings</source>
+        <translation>Distância entre os anéis</translation>
+    </message>
+    <message>
+        <source>Fill colour of the last ring</source>
+        <translation>Cor de preenchimento do último anel</translation>
+    </message>
+    <message>
+        <source>Outline colour of the last ring</source>
+        <translation>Cor do contorno do último anel</translation>
+    </message>
+    <message>
+        <source>Remove the contour</source>
+        <translation>Remover o contorno concêntrico</translation>
+    </message>
+    <message>
+        <source>Remove contour</source>
+        <translation>Remover contorno concêntrico</translation>
     </message>
     <message>
         <source>Number of shapes between the two ends of the blend</source>
@@ -2170,6 +2226,10 @@ Clique esquerdo: preenchimento · Clique direito: contorno</translation>
     <message>
         <source>Drop shadow</source>
         <translation>Sombra</translation>
+    </message>
+    <message>
+        <source>Contour</source>
+        <translation>Contorno concêntrico</translation>
     </message>
 </context>
 <context>

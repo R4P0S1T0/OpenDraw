@@ -5,6 +5,8 @@ add_library(opendraw_core STATIC
     Blend.h
     Commands.cpp
     Commands.h
+    ContourEffect.cpp
+    ContourEffect.h
     Document.cpp
     Document.h
     Export.cpp
