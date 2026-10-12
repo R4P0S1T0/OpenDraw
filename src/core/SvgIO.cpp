@@ -612,6 +612,17 @@ void writeShapeElement(QXmlStreamWriter &w, const Shape &shape, int &gradientCou
         const TextFormat &f = data.format;
         const QPointF origin = shape.textOrigin();
         const QString ns = QString::fromLatin1(kNamespace);
+        // Text on a curve: the curve goes first, for <textPath> to refer to.
+        const bool onPath = data.path && !data.isParagraph();
+        QString curveId;
+        if (onPath) {
+            curveId = QStringLiteral("textpath%1").arg(++gradientCount);
+            w.writeStartElement(QStringLiteral("defs"));
+            w.writeEmptyElement(QStringLiteral("path"));
+            w.writeAttribute(QStringLiteral("id"), curveId);
+            w.writeAttribute(QStringLiteral("d"), pathops::toSvg(data.path->curve));
+            w.writeEndElement();
+        }
         w.writeStartElement(QStringLiteral("text"));
         writeLabel(w, shape.name());
         w.writeAttribute(QStringLiteral("xml:space"), QStringLiteral("preserve"));
@@ -646,9 +657,74 @@ void writeShapeElement(QXmlStreamWriter &w, const Shape &shape, int &gradientCou
                              QStringLiteral("%1 %2 %3 %4").arg(number(origin.x()), number(origin.y()),
                                                                number(data.frame.width()), number(data.frame.height())));
         }
+        if (onPath)
+            w.writeAttribute(ns, QStringLiteral("text-path"), number(data.path->offset));
         const std::vector<CharFormat> formats = richtext::perCharacter(data);
         const bool autoFormatting = w.autoFormatting();
-        for (const textlayout::Line &line : textlayout::layout(data, origin).lines) {
+        // Characters [from, to), parts in their own format as nested spans.
+        auto writeRuns = [&](int from, int to) {
+            for (int i = from; i < to;) {
+                int j = i + 1;
+                while (j < to && formats[j] == formats[i])
+                    ++j;
+                const QString chars = data.text.mid(i, j - i);
+                const CharFormat &c = formats[i];
+                if (c.isEmpty()) {
+                    w.writeCharacters(chars);
+                } else {
+                    w.writeStartElement(QStringLiteral("tspan"));
+                    if (c.family)
+                        w.writeAttribute(QStringLiteral("font-family"), *c.family);
+                    if (c.size)
+                        w.writeAttribute(QStringLiteral("font-size"), number(*c.size));
+                    if (c.bold)
+                        w.writeAttribute(QStringLiteral("font-weight"), *c.bold ? QStringLiteral("bold") : QStringLiteral("normal"));
+                    if (c.italic)
+                        w.writeAttribute(QStringLiteral("font-style"), *c.italic ? QStringLiteral("italic") : QStringLiteral("normal"));
+                    if (c.color)
+                        writePaint(w, QStringLiteral("fill"), *c.color, true);
+                    w.writeCharacters(chars);
+                    w.writeEndElement();
+                }
+                i = j;
+            }
+        };
+        const textlayout::Layout layout = textlayout::layout(data, origin);
+        if (onPath) {
+            // Each line along the curve (SVG <textPath>), the ones after the first lowered.
+            const double length = pathops::toPainterPath(data.path->curve).length();
+            double anchor = data.path->offset;
+            if (f.align == TextAlign::Center)
+                anchor += length / 2.0;
+            else if (f.align == TextAlign::Right)
+                anchor += length;
+            if (data.path->curve.size() == 1 && data.path->curve.front().closed && length > 0.0) {
+                // SVG does not go round a closed path: start on it.
+                anchor = std::fmod(anchor, length);
+                if (anchor < 0.0)
+                    anchor += length;
+            }
+            for (std::size_t i = 0; i < layout.lines.size(); ++i) {
+                const textlayout::Line &line = layout.lines[i];
+                w.writeStartElement(QStringLiteral("textPath"));
+                w.writeAttribute(kXlinkNamespace, QStringLiteral("href"), QLatin1Char('#') + curveId);
+                w.writeAttribute(QStringLiteral("startOffset"), number(anchor));
+                w.setAutoFormatting(false);
+                if (i > 0) {
+                    w.writeStartElement(QStringLiteral("tspan"));
+                    w.writeAttribute(QStringLiteral("dy"),
+                                     number(line.baselineStart.y() - layout.lines.front().baselineStart.y()));
+                }
+                writeRuns(line.start, line.start + int(line.text.size()));
+                if (i > 0)
+                    w.writeEndElement();
+                w.writeEndElement();
+                w.setAutoFormatting(autoFormatting);
+            }
+            w.writeEndElement();
+            return;
+        }
+        for (const textlayout::Line &line : layout.lines) {
             // Artistic text lines share the origin; paragraph lines are placed one by one (the
             // indents and the frame decide where each goes).
             double anchorX = origin.x();
@@ -670,32 +746,7 @@ void writeShapeElement(QXmlStreamWriter &w, const Shape &shape, int &gradientCou
             w.setAutoFormatting(false);
             // A wrapped line keeps its trailing spaces, so the paragraph can be put back together.
             const int end = line.softBreak ? line.next : line.start + int(line.text.size());
-            for (int i = line.start; i < end;) {
-                int j = i + 1;
-                while (j < end && formats[j] == formats[i])
-                    ++j;
-                const QString chars = data.text.mid(i, j - i);
-                const CharFormat &c = formats[i];
-                if (c.isEmpty()) {
-                    w.writeCharacters(chars);
-                } else {
-                    // Parts of the text in their own format.
-                    w.writeStartElement(QStringLiteral("tspan"));
-                    if (c.family)
-                        w.writeAttribute(QStringLiteral("font-family"), *c.family);
-                    if (c.size)
-                        w.writeAttribute(QStringLiteral("font-size"), number(*c.size));
-                    if (c.bold)
-                        w.writeAttribute(QStringLiteral("font-weight"), *c.bold ? QStringLiteral("bold") : QStringLiteral("normal"));
-                    if (c.italic)
-                        w.writeAttribute(QStringLiteral("font-style"), *c.italic ? QStringLiteral("italic") : QStringLiteral("normal"));
-                    if (c.color)
-                        writePaint(w, QStringLiteral("fill"), *c.color, true);
-                    w.writeCharacters(chars);
-                    w.writeEndElement();
-                }
-                i = j;
-            }
+            writeRuns(line.start, end);
             w.writeEndElement();
             w.setAutoFormatting(autoFormatting);
         }
@@ -1059,6 +1110,7 @@ struct PatternDef {
 struct PaintServers {
     GradientDefs gradients;
     QHash<QString, PatternDef> patterns;
+    QHash<QString, QString> paths; // path data of <path> elements with an id (for <textPath>)
 };
 
 // Uncompressed 32-bit BMPs often carry alpha in the fourth byte (libcdr writes bitmaps that
@@ -1148,6 +1200,10 @@ PaintServers collectPaintServers(const QByteArray &data)
         if (!r.isStartElement())
             continue;
         const QXmlStreamAttributes a = r.attributes();
+        if (r.name() == u"path" && a.hasAttribute(QStringLiteral("id"))) {
+            servers.paths.insert(a.value(QStringLiteral("id")).toString(), a.value(QStringLiteral("d")).toString());
+            continue;
+        }
         if (r.name() == u"pattern") {
             currentPattern = a.value(QStringLiteral("id")).toString();
             PatternDef def;
@@ -1463,7 +1519,7 @@ struct SpanValues {
 // Each <tspan> with its own y or dy starts a new line (unless OpenDraw marked the line before
 // as wrapped); nested <tspan>s give parts of the text their own font, size and colour.
 std::unique_ptr<Shape> readText(QXmlStreamReader &r, const Properties &props, const Context &context,
-                                ReadReport &report)
+                                const QHash<QString, QString> &curves, ReadReport &report)
 {
     const QXmlStreamAttributes attributes = r.attributes();
     std::optional<double> x = firstNumber(attributes.value(QStringLiteral("x")));
@@ -1489,11 +1545,32 @@ std::unique_ptr<Shape> readText(QXmlStreamReader &r, const Properties &props, co
     RichString current;
     std::vector<double> lineBaselines;
     bool previousSoft = false; // the previous line was wrapped: the next one continues it
+    std::optional<TextPath> textPath; // from the first <textPath>
+    std::optional<double> startOffset;
     while (!spans.empty() && !r.atEnd()) {
         r.readNext();
         if (r.isStartElement()) {
             const QXmlStreamAttributes a = r.attributes();
             spans.push_back(spans.back().with(a));
+            if (r.name() == u"textPath" && !textPath) {
+                QString href = a.value(kXlinkNamespace, QStringLiteral("href")).toString();
+                if (href.isEmpty())
+                    href = a.value(QStringLiteral("href")).toString();
+                if (href.startsWith(QLatin1Char('#'))) {
+                    if (auto curve = pathops::fromSvg(curves.value(href.mid(1))); curve && !curve->empty()) {
+                        textPath = TextPath{*curve, 0.0};
+                        const QString offset = a.value(QStringLiteral("startOffset")).toString().trimmed();
+                        const double length = pathops::toPainterPath(*curve).length();
+                        if (offset.endsWith(QLatin1Char('%')))
+                            startOffset = offset.chopped(1).toDouble() / 100.0 * length;
+                        else if (!offset.isEmpty())
+                            startOffset = parseLength(offset);
+                    }
+                }
+                if (!textPath)
+                    ++report.skippedElements[QCoreApplication::translate("SvgIO", "text on a missing path (shown straight)")];
+                continue;
+            }
             if (r.name() != u"tspan")
                 continue;
             const auto tx = firstNumber(a.value(QStringLiteral("x")));
@@ -1595,6 +1672,22 @@ std::unique_ptr<Shape> readText(QXmlStreamReader &r, const Properties &props, co
     if (paragraph) {
         position = QPointF(frame[0], frame[1]);
         text.frame = QSizeF(frame[2], frame[3]);
+    } else if (textPath) {
+        // OpenDraw's own offset, or SVG's startOffset (where the anchor of the line sits).
+        bool hasOwn = false;
+        const double own = attributes.value(ns, QStringLiteral("text-path")).toDouble(&hasOwn);
+        if (hasOwn) {
+            textPath->offset = own;
+        } else {
+            const double length = pathops::toPainterPath(textPath->curve).length();
+            double offset = startOffset.value_or(0.0);
+            if (format.align == TextAlign::Center)
+                offset -= length / 2.0;
+            else if (format.align == TextAlign::Right)
+                offset -= length;
+            textPath->offset = offset;
+        }
+        text.path = textPath;
     }
     if (t.type() > QTransform::TxScale) {
         // Rotated or skewed: the text keeps its own size and position, turned by the transform.
@@ -1607,6 +1700,10 @@ std::unique_ptr<Shape> readText(QXmlStreamReader &r, const Properties &props, co
     text.format.firstIndent *= scale;
     text.format.leftIndent *= scale;
     text.format.rightIndent *= scale;
+    if (text.path) {
+        pathops::transform(text.path->curve, t);
+        text.path->offset *= scale;
+    }
     for (TextRun &run : text.runs) {
         if (run.format.size)
             *run.format.size *= scale;
@@ -1912,7 +2009,7 @@ bool read(QIODevice *device, Document &document, QString *errorMessage, ReadRepo
                     guides.push_back({Qt::Horizontal, point.y()});
             }
         } else if (name == u"text" && context.rendering) {
-            if (auto text = readText(r, props, context, localReport)) {
+            if (auto text = readText(r, props, context, paintServers.paths, localReport)) {
                 applyFillPaint(*text, props, context.transform, paintServers, localReport);
                 text->setName(attributes.value(QString::fromLatin1(kInkscapeNamespace), QStringLiteral("label")).toString());
                 applyEffects(*text, attributes, localReport);

@@ -133,6 +133,7 @@ private slots:
     void envelopeToolBendsObjects();
     void extrudeToolGivesDepth();
     void smartFillToolMakesAreas();
+    void textFitsToPathAndBack();
     void textToolDrawsParagraphFrames();
     void formatPartOfAText();
     void shadowAndTransparencyTools();
@@ -1055,6 +1056,38 @@ void CanvasTests::mainWindowWorkspace()
         canvas->fitPage();
         QTest::qWait(150);
         QVERIFY(window.grab().save(dir + QStringLiteral("/window-extrude.png")));
+
+        // Text round a circle and along a wave; a smart-filled overlap.
+        canvas->selectAll();
+        canvas->deleteSelection();
+        Style ring;
+        ring.fill = Qt::transparent;
+        ring.stroke = QColor(0x90, 0xa4, 0xae);
+        Shape *circleGuide = doc->insertShape(-1, std::make_unique<Shape>(ShapeKind::Ellipse, QRectF(160, 160, 420, 420), ring));
+        TextData round{QStringLiteral("OpenDraw · open source · vector editor"), {}};
+        round.format.size = 34;
+        round.format.bold = true;
+        Style letters;
+        letters.fill = QColor(0x1e, 0x88, 0xe5);
+        letters.stroke = Qt::transparent;
+        Shape *roundText = doc->insertShape(-1, std::make_unique<Shape>(round, QPointF(0, 0), letters));
+        canvas->setSelection({roundText, circleGuide});
+        canvas->fitTextToPath();
+        SubPath wave;
+        wave.nodes = {PathNode{{120, 820}, {120, 820}, {260, 700}}, PathNode{{420, 820}, {300, 940}, {540, 700}},
+                      PathNode{{680, 820}, {560, 940}, {680, 820}}};
+        Shape *waveGuide = doc->insertShape(-1, std::make_unique<Shape>(PathData{wave}, ring));
+        TextData along{QStringLiteral("Text follows any curve"), {}};
+        along.format.size = 40;
+        letters.fill = QColor(0xe5, 0x39, 0x35);
+        Shape *waveText = doc->insertShape(-1, std::make_unique<Shape>(along, QPointF(0, 0), letters));
+        canvas->setSelection({waveText, waveGuide});
+        canvas->fitTextToPath();
+        canvas->setTool(CanvasWidget::Tool::Text);
+        canvas->setSelection({});
+        canvas->fitPage();
+        QTest::qWait(150);
+        QVERIFY(window.grab().save(dir + QStringLiteral("/window-textpath.png")));
         theme::apply(ColorScheme::Light);
     }
 }
@@ -1493,6 +1526,32 @@ void CanvasTests::smartFillToolMakesAreas()
     QCOMPARE(m_undo->index(), before);
     QCOMPARE(m_doc->count(), 2);
     m_canvas->setTool(CanvasWidget::Tool::Select);
+}
+
+void CanvasTests::textFitsToPathAndBack()
+{
+    Shape *circle = m_doc->insertShape(-1, std::make_unique<Shape>(ShapeKind::Ellipse, QRectF(100, 100, 200, 200)));
+    Shape *text = m_doc->insertShape(-1, std::make_unique<Shape>(TextData{QStringLiteral("Around the circle"), {}},
+                                                                 QPointF(400, 400), Style{}));
+    const int before = m_undo->index();
+    m_canvas->setSelection({text, circle});
+    m_canvas->fitTextToPath();
+    QVERIFY(text->textData().path);
+    QCOMPARE(m_canvas->selectedShape(), text);
+    // The letters now sit on the circle, not where the text was.
+    // Centred on top of the circle, reading clockwise.
+    const QRectF placed = text->bounds();
+    QVERIFY(QRectF(60, 60, 280, 280).contains(placed));
+    QVERIFY(placed.top() < 100 && placed.bottom() < 220);
+    QVERIFY(std::abs(placed.center().x() - 200) < 15);
+    m_canvas->straightenText();
+    QCOMPARE(m_doc->count(), 2);
+    Shape *straight = m_canvas->selectedShape();
+    QVERIFY(straight && straight->kind() == ShapeKind::Text && !straight->textData().path);
+    while (m_undo->index() > before)
+        m_undo->undo();
+    QVERIFY(!text->textData().path);
+    QCOMPARE(text->textOrigin(), QPointF(400, 400));
 }
 
 void CanvasTests::textToolDrawsParagraphFrames()

@@ -1,5 +1,6 @@
 #include "core/TextLayout.h"
 
+#include "core/PathOps.h"
 #include "core/RichText.h"
 
 #include <QFont>
@@ -166,6 +167,81 @@ double xAt(Measurer &measure, const QString &text, const Line &line, int index)
            + line.wordSpacing * countSpaces(text, line.start, index);
 }
 
+// Text fitted to a curve: maps positions along a line (distance from its start, height below
+// its baseline) onto the page, bending the line along the curve. Past the ends of the curve
+// the text carries on straight.
+class OnPath {
+public:
+    OnPath(const TextData &text, const Layout &layout)
+        : m_guide(pathops::toPainterPath(text.path->curve))
+        , m_length(m_guide.length())
+        , m_offset(text.path->offset)
+        , m_align(text.format.align)
+        , m_firstBaseline(layout.lines.front().baselineStart.y())
+        , m_closed(text.path->curve.size() == 1 && text.path->curve.front().closed)
+    {
+    }
+
+    // From the start of `line` and its baseline to the page.
+    QTransform at(const Line &line, double along, double below = 0.0) const
+    {
+        double start = m_offset;
+        if (m_align == TextAlign::Center)
+            start += (m_length - line.width) / 2.0;
+        else if (m_align == TextAlign::Right)
+            start += m_length - line.width;
+        double s = start + along;
+        if (m_closed && m_length > 0.0) {
+            // Round and round a closed curve.
+            s = std::fmod(s, m_length);
+            if (s < 0.0)
+                s += m_length;
+        }
+        const double clamped = std::clamp(s, 0.0, m_length);
+        const double t = m_length > 0.0 ? m_guide.percentAtLength(clamped) : 0.0;
+        const QPointF a = m_guide.pointAtPercent(std::max(t - 1e-4, 0.0));
+        const QPointF b = m_guide.pointAtPercent(std::min(t + 1e-4, 1.0));
+        const double angle = QLineF(a, b).length() > 0.0 ? std::atan2(b.y() - a.y(), b.x() - a.x()) : 0.0;
+        const QPointF direction(std::cos(angle), std::sin(angle));
+        const QPointF point = m_guide.pointAtPercent(t) + direction * (s - clamped);
+        QTransform transform;
+        transform.translate(point.x(), point.y());
+        transform.rotateRadians(angle);
+        transform.translate(0.0, line.baselineStart.y() - m_firstBaseline + below);
+        return transform;
+    }
+
+private:
+    QPainterPath m_guide;
+    double m_length;
+    double m_offset;
+    TextAlign m_align;
+    double m_firstBaseline;
+    bool m_closed;
+};
+
+// Every drawn character of a text on a curve: its index, the line, where it starts along the
+// line, its width and its format.
+template<typename F>
+void forEachCharacter(const TextData &text, const Layout &layout, Measurer &measure, F &&f)
+{
+    for (const Line &line : layout.lines) {
+        for (const Piece &piece : line.pieces) {
+            for (int c = piece.start; c < piece.start + piece.length; ++c) {
+                const double x = piece.x - line.baselineStart.x() + measure.advance(piece.start, c);
+                f(c, line, x, measure.advance(c, c + 1), piece);
+            }
+        }
+    }
+    Q_UNUSED(text);
+}
+
+// The box of one character, bent onto the curve.
+QPolygonF characterCell(const OnPath &onPath, const Line &line, double x, double width)
+{
+    return onPath.at(line, x).map(QPolygonF(QRectF(0.0, -line.ascent, width, line.ascent + line.descent)));
+}
+
 } // namespace
 
 Layout layout(const TextData &text, const QPointF &origin)
@@ -308,6 +384,15 @@ Layout layout(const TextData &text, const QPointF &origin)
     result.descent = result.lines.front().descent;
     if (paragraph)
         result.bounds = QRectF(origin, QSizeF(frameWidth, std::max(text.frame.height(), 1.0)));
+    if (text.path && !paragraph) {
+        // On a curve: around the bent characters (or where the first one would go).
+        const OnPath onPath(text, result);
+        QRectF box = characterCell(onPath, result.lines.front(), 0.0, result.lines.front().ascent * 0.3).boundingRect();
+        forEachCharacter(text, result, measure, [&](int, const Line &line, double x, double width, const Piece &) {
+            box = box.united(characterCell(onPath, line, x, width).boundingRect());
+        });
+        result.bounds = box;
+    }
     return result;
 }
 
@@ -315,6 +400,26 @@ std::vector<ColoredPath> coloredOutline(const TextData &text, const QPointF &ori
 {
     const Layout l = layout(text, origin);
     std::vector<ColoredPath> result;
+    auto partFor = [&result](const std::optional<QColor> &color) {
+        auto it = std::find_if(result.begin(), result.end(), [&](const ColoredPath &c) { return c.color == color; });
+        if (it == result.end())
+            it = result.insert(result.end(), ColoredPath{QPainterPath(), color});
+        return it;
+    };
+    if (text.path && !text.isParagraph()) {
+        // Letter by letter, each turned to follow the curve.
+        Measurer measure(text);
+        const OnPath onPath(text, l);
+        forEachCharacter(text, l, measure, [&](int c, const Line &line, double x, double, const Piece &piece) {
+            if (text.text[c].isSpace())
+                return;
+            QPainterPath glyph;
+            glyph.addText(0, 0, referenceFont(piece.format), text.text.mid(c, 1));
+            const double scale = piece.format.size / kReferencePixelSize;
+            partFor(piece.color)->path.addPath((QTransform::fromScale(scale, scale) * onPath.at(line, x)).map(glyph));
+        });
+        return result;
+    }
     for (const Line &line : l.lines) {
         if (line.hidden)
             continue;
@@ -364,6 +469,15 @@ std::vector<QRectF> selectionRects(const TextData &text, const QPointF &origin, 
         return rects;
     Measurer measure(text);
     const Layout l = layout(text, origin);
+    if (text.path && !text.isParagraph()) {
+        // On a curve: around each selected letter.
+        const OnPath onPath(text, l);
+        forEachCharacter(text, l, measure, [&](int c, const Line &line, double x, double width, const Piece &) {
+            if (c >= start && c < end)
+                rects.push_back(characterCell(onPath, line, x, width).boundingRect());
+        });
+        return rects;
+    }
     for (const Line &line : l.lines) {
         if (line.hidden)
             continue;
@@ -391,6 +505,11 @@ QLineF caret(const TextData &text, const QPointF &origin, int index)
     index = std::clamp(index, 0, int(text.text.size()));
     const Line &line = l.lines[lineOf(l, index)];
     const int inLine = std::clamp(index, line.start, line.start + int(line.text.size()));
+    if (text.path && !text.isParagraph()) {
+        // Across the curve where the letter starts.
+        const QTransform at = OnPath(text, l).at(line, measure.advance(line.start, inLine));
+        return QLineF(at.map(QPointF(0, -line.ascent)), at.map(QPointF(0, line.descent)));
+    }
     const double x = xAt(measure, text.text, line, inLine);
     const double y = line.baselineStart.y();
     return QLineF(x, y - line.ascent, x, y + line.descent);
@@ -400,6 +519,24 @@ int indexAt(const TextData &text, const QPointF &origin, const QPointF &point)
 {
     Measurer measure(text);
     const Layout l = layout(text, origin);
+    if (text.path && !text.isParagraph()) {
+        // On a curve: the caret position nearest to the point.
+        const OnPath onPath(text, l);
+        int index = 0;
+        double nearest = 1e300;
+        for (const Line &line : l.lines) {
+            for (int k = 0; k <= int(line.text.size()); ++k) {
+                const QTransform at = onPath.at(line, measure.advance(line.start, line.start + k));
+                const QPointF middle = at.map(QPointF(0, (line.descent - line.ascent) / 2.0));
+                const double d = QLineF(middle, point).length();
+                if (d < nearest) {
+                    nearest = d;
+                    index = line.start + k;
+                }
+            }
+        }
+        return index;
+    }
     // The line whose band holds the point, or the nearest one.
     const Line *best = &l.lines.front();
     double bestDistance = 1e300;

@@ -294,6 +294,10 @@ void Shape::transform(const QTransform &t)
         } else {
             m_textOrigin = t.map(m_textOrigin);
         }
+        if (m_text.path) {
+            pathops::transform(m_text.path->curve, t);
+            m_text.path->offset *= scale;
+        }
         break;
     }
     }

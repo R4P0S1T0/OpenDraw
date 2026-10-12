@@ -730,6 +730,76 @@ void CanvasWidget::dragEnvelopeHandle(const QPointF &documentPosition)
     m_document->notifyShapeChanged(shape);
 }
 
+void CanvasWidget::fitTextToPath()
+{
+    finishTextEdit();
+    if (m_selection.size() != 2)
+        return;
+    Shape *text = m_selection[0]->kind() == ShapeKind::Text ? m_selection[0] : m_selection[1];
+    Shape *guide = text == m_selection[0] ? m_selection[1] : m_selection[0];
+    if (text->kind() != ShapeKind::Text || guide->kind() == ShapeKind::Group || guide->kind() == ShapeKind::Image
+        || guide->kind() == ShapeKind::Text)
+        return;
+    // The curve in the text's own coordinates (a turned text keeps its turn).
+    PathData curve = pathops::fromPainterPath(text->shapeTransform().inverted().map(guide->path()));
+    if (curve.empty())
+        return;
+    TextData data = text->textData();
+    data.frame = QSizeF(); // paragraph text becomes artistic text on the curve
+    double offset = 0.0;
+    if (curve.size() == 1 && curve.front().closed) {
+        // Round a closed shape: clockwise from its top, the text centred there (upright on top).
+        SubPath &ring = curve.front();
+        double area = 0.0;
+        for (std::size_t i = 0; i < ring.nodes.size(); ++i) {
+            const QPointF &p = ring.nodes[i].point, &q = ring.nodes[(i + 1) % ring.nodes.size()].point;
+            area += p.x() * q.y() - q.x() * p.y();
+        }
+        if (area < 0) { // counter-clockwise on screen
+            std::reverse(ring.nodes.begin(), ring.nodes.end());
+            for (PathNode &node : ring.nodes)
+                std::swap(node.in, node.out);
+        }
+        const auto top = std::min_element(ring.nodes.begin(), ring.nodes.end(), [](const PathNode &a, const PathNode &b) {
+            return a.point.y() < b.point.y();
+        });
+        std::rotate(ring.nodes.begin(), top, ring.nodes.end());
+        if (data.format.align == TextAlign::Left || data.format.align == TextAlign::Justify)
+            offset = -textlayout::layout(data, text->textOrigin()).lines.front().width / 2.0;
+    }
+    data.path = TextPath{std::move(curve), offset};
+    m_undoStack->push(new SetTextCommand(m_document, text, text->textData(), data, tr("Fit text to path")));
+    setSelectedShape(text);
+}
+
+void CanvasWidget::straightenText()
+{
+    finishTextEdit();
+    std::vector<Shape *> texts;
+    for (Shape *shape : m_selection) {
+        if (shape->kind() == ShapeKind::Text && shape->textData().path)
+            texts.push_back(shape);
+    }
+    if (texts.empty())
+        return;
+    std::vector<Shape *> straightened;
+    m_undoStack->beginMacro(tr("Straighten text"));
+    for (Shape *shape : texts) {
+        // The text goes back to a straight line starting where the curve started.
+        TextData data = shape->textData();
+        const QPointF start = data.path->curve.front().nodes.front().point;
+        data.path.reset();
+        auto straight = std::make_unique<Shape>(std::move(data), start, shape->style());
+        straight->setShapeTransform(shape->shapeTransform());
+        straight->setName(shape->name());
+        auto *command = new ReplaceShapeCommand(m_document, shape, std::move(straight), tr("Straighten text"));
+        straightened.push_back(command->newShape());
+        m_undoStack->push(command);
+    }
+    m_undoStack->endMacro();
+    setSelection(std::move(straightened));
+}
+
 void CanvasWidget::smartFill(const QPointF &documentPosition)
 {
     if (!m_document->activeLayer()->isEditable())

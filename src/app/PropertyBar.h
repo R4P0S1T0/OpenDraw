@@ -82,6 +82,8 @@ private:
     QList<QAction *> m_objectActions;
     QList<QAction *> m_cornerActions; // rectangles only, part of the object actions
     QList<QAction *> m_lineActions;   // curves only (arrowheads), part of the object actions
+    QList<QAction *> m_textPathActions; // texts on curves only, part of the object actions
+    QDoubleSpinBox *m_textPathOffset;
     QComboBox *m_startArrow;
     QComboBox *m_endArrow;
     QList<QAction *> m_rectangleToolActions;

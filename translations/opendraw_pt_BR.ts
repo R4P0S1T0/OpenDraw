@@ -211,6 +211,10 @@
         <translation>marcador (desenhado como ponta de seta triangular)</translation>
     </message>
     <message>
+        <source>text on a missing path (shown straight)</source>
+        <translation>texto num caminho inexistente (mostrado reto)</translation>
+    </message>
+    <message>
         <source>Layer</source>
         <translation>Camada</translation>
     </message>
@@ -263,6 +267,14 @@
     <message>
         <source>Transparency</source>
         <translation>Transparência</translation>
+    </message>
+    <message>
+        <source>Fit text to path</source>
+        <translation>Ajustar texto ao caminho</translation>
+    </message>
+    <message>
+        <source>Straighten text</source>
+        <translation>Endireitar texto</translation>
     </message>
     <message>
         <source>Smart fill</source>
@@ -909,6 +921,14 @@ Clique esquerdo: preenchimento · Clique direito: contorno</translation>
     <message>
         <source>&amp;Convert to Paragraph/Artistic Text</source>
         <translation>&amp;Converter em texto de parágrafo/artístico</translation>
+    </message>
+    <message>
+        <source>&amp;Fit Text to Path</source>
+        <translation>&amp;Ajustar texto ao caminho</translation>
+    </message>
+    <message>
+        <source>&amp;Straighten Text</source>
+        <translation>&amp;Endireitar texto</translation>
     </message>
     <message>
         <source>&amp;Tools</source>
@@ -2038,6 +2058,14 @@ Clique esquerdo: preenchimento · Clique direito: contorno</translation>
     <message>
         <source>Corner radius of the rectangle</source>
         <translation>Raio dos cantos do retângulo</translation>
+    </message>
+    <message>
+        <source>Distance of the text from the start of its curve</source>
+        <translation>Distância do texto até o início da curva</translation>
+    </message>
+    <message>
+        <source>Text offset</source>
+        <translation>Deslocamento do texto</translation>
     </message>
     <message>
         <source>Angle</source>

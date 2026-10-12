@@ -109,6 +109,20 @@ PropertyBar::PropertyBar(Document *document, QUndoStack *undoStack, QWidget *par
     m_cornerActions << addSeparator();
     m_cornerRadius = addField(tr("Corners"), tr("Corner radius of the rectangle"), 0.0, m_cornerActions);
     m_objectActions << m_cornerActions;
+    m_textPathActions << addSeparator();
+    m_textPathOffset = addField(tr("Offset"), tr("Distance of the text from the start of its curve"), -kMaxDisplay,
+                                m_textPathActions);
+    m_objectActions << m_textPathActions;
+    connect(m_textPathOffset, &QDoubleSpinBox::editingFinished, this, [this] {
+        if (!m_shape || m_shape->kind() != ShapeKind::Text || !m_shape->textData().path)
+            return;
+        TextData data = m_shape->textData();
+        const double offset = units().fromDisplay(m_textPathOffset->value());
+        if (std::abs(offset - data.path->offset) < 1e-6)
+            return;
+        data.path->offset = offset;
+        m_undoStack->push(new SetTextCommand(m_document, m_shape, m_shape->textData(), data, tr("Text offset")));
+    });
     m_objectActions << addSeparator();
     m_objectActions << addSeparator();
     m_angle = addField(tr("Angle"), tr("Rotation angle (degrees, clockwise)"), -360.0, m_objectActions);
@@ -750,6 +764,9 @@ void PropertyBar::updateMode()
     const bool curve = m_shape && m_shape->kind() == ShapeKind::Path;
     for (QAction *action : std::as_const(m_lineActions))
         action->setVisible(showObject && curve);
+    const bool textOnPath = m_shape && m_shape->kind() == ShapeKind::Text && m_shape->textData().path;
+    for (QAction *action : std::as_const(m_textPathActions))
+        action->setVisible(showObject && textOnPath);
     refresh();
 }
 
@@ -759,7 +776,7 @@ void PropertyBar::updateUnits()
     const QString suffix = QLatin1Char(' ') + units().suffix();
     for (QDoubleSpinBox *box : {m_pageWidth, m_pageHeight, m_nudge, m_duplicateX, m_duplicateY, m_x, m_y, m_width,
                                 m_height, m_outline, m_cornerRadius, m_newCornerRadius, m_shadowX, m_shadowY, m_shadowBlur,
-                                m_contourOffset, m_extrudeX, m_extrudeY}) {
+                                m_contourOffset, m_extrudeX, m_extrudeY, m_textPathOffset}) {
         box->setSuffix(suffix);
         box->setDecimals(units().decimals());
     }
@@ -835,6 +852,8 @@ void PropertyBar::refresh()
     setValueQuietly(m_angle, m_shownAngle);
     if (m_shape->kind() == ShapeKind::Rectangle)
         setValueQuietly(m_cornerRadius, units().toDisplay(m_shape->cornerRadius()));
+    if (m_shape->kind() == ShapeKind::Text && m_shape->textData().path)
+        setValueQuietly(m_textPathOffset, units().toDisplay(m_shape->textData().path->offset));
     const QSignalBlocker b1(m_startArrow), b2(m_endArrow);
     m_startArrow->setCurrentIndex(m_startArrow->findData(int(m_shape->style().startArrow)));
     m_endArrow->setCurrentIndex(m_endArrow->findData(int(m_shape->style().endArrow)));

@@ -509,6 +509,9 @@ void MainWindow::createActions()
     });
     textMenu->addAction(tr("&Convert to Paragraph/Artistic Text"), QKeySequence(Qt::CTRL | Qt::Key_F8), m_canvas,
                         &CanvasWidget::convertTextKind);
+    textMenu->addSeparator();
+    textMenu->addAction(tr("&Fit Text to Path"), m_canvas, &CanvasWidget::fitTextToPath);
+    textMenu->addAction(tr("&Straighten Text"), m_canvas, &CanvasWidget::straightenText);
 
     // Tools
     QMenu *toolsMenu = menuBar()->addMenu(tr("&Tools"));

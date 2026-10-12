@@ -37,6 +37,8 @@ private slots:
     void indentsMoveAndNarrowLines();
     void paragraphSpacing();
     void paragraphFormatSurvivesSvg();
+    void textFollowsItsCurve();
+    void textOnCurveSurvivesSvg();
 };
 
 void TextTests::boundsGrowWithText()
@@ -288,6 +290,93 @@ void TextTests::paragraphFormatSurvivesSvg()
     const TextData &read = loaded.shapes()[0]->textData();
     QCOMPARE(read.text, data.text);
     QVERIFY(read.format.sameParagraphFormat(data.format));
+}
+
+namespace {
+TextData onLine(const QString &text, const QPointF &from, const QPointF &to, double offset = 0.0)
+{
+    TextData data{text, {}};
+    data.format.size = 20;
+    SubPath line;
+    line.nodes = {PathNode::corner(from), PathNode::corner(to)};
+    data.path = TextPath{{line}, offset};
+    return data;
+}
+} // namespace
+
+void TextTests::textFollowsItsCurve()
+{
+    // Along a horizontal line: like a straight text whose baseline is the line.
+    const TextData flat = onLine(QStringLiteral("Wave"), {0, 100}, {300, 100}, 10);
+    const QRectF glyphs = textlayout::outline(flat, {}).boundingRect();
+    QVERIFY(glyphs.left() >= 10 && glyphs.left() < 14);
+    QVERIFY(glyphs.top() < 90 && glyphs.bottom() <= 101);
+    QVERIFY(textlayout::layout(flat, {}).bounds.contains(glyphs));
+    // Down a vertical line: the letters turn, so the text is tall and narrow.
+    const TextData down = onLine(QStringLiteral("Wave"), {200, 0}, {200, 300});
+    const QRectF turned = textlayout::outline(down, {}).boundingRect();
+    QVERIFY(turned.height() > 2 * turned.width());
+    QVERIFY(turned.left() >= 199 && turned.right() < 230); // turned clockwise: the tops face right
+    // The caret runs along the curve, across it.
+    const QLineF start = textlayout::caret(down, {}, 0);
+    QVERIFY(std::abs(start.p1().y() - start.p2().y()) < 1e-6); // horizontal: across a vertical line
+    QVERIFY(std::abs(start.p2().y()) < 1e-6);
+    const QLineF third = textlayout::caret(down, {}, 2);
+    QVERIFY(third.p1().y() > 10);
+    QCOMPARE(textlayout::indexAt(down, {}, (third.p1() + third.p2()) / 2 + QPointF(0, 1)), 2);
+    QCOMPARE(textlayout::selectionRects(down, {}, 0, 2).size(), std::size_t(2));
+    // Centred: the text sits around the middle of the curve.
+    TextData centred = flat;
+    centred.path->offset = 0;
+    centred.format.align = TextAlign::Center;
+    QVERIFY(std::abs(textlayout::outline(centred, {}).boundingRect().center().x() - 150) < 3);
+    // Moving and scaling the text moves its curve.
+    Shape shape(flat, QPointF(0, 100), Style{});
+    const QRectF before = shape.bounds();
+    shape.transform(QTransform::fromTranslate(0, 50));
+    QVERIFY(std::abs(shape.bounds().top() - (before.top() + 50)) < 1e-6);
+    shape.transform(QTransform::fromScale(2, 2));
+    QCOMPARE(shape.textData().path->offset, 20.0);
+}
+
+void TextTests::textOnCurveSurvivesSvg()
+{
+    Document doc;
+    SubPath arc;
+    arc.nodes = {PathNode::corner({0, 200}), PathNode{{300, 200}, {200, 0}, {300, 200}}};
+    arc.nodes[0].out = {100, 0};
+    TextData data{QStringLiteral("Round and round"), {}};
+    data.path = TextPath{{arc}, 12.5};
+    doc.insertShape(-1, std::make_unique<Shape>(data, QPointF(0, 200), Style{QColor(Qt::black), {}, 0}));
+    QBuffer buffer;
+    QVERIFY(buffer.open(QIODevice::ReadWrite));
+    QVERIFY(svg::write(doc, &buffer));
+    QVERIFY(buffer.data().contains("<textPath"));
+    buffer.seek(0);
+    Document copy;
+    QVERIFY(svg::read(&buffer, copy));
+    QCOMPARE(copy.count(), 1);
+    const TextData &read = copy.shapes()[0]->textData();
+    QCOMPARE(read.text, data.text);
+    QVERIFY(read.path);
+    QCOMPARE(read.path->offset, 12.5);
+    QCOMPARE(read.path->curve.front().nodes.back().point, QPointF(300, 200));
+
+    // Another program's <textPath>, centred on the middle of its path.
+    QByteArray other(R"svg(<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+        <defs><path id="p" d="M 0 50 L 200 50"/></defs>
+        <text font-size="10" text-anchor="middle"><textPath xlink:href="#p" startOffset="50%">Hello</textPath></text>
+        </svg>)svg");
+    QBuffer in(&other);
+    in.open(QIODevice::ReadOnly);
+    Document foreign;
+    QVERIFY(svg::read(&in, foreign));
+    QCOMPARE(foreign.count(), 1);
+    const TextData &hello = foreign.shapes()[0]->textData();
+    QCOMPARE(hello.text, QStringLiteral("Hello"));
+    QVERIFY(hello.path);
+    QVERIFY(std::abs(hello.path->offset) < 1e-6);
+    QCOMPARE(hello.format.align, TextAlign::Center);
 }
 
 QTEST_MAIN(TextTests)

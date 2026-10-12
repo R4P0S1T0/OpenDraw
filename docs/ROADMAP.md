@@ -50,7 +50,7 @@ Rough order of work. Items move as contributors pick them up.
 - [x] Paragraph text frames: wrapping, reflow on resize, hidden overflow, conversion to and from artistic text; frames and paragraph breaks recovered from CorelDRAW files
 - [x] Per-character formatting: font, size, bold, italic and colour for selected parts of a text (selection with Shift+arrows, mouse, double-click, Ctrl+A), saved as nested tspans; mixed sizes and colours read from CorelDRAW files
 - [x] Paragraph formatting: justification, space before and after paragraphs, first-line, left and right indents (Properties docker › Paragraph, Text › Paragraph Formatting, Ctrl+T); justified lines saved with SVG word-spacing
-- [ ] Text on a path
+- [x] Text on a path: Text › Fit Text to Path (round closed shapes clockwise from the top, centred), Straighten Text, offset on the property bar; caret, selection and clicks follow the curve; saved as SVG `<textPath>`, which is also read from other programs
 - [x] Layers (visible, locked, rename, reorder, move objects between layers) and multiple pages (tabs, Layout menu, PgUp/PgDn); Inkscape layers import; one PDF page per page
 
 ## 0.4 — No more locked files

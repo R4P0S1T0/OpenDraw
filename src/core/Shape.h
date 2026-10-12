@@ -229,6 +229,15 @@ struct TextRun {
     bool operator==(const TextRun &) const = default;
 };
 
+// The curve an artistic text follows ("fit text to path"): the first baseline runs along it,
+// starting `offset` from its start (the alignment shifts the text along it the way it shifts
+// a line); further lines run below it. In the same coordinates as the text's origin.
+struct TextPath {
+    PathData curve;
+    double offset = 0.0;
+    bool operator==(const TextPath &) const = default;
+};
+
 // Content of a text object.
 struct TextData {
     QString text; // paragraphs (artistic text: lines) separated by '\n'
@@ -238,6 +247,8 @@ struct TextData {
     QSizeF frame;
     // Formatting of parts of the text, sorted and not overlapping (see core/RichText.h).
     std::vector<TextRun> runs;
+    // Set for text fitted to a curve (never for paragraph text).
+    std::optional<TextPath> path;
 
     bool isParagraph() const { return frame.width() > 0.0; }
     bool operator==(const TextData &) const = default;

@@ -148,6 +148,10 @@ public slots:
     void breakBlendApart();
     // Takes the envelope off the selected objects.
     void removeEnvelope();
+    // With a text and another object selected, the text follows that object's outline.
+    void fitTextToPath();
+    // Selected texts on curves go back to straight lines.
+    void straightenText();
     void orderToFront();
     void orderToBack();
     void orderForwardOne();
