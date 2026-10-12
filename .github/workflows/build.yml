@@ -147,6 +147,16 @@ jobs:
     permissions:
       contents: write
     steps:
+      # Release notes written for the tag, if any: docs/release-notes/<tag>.md.
+      - uses: actions/checkout@v4
+        with:
+          path: source
+
+      - name: Release notes
+        run: |
+          notes="source/docs/release-notes/${GITHUB_REF_NAME}.md"
+          if [ -f "$notes" ]; then cp "$notes" notes.md; else : > notes.md; fi
+
       - uses: actions/download-artifact@v4
         with:
           merge-multiple: true
@@ -156,5 +166,6 @@ jobs:
           files: |
             OpenDraw-*.AppImage
             OpenDraw-*.zip
+          body_path: notes.md
           prerelease: ${{ startsWith(github.ref_name, 'v0.') }}
           generate_release_notes: true

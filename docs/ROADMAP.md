@@ -39,7 +39,7 @@ Rough order of work. Items move as contributors pick them up.
 - [ ] More languages (see CONTRIBUTING.md › Translations)
 - [ ] Keep unsupported SVG elements when saving, so round-tripping a newer file loses nothing
 
-## 0.3 — Real drawings (current)
+## 0.3 — Real drawings
 
 - [x] Paths: Bézier and freehand tools, node editing (move, add, delete, smooth/corner handles)
 - [x] Convert rectangles and ellipses to curves
@@ -55,7 +55,7 @@ Rough order of work. Items move as contributors pick them up.
 - [x] Text on a path: Text › Fit Text to Path (round closed shapes clockwise from the top, centred), Straighten Text, offset on the property bar; caret, selection and clicks follow the curve; saved as SVG `<textPath>`, which is also read from other programs
 - [x] Layers (visible, locked, rename, reorder, move objects between layers) and multiple pages (tabs, Layout menu, PgUp/PgDn); Inkscape layers import; one PDF page per page
 
-## 0.4 — No more locked files
+## 0.4 — No more locked files (current: 0.4.0-alpha)
 
 - [x] CorelDRAW (`.cdr`, `.cdt`) import through libcdr: all pages, curves, groups, colours, gradients, bitmaps and texture fills, text (checked against the 134 sample files shipped with CorelDRAW 2026; none fails)
 - [ ] CorelDRAW import gaps, in libcdr itself (it passes on no PowerClip, transparency effect, lens or paragraph formatting data): OpenDraw can show all of these, but cannot learn them from the files yet
@@ -70,6 +70,6 @@ Rough order of work. Items move as contributors pick them up.
 - [x] Interactive fill tool (G): gradients dragged on the canvas, any number of colours (double-click to add, palette to recolour, Delete to remove), linear or radial
 - [x] Mesh fill tool (M): a grid of colours blending smoothly, columns and rows on the property bar; saved as a picture for other programs and as the mesh for OpenDraw
 - Creating pattern fills, importing bitmaps from files; mesh nodes that can be moved
-- Effects (shadow, blend, contour)
+- Distort tool (push and pull, zipper, twister) and block shadow
 - Colour management (CMYK, ICC profiles)
 - Plugin / scripting API
