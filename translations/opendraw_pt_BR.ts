@@ -591,6 +591,10 @@ Clique esquerdo: preenchimento · Clique direito: contorno</translation>
         <translation>Salvar &amp;como…</translation>
     </message>
     <message>
+        <source>&amp;Close</source>
+        <translation>&amp;Fechar</translation>
+    </message>
+    <message>
         <source>&amp;Import…</source>
         <translation>&amp;Importar…</translation>
     </message>
@@ -951,6 +955,14 @@ Clique esquerdo: preenchimento · Clique direito: contorno</translation>
         <translation>&amp;Janela</translation>
     </message>
     <message>
+        <source>&amp;Next Drawing</source>
+        <translation>Próximo &amp;desenho</translation>
+    </message>
+    <message>
+        <source>&amp;Previous Drawing</source>
+        <translation>Desenho &amp;anterior</translation>
+    </message>
+    <message>
         <source>&amp;Help</source>
         <translation>Aj&amp;uda</translation>
     </message>
@@ -1129,6 +1141,10 @@ Clique esquerdo: preenchimento · Clique direito: contorno</translation>
     <message>
         <source>Outline colour (Shift+F12)</source>
         <translation>Cor do contorno (Shift+F12)</translation>
+    </message>
+    <message>
+        <source>Untitled-%1</source>
+        <translation>Sem título-%1</translation>
     </message>
     <message>
         <source>Untitled</source>

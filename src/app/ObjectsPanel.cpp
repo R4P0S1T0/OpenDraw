@@ -209,16 +209,34 @@ ObjectsPanel::ObjectsPanel(Document *document, QUndoStack *undoStack, CanvasWidg
         else
             updateButtons();
     });
-    auto schedule = [this] { m_refreshTimer->start(); };
-    connect(m_document, &Document::changed, this, schedule);
-    connect(m_document, &Document::structureChanged, this, schedule);
-    connect(m_document, &Document::currentPageChanged, this, schedule);
-    connect(m_document, &Document::cleared, this, schedule);
+    connectDocument();
     connect(m_canvas, &CanvasWidget::selectionChanged, this, [this] {
         syncSelectionFromCanvas();
         updateButtons();
     });
     refresh();
+}
+
+void ObjectsPanel::setDocument(Document *document, QUndoStack *undoStack)
+{
+    if (document == m_document && undoStack == m_undoStack)
+        return;
+    m_document->disconnect(this);
+    m_document = document;
+    m_undoStack = undoStack;
+    m_expanded.clear();
+    m_collapsed.clear();
+    connectDocument();
+    refresh();
+}
+
+void ObjectsPanel::connectDocument()
+{
+    auto schedule = [this] { m_refreshTimer->start(); };
+    connect(m_document, &Document::changed, this, schedule);
+    connect(m_document, &Document::structureChanged, this, schedule);
+    connect(m_document, &Document::currentPageChanged, this, schedule);
+    connect(m_document, &Document::cleared, this, schedule);
 }
 
 ObjectsPanel::Kind ObjectsPanel::kindOf(const QTreeWidgetItem *item)

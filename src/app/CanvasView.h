@@ -45,6 +45,8 @@ public:
 
     bool rulersVisible() const;
     void setRulersVisible(bool visible);
+    // Follows another open drawing.
+    void setDocument(Document *document);
 
 private:
     void syncScrollBars();

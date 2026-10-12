@@ -182,6 +182,16 @@ PropertiesPanel::PropertiesPanel(Document *document, CanvasWidget *canvas, QWidg
     refresh();
 }
 
+void PropertiesPanel::setDocument(Document *document)
+{
+    if (document == m_document)
+        return;
+    m_document->disconnect(this);
+    m_document = document;
+    connect(m_document, &Document::changed, this, &PropertiesPanel::refresh);
+    refresh();
+}
+
 void PropertiesPanel::showSection(Section section)
 {
     m_pages->setCurrentIndex(int(section));

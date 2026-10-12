@@ -230,9 +230,19 @@ CanvasView::CanvasView(CanvasWidget *canvas, Document *document, QWidget *parent
         m_verticalRuler->setCursorPosition(position.y());
     });
     connect(canvas, &CanvasWidget::viewChanged, this, &CanvasView::syncScrollBars);
-    connect(document, &Document::changed, this, &CanvasView::syncScrollBars);
+    connect(m_document, &Document::changed, this, &CanvasView::syncScrollBars);
     connect(m_horizontalBar, &QScrollBar::valueChanged, this, &CanvasView::scrolled);
     connect(m_verticalBar, &QScrollBar::valueChanged, this, &CanvasView::scrolled);
+    syncScrollBars();
+}
+
+void CanvasView::setDocument(Document *document)
+{
+    if (document == m_document)
+        return;
+    m_document->disconnect(this);
+    m_document = document;
+    connect(m_document, &Document::changed, this, &CanvasView::syncScrollBars);
     syncScrollBars();
 }
 

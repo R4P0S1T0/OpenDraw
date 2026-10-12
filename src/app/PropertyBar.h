@@ -38,6 +38,8 @@ public:
     void setEyedropperColor(const QColor &color);
     // The shadow and transparency options act on the canvas selection.
     void setCanvas(CanvasWidget *canvas);
+    // Follows another open drawing.
+    void setDocument(Document *document, QUndoStack *undoStack);
 
 signals:
     void mirrorRequested(Qt::Orientation orientation);

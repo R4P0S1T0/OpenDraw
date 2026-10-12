@@ -88,10 +88,25 @@ PageBar::PageBar(Document *document, QWidget *parent)
         remove->setEnabled(m_document->pageCount() > 1);
         menu.exec(m_tabs->mapToGlobal(pos));
     });
+    connectDocument();
+    sync();
+}
+
+void PageBar::setDocument(Document *document)
+{
+    if (document == m_document)
+        return;
+    m_document->disconnect(this);
+    m_document = document;
+    connectDocument();
+    sync();
+}
+
+void PageBar::connectDocument()
+{
     connect(m_document, &Document::structureChanged, this, &PageBar::sync);
     connect(m_document, &Document::currentPageChanged, this, &PageBar::sync);
     connect(m_document, &Document::cleared, this, &PageBar::sync);
-    sync();
 }
 
 void PageBar::sync()

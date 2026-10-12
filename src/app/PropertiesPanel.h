@@ -31,6 +31,9 @@ class PropertiesPanel : public QWidget {
 public:
     PropertiesPanel(Document *document, CanvasWidget *canvas, QWidget *parent = nullptr);
 
+    // Follows another open drawing.
+    void setDocument(Document *document);
+
     enum class Section { Outline, Fill, Transparency, Paragraph };
     void showSection(Section section);
 

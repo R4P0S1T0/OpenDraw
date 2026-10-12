@@ -24,7 +24,12 @@ signals:
     void renamePageRequested();
     void deletePageRequested();
 
+public:
+    // Shows the pages of another open drawing.
+    void setDocument(Document *document);
+
 private:
+    void connectDocument();
     void sync();
 
     Document *m_document;

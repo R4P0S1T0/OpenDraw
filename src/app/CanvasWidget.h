@@ -37,6 +37,10 @@ public:
     Tool tool() const { return m_tool; }
     void setTool(Tool tool);
 
+    // Shows and edits another drawing (one of several open ones), with its own undo history.
+    Document *document() const { return m_document; }
+    void setDocument(Document *document, QUndoStack *undoStack);
+
     // Top-level shapes, in the order they were selected.
     const std::vector<Shape *> &selection() const { return m_selection; }
     // The selected shape when exactly one is selected, otherwise nullptr.
@@ -219,6 +223,7 @@ private:
         bool isValid() const { return subpath >= 0 && node >= 0; }
     };
 
+    void connectDocument();
     void viewUpdated(bool zoomChanged);
     QPointF toDocument(const QPointF &widgetPosition) const;
     QPointF toWidget(const QPointF &documentPosition) const;

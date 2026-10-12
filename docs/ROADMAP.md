@@ -32,7 +32,7 @@ Rough order of work. Items move as contributors pick them up.
 - [x] Objects docker: pages, layers and objects as a tree, selection in both directions, renaming (object names saved as Inkscape labels), drag and drop to restack or change layers
 - [x] Properties docker: outline (colour, width, dashes, ends, corners), fill (none, uniform, linear, radial) and transparency, applied live; dashes, line ends and corners saved in SVG and read from other files
 - [x] Arrowheads (eight shapes, at either end, on the property bar and in the Properties docker), outline behind fill, scale outline with object; saved as SVG markers and `paint-order`, other programs' markers read as triangles
-- [ ] Several documents open at once (one tab each)
+- [x] Several drawings open at once, one tab each (own undo history, file and view; File › Close, Window › Next/Previous Drawing, Ctrl+Tab); opening a file that is already open shows its tab
 - [x] Translatable interface; Brazilian Portuguese translation, chosen from the system language or View › Language
 - [ ] More languages (see CONTRIBUTING.md › Translations)
 - [ ] Keep unsupported SVG elements when saving, so round-tripping a newer file loses nothing

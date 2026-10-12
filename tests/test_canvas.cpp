@@ -16,12 +16,14 @@
 #include "core/Document.h"
 #include "core/Export.h"
 #include "core/Extrude.h"
+#include "core/SvgIO.h"
 
 #include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QSpinBox>
 #include <QMouseEvent>
 #include <QSignalSpy>
+#include <QTabBar>
 #include <QToolBar>
 #include <QToolButton>
 #include <QTranslator>
@@ -134,6 +136,7 @@ private slots:
     void extrudeToolGivesDepth();
     void smartFillToolMakesAreas();
     void textFitsToPathAndBack();
+    void severalDrawingsInTabs();
     void textToolDrawsParagraphFrames();
     void formatPartOfAText();
     void shadowAndTransparencyTools();
@@ -1552,6 +1555,84 @@ void CanvasTests::textFitsToPathAndBack()
         m_undo->undo();
     QVERIFY(!text->textData().path);
     QCOMPARE(text->textOrigin(), QPointF(400, 400));
+}
+
+void CanvasTests::severalDrawingsInTabs()
+{
+    MainWindow window;
+    window.resize(1200, 800);
+    window.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
+    auto *canvas = window.findChild<CanvasWidget *>();
+    auto *tabs = window.findChild<QTabBar *>(QStringLiteral("documentTabs"));
+    QVERIFY(canvas && tabs);
+    auto action = [&window](const QKeySequence &keys) {
+        for (QAction *a : window.findChildren<QAction *>()) {
+            if (a->shortcut() == keys)
+                return a;
+        }
+        return static_cast<QAction *>(nullptr);
+    };
+    QAction *newDrawing = action(QKeySequence(QKeySequence::New));
+    QAction *undo = action(QKeySequence(QKeySequence::Undo));
+    QVERIFY(newDrawing && undo);
+
+    // Draw in the first drawing, then start a second one: it is empty and has its own tab.
+    Document *first = canvas->document();
+    canvas->setTool(CanvasWidget::Tool::Rectangle);
+    dragFromTo(canvas, {100, 100}, {200, 180});
+    QCOMPARE(first->count(), 1);
+    newDrawing->trigger();
+    QCOMPARE(window.documentCount(), 2);
+    QCOMPARE(tabs->count(), 2);
+    QCOMPARE(tabs->currentIndex(), 1);
+    Document *second = canvas->document();
+    QVERIFY(second != first);
+    QCOMPARE(second->count(), 0);
+    QVERIFY(tabs->tabText(0) != tabs->tabText(1)); // Untitled-1, Untitled-2
+    QVERIFY(!undo->isEnabled()); // nothing to undo in the new drawing
+
+    // Each drawing has its own undo history.
+    canvas->setTool(CanvasWidget::Tool::Ellipse);
+    dragFromTo(canvas, {100, 100}, {200, 180});
+    canvas->setTool(CanvasWidget::Tool::Ellipse);
+    dragFromTo(canvas, {300, 100}, {400, 180});
+    QCOMPARE(second->count(), 2);
+    tabs->setCurrentIndex(0);
+    QCOMPARE(canvas->document(), first);
+    undo->trigger();
+    QCOMPARE(first->count(), 0);
+    QCOMPARE(second->count(), 2);
+    window.activateDocument(1);
+    QCOMPARE(tabs->currentIndex(), 1);
+    undo->trigger();
+    QCOMPARE(second->count(), 1);
+
+    // Opening a file adds a tab; opening it again only shows it.
+    const QString path = QDir(QDir::tempPath()).filePath(QStringLiteral("opendraw-tabs-test.svg"));
+    {
+        Document saved;
+        saved.insertShape(-1, std::make_unique<Shape>(ShapeKind::Rectangle, QRectF(0, 0, 10, 10)));
+        saved.insertShape(-1, std::make_unique<Shape>(ShapeKind::Rectangle, QRectF(20, 0, 10, 10)));
+        saved.insertShape(-1, std::make_unique<Shape>(ShapeKind::Rectangle, QRectF(40, 0, 10, 10)));
+        QFile file(path);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        QVERIFY(svg::write(saved, &file));
+    }
+    QVERIFY(window.openFile(path));
+    QCOMPARE(window.documentCount(), 3);
+    QCOMPARE(canvas->document()->count(), 3);
+    QCOMPARE(tabs->tabText(2), QStringLiteral("opendraw-tabs-test.svg"));
+    window.activateDocument(0);
+    QVERIFY(window.openFile(path));
+    QCOMPARE(window.documentCount(), 3);
+    QCOMPARE(window.currentDocumentIndex(), 2);
+
+    // Closing an unchanged drawing just closes it.
+    QVERIFY(window.closeDocument(2));
+    QCOMPARE(window.documentCount(), 2);
+    QCOMPARE(tabs->count(), 2);
+    QFile::remove(path);
 }
 
 void CanvasTests::textToolDrawsParagraphFrames()

@@ -62,7 +62,31 @@ CanvasWidget::CanvasWidget(Document *document, QUndoStack *undoStack, QWidget *p
     setFocusPolicy(Qt::StrongFocus);
     setMouseTracking(true);
     setAttribute(Qt::WA_OpaquePaintEvent);
+    connectDocument();
+}
 
+void CanvasWidget::setDocument(Document *document, QUndoStack *undoStack)
+{
+    if (document == m_document && undoStack == m_undoStack)
+        return;
+    // Whatever was going on in the other drawing ends there.
+    finishTextEdit();
+    m_bezier = {};
+    m_freehand.clear();
+    m_drag = Drag::None;
+    m_blendStart = nullptr;
+    m_effectBefore.clear();
+    m_envelopeHandle = -1;
+    setSelection({});
+    m_document->disconnect(this);
+    m_document = document;
+    m_undoStack = undoStack;
+    connectDocument();
+    update();
+}
+
+void CanvasWidget::connectDocument()
+{
     connect(m_document, &Document::changed, this, qOverload<>(&QWidget::update));
     connect(m_document, &Document::shapeRemoved, this, [this](Shape *shape) {
         if (shape == m_editText && !m_pendingText) {

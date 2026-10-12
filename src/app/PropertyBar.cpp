@@ -271,6 +271,19 @@ PropertyBar::PropertyBar(Document *document, QUndoStack *undoStack, QWidget *par
     updateMode();
 }
 
+void PropertyBar::setDocument(Document *document, QUndoStack *undoStack)
+{
+    if (document == m_document && undoStack == m_undoStack)
+        return;
+    m_document->disconnect(this);
+    m_document = document;
+    m_undoStack = undoStack;
+    m_shape = nullptr;
+    m_anySelected = false;
+    connect(m_document, &Document::changed, this, &PropertyBar::refresh);
+    updateMode();
+}
+
 QDoubleSpinBox *PropertyBar::addField(const QString &label, const QString &toolTip, double minimum,
                                       QList<QAction *> &group)
 {

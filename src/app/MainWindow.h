@@ -3,8 +3,10 @@
 #include "core/Shape.h"
 
 #include <QMainWindow>
+#include <QPointF>
 
 #include <functional>
+#include <vector>
 
 class QAction;
 class QActionGroup;
@@ -17,6 +19,7 @@ class QTabBar;
 class QTimer;
 class QToolBar;
 class QToolButton;
+class QUndoGroup;
 class QUndoStack;
 
 namespace opendraw {
@@ -25,7 +28,9 @@ class CanvasView;
 class CanvasWidget;
 class ColorPalette;
 class Document;
+class ObjectsPanel;
 class PageBar;
+class PropertiesPanel;
 class PropertyBar;
 
 class MainWindow : public QMainWindow {
@@ -35,10 +40,19 @@ public:
     explicit MainWindow(QWidget *parent = nullptr);
     ~MainWindow() override;
 
+    // Opens a drawing in a tab of its own (or switches to it, if it is open already).
     bool openFile(const QString &path);
+    int documentCount() const { return int(m_documents.size()); }
+    int currentDocumentIndex() const { return m_current; }
 
 protected:
     void closeEvent(QCloseEvent *event) override;
+
+public slots:
+    // Shows one of the open drawings.
+    void activateDocument(int index);
+    // Closes a drawing (asking to save it first); false when the user cancelled.
+    bool closeDocument(int index);
 
 private slots:
     void newDocument();
@@ -79,12 +93,36 @@ private:
     void setFilePath(const QString &path) { setFilePath(path, path); }
     QString documentName() const;
     QString toolHint() const;
+    // Adds an open drawing (taking ownership) with a tab of its own; returns its index.
+    int addDocument(Document *document, QString filePath = QString(), QString sourcePath = QString());
+    // The connections this window keeps to the drawing shown.
+    void connectDocument();
+    // The drawing shown is a new, empty, unchanged one: opening a file can take its place.
+    bool currentIsPristine() const;
 
+    // Every open drawing, in the order of the tabs.
+    struct OpenDocument {
+        Document *document;
+        QUndoStack *undoStack;
+        QString filePath;
+        QString sourcePath;
+        double zoom = 0.0; // 0: never shown yet, the page is fitted to the window
+        QPointF pan;
+        int untitled = 0;  // numbers new drawings: "Untitled-1", "Untitled-2", ...
+    };
+    std::vector<OpenDocument> m_documents;
+    int m_current = 0;
+    int m_untitledCount = 0;
+    QUndoGroup *m_undoGroup;
+
+    // The drawing shown (one of m_documents).
     Document *m_document;
     QUndoStack *m_undoStack;
     CanvasWidget *m_canvas;
     CanvasView *m_canvasView = nullptr;
     PropertyBar *m_propertyBar = nullptr;
+    PropertiesPanel *m_propertiesPanel = nullptr;
+    ObjectsPanel *m_objectsPanel = nullptr;
     PageBar *m_pageBar = nullptr;
     ColorPalette *m_documentPalette = nullptr;
     QTimer *m_documentPaletteTimer = nullptr;

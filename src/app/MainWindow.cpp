@@ -40,6 +40,7 @@
 #include <QToolButton>
 #include <QVBoxLayout>
 #include <QSettings>
+#include <QSignalBlocker>
 #include <QFileInfo>
 #include <QFontComboBox>
 #include <QLabel>
@@ -50,6 +51,7 @@
 #include <QScreen>
 #include <QStatusBar>
 #include <QToolBar>
+#include <QUndoGroup>
 #include <QUndoStack>
 
 namespace opendraw {
@@ -100,10 +102,15 @@ QIcon indicatorIcon(const QIcon &glyph, const QBrush &swatch, bool none)
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
+    , m_undoGroup(new QUndoGroup(this))
     , m_document(new Document(this))
     , m_undoStack(new QUndoStack(this))
     , m_canvas(new CanvasWidget(m_document, m_undoStack, this))
 {
+    m_documents.push_back({m_document, m_undoStack});
+    m_documents.back().untitled = ++m_untitledCount;
+    m_undoGroup->addStack(m_undoStack);
+    m_undoGroup->setActiveStack(m_undoStack);
     setDocumentMode(true);
     setDockOptions(QMainWindow::AnimatedDocks | QMainWindow::AllowTabbedDocks);
 
@@ -132,8 +139,6 @@ MainWindow::MainWindow(QWidget *parent)
     m_documentPaletteTimer->setSingleShot(true);
     m_documentPaletteTimer->setInterval(150);
     connect(m_documentPaletteTimer, &QTimer::timeout, this, &MainWindow::updateDocumentPalette);
-    connect(m_document, &Document::changed, m_documentPaletteTimer, qOverload<>(&QTimer::start));
-    connect(m_document, &Document::currentPageChanged, m_documentPaletteTimer, qOverload<>(&QTimer::start));
 
     createActions();
 
@@ -156,18 +161,19 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_canvas, &CanvasWidget::toolChanged, m_propertyBar, &PropertyBar::setTool);
     m_propertyBar->setToolSettings(m_canvas->toolSettings());
     connect(m_canvas, &CanvasWidget::nodeSelectionChanged, this, &MainWindow::updateNodeActions);
-    connect(m_document, &Document::changed, this, &MainWindow::updateNodeActions);
     updateNodeActions();
 
     // Dockers sit between the drawing and the colour palette, which hugs the window edge.
     auto *propertiesDock = new QDockWidget(tr("Properties"), this);
     propertiesDock->setObjectName(QStringLiteral("properties"));
-    propertiesDock->setWidget(new PropertiesPanel(m_document, m_canvas, propertiesDock));
+    m_propertiesPanel = new PropertiesPanel(m_document, m_canvas, propertiesDock);
+    propertiesDock->setWidget(m_propertiesPanel);
     addDockWidget(Qt::RightDockWidgetArea, propertiesDock);
 
     auto *layersDock = new QDockWidget(tr("Objects"), this);
     layersDock->setObjectName(QStringLiteral("objects"));
-    layersDock->setWidget(new ObjectsPanel(m_document, m_undoStack, m_canvas, layersDock));
+    m_objectsPanel = new ObjectsPanel(m_document, m_undoStack, m_canvas, layersDock);
+    layersDock->setWidget(m_objectsPanel);
     addDockWidget(Qt::RightDockWidgetArea, layersDock);
     // Sizes only stick once the window is laid out.
     QTimer::singleShot(0, this, [this, layersDock, propertiesDock] {
@@ -231,11 +237,11 @@ MainWindow::MainWindow(QWidget *parent)
         updateTextBar();
         updateStyleIndicators();
     });
-    connect(m_document, &Document::changed, this, &MainWindow::updateStyleIndicators);
     connect(m_canvas, &CanvasWidget::eyedropperColorChanged, this, &MainWindow::updateStyleIndicators);
     connect(m_canvas, &CanvasWidget::defaultStyleChanged, this, &MainWindow::updateStyleIndicators);
     connect(&Units::instance(), &Units::unitChanged, this, &MainWindow::updateStyleIndicators);
-    connect(m_undoStack, &QUndoStack::cleanChanged, this, &MainWindow::updateTitle);
+    connect(m_undoGroup, &QUndoGroup::cleanChanged, this, &MainWindow::updateTitle);
+    connectDocument();
     m_cutAction->setEnabled(false);
     m_copyAction->setEnabled(false);
 
@@ -254,14 +260,122 @@ MainWindow::MainWindow(QWidget *parent)
 // children afterwards); clearing the stack would otherwise call back into a half-destroyed window.
 MainWindow::~MainWindow()
 {
-    m_undoStack->disconnect(this);
-    m_document->disconnect(this);
+    m_undoGroup->disconnect(this);
+    for (const OpenDocument &open : m_documents) {
+        open.undoStack->disconnect(this);
+        open.document->disconnect(this);
+    }
     m_canvas->disconnect(this);
+}
+
+int MainWindow::addDocument(Document *document, QString filePath, QString sourcePath)
+{
+    document->setParent(this);
+    auto *stack = new QUndoStack(this);
+    m_undoGroup->addStack(stack);
+    m_documents.push_back({document, stack, std::move(filePath), std::move(sourcePath)});
+    if (m_documents.back().sourcePath.isEmpty())
+        m_documents.back().untitled = ++m_untitledCount;
+    const QSignalBlocker blocker(m_documentTabs);
+    m_documentTabs->addTab(QString());
+    return int(m_documents.size()) - 1;
+}
+
+void MainWindow::connectDocument()
+{
+    connect(m_document, &Document::changed, m_documentPaletteTimer, qOverload<>(&QTimer::start));
+    connect(m_document, &Document::currentPageChanged, m_documentPaletteTimer, qOverload<>(&QTimer::start));
+    connect(m_document, &Document::changed, this, &MainWindow::updateNodeActions);
+    connect(m_document, &Document::changed, this, &MainWindow::updateStyleIndicators);
+    connect(m_document, &Document::changed, this, &MainWindow::updateTextBar);
+    connect(m_document, &Document::structureChanged, this,
+            [this] { m_deletePageAction->setEnabled(m_document->pageCount() > 1); });
+    m_deletePageAction->setEnabled(m_document->pageCount() > 1);
+}
+
+void MainWindow::activateDocument(int index)
+{
+    if (index < 0 || index >= int(m_documents.size()) || index == m_current)
+        return;
+    m_canvas->finishTextEdit();
+    // Keep where the view was, to come back to it.
+    OpenDocument &previous = m_documents[m_current];
+    previous.zoom = m_canvas->zoom();
+    previous.pan = m_canvas->pan();
+    previous.filePath = m_filePath;
+    previous.sourcePath = m_sourcePath;
+    m_document->disconnect(this);
+    m_document->disconnect(m_documentPaletteTimer);
+
+    m_current = index;
+    const OpenDocument &shown = m_documents[index];
+    m_document = shown.document;
+    m_undoStack = shown.undoStack;
+    m_filePath = shown.filePath;
+    m_sourcePath = shown.sourcePath;
+    m_undoGroup->setActiveStack(m_undoStack);
+    m_canvas->setDocument(m_document, m_undoStack);
+    m_canvasView->setDocument(m_document);
+    m_pageBar->setDocument(m_document);
+    m_propertyBar->setDocument(m_document, m_undoStack);
+    m_propertiesPanel->setDocument(m_document);
+    m_objectsPanel->setDocument(m_document, m_undoStack);
+    connectDocument();
+    if (shown.zoom > 0.0) {
+        m_canvas->setZoom(shown.zoom);
+        m_canvas->setPan(shown.pan);
+    } else {
+        m_canvas->fitPage();
+    }
+    {
+        const QSignalBlocker blocker(m_documentTabs);
+        m_documentTabs->setCurrentIndex(index);
+    }
+    updateTitle();
+    updateStyleIndicators();
+    updateNodeActions();
+    updateTextBar();
+    updateDocumentPalette();
+}
+
+bool MainWindow::closeDocument(int index)
+{
+    if (index < 0 || index >= int(m_documents.size()))
+        return false;
+    activateDocument(index); // so it is clear which drawing the question is about
+    if (!maybeSave())
+        return false;
+    if (m_documents.size() == 1)
+        addDocument(new Document(this)); // there is always a drawing to work on
+    activateDocument(index + 1 < int(m_documents.size()) ? index + 1 : index - 1);
+
+    const OpenDocument closing = m_documents[index];
+    m_documents.erase(m_documents.begin() + index);
+    if (m_current > index)
+        --m_current;
+    {
+        const QSignalBlocker blocker(m_documentTabs);
+        m_documentTabs->removeTab(index);
+        m_documentTabs->setCurrentIndex(m_current);
+    }
+    m_undoGroup->removeStack(closing.undoStack);
+    closing.undoStack->disconnect(this);
+    closing.document->disconnect(this);
+    delete closing.undoStack;
+    delete closing.document;
+    updateTitle();
+    return true;
+}
+
+bool MainWindow::currentIsPristine() const
+{
+    return m_filePath.isEmpty() && m_sourcePath.isEmpty() && m_undoStack->count() == 0 && m_document->pageCount() == 1
+           && m_document->count() == 0;
 }
 
 QWidget *MainWindow::createDocumentTabs()
 {
-    // One tab for the open drawing, as in other desktop editors; "+" starts a new drawing.
+    // One tab per open drawing, as in other desktop editors; "+" starts a new drawing.
     auto *row = new QWidget(this);
     auto *layout = new QHBoxLayout(row);
     layout->setContentsMargins(4, 2, 4, 0);
@@ -271,7 +385,10 @@ QWidget *MainWindow::createDocumentTabs()
     m_documentTabs->setDocumentMode(true);
     m_documentTabs->setDrawBase(false);
     m_documentTabs->setExpanding(false);
+    m_documentTabs->setTabsClosable(true);
     m_documentTabs->addTab(QString());
+    connect(m_documentTabs, &QTabBar::currentChanged, this, &MainWindow::activateDocument);
+    connect(m_documentTabs, &QTabBar::tabCloseRequested, this, &MainWindow::closeDocument);
     auto *add = new QToolButton(row);
     add->setText(QStringLiteral("+"));
     add->setAutoRaise(true);
@@ -295,6 +412,7 @@ void MainWindow::createActions()
     QAction *saveAction = fileMenu->addAction(icon(Icon::Save), tr("&Save"), QKeySequence::Save, this,
                                               &MainWindow::save);
     fileMenu->addAction(tr("Save &As…"), QKeySequence::SaveAs, this, &MainWindow::saveAs);
+    fileMenu->addAction(tr("&Close"), QKeySequence::Close, this, [this] { closeDocument(m_current); });
     fileMenu->addSeparator();
     QAction *importAction = fileMenu->addAction(icon(Icon::Import), tr("&Import…"),
                                                 QKeySequence(Qt::CTRL | Qt::Key_I), this, &MainWindow::import);
@@ -311,10 +429,10 @@ void MainWindow::createActions()
 
     // Edit
     QMenu *editMenu = menuBar()->addMenu(tr("&Edit"));
-    m_undoAction = m_undoStack->createUndoAction(this, tr("&Undo"));
+    m_undoAction = m_undoGroup->createUndoAction(this, tr("&Undo"));
     m_undoAction->setShortcut(QKeySequence::Undo);
     m_undoAction->setIcon(icon(Icon::Undo));
-    m_redoAction = m_undoStack->createRedoAction(this, tr("&Redo"));
+    m_redoAction = m_undoGroup->createRedoAction(this, tr("&Redo"));
     m_redoAction->setShortcut(QKeySequence::Redo);
     m_redoAction->setIcon(icon(Icon::Redo));
     editMenu->addAction(m_undoAction);
@@ -395,9 +513,6 @@ void MainWindow::createActions()
                           [this] { m_document->setCurrentPage(m_document->currentPageIndex() + 1); });
     layoutMenu->addAction(tr("&Previous Page"), QKeySequence(Qt::Key_PageUp), this,
                           [this] { m_document->setCurrentPage(m_document->currentPageIndex() - 1); });
-    connect(m_document, &Document::structureChanged, this,
-            [this] { m_deletePageAction->setEnabled(m_document->pageCount() > 1); });
-    m_deletePageAction->setEnabled(m_document->pageCount() > 1);
 
     // Object
     QMenu *objectMenu = menuBar()->addMenu(tr("&Object"));
@@ -530,6 +645,26 @@ void MainWindow::createActions()
 
     // Window
     m_windowMenu = menuBar()->addMenu(tr("&Window"));
+    // The open drawings, listed at the end of the menu each time it opens.
+    m_windowMenu->addAction(tr("&Next Drawing"), QKeySequence(Qt::CTRL | Qt::Key_Tab), this,
+                            [this] { activateDocument((m_current + 1) % int(m_documents.size())); });
+    m_windowMenu->addAction(tr("&Previous Drawing"), QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_Tab), this, [this] {
+        activateDocument((m_current + int(m_documents.size()) - 1) % int(m_documents.size()));
+    });
+    m_windowMenu->addSeparator();
+    connect(m_windowMenu, &QMenu::aboutToShow, this, [this] {
+        for (QAction *action : m_windowMenu->actions()) {
+            if (action->property("drawing").isValid())
+                delete action;
+        }
+        m_windowMenu->addSeparator()->setProperty("drawing", -1);
+        for (int i = 0; i < m_documentTabs->count(); ++i) {
+            QAction *action = m_windowMenu->addAction(m_documentTabs->tabText(i), this, [this, i] { activateDocument(i); });
+            action->setProperty("drawing", i);
+            action->setCheckable(true);
+            action->setChecked(i == m_current);
+        }
+    });
 
     // Help
     QMenu *helpMenu = menuBar()->addMenu(tr("&Help"));
@@ -833,7 +968,8 @@ void MainWindow::updateDocumentPalette()
 
 QString MainWindow::documentName() const
 {
-    return m_sourcePath.isEmpty() ? tr("Untitled") : QFileInfo(m_sourcePath).fileName();
+    return m_sourcePath.isEmpty() ? tr("Untitled-%1").arg(m_documents[m_current].untitled)
+                                  : QFileInfo(m_sourcePath).fileName();
 }
 
 QString MainWindow::toolHint() const
@@ -934,18 +1070,11 @@ void MainWindow::import()
 
 void MainWindow::newDocument()
 {
-    if (!maybeSave())
-        return;
-    m_document->clear();
-    m_undoStack->clear();
-    setFilePath(QString());
-    m_canvas->fitPage();
+    activateDocument(addDocument(new Document(this)));
 }
 
 void MainWindow::open()
 {
-    if (!maybeSave())
-        return;
     QStringList filters{kSvgFilter};
     if (cdr::isAvailable()) {
         filters.prepend(tr("All supported files (*.svg *.cdr *.cdt)"));
@@ -958,6 +1087,16 @@ void MainWindow::open()
 
 bool MainWindow::openFile(const QString &path)
 {
+    // Already open: show it.
+    m_documents[m_current].filePath = m_filePath;
+    m_documents[m_current].sourcePath = m_sourcePath;
+    const QString canonical = QFileInfo(path).canonicalFilePath();
+    for (int i = 0; i < int(m_documents.size()); ++i) {
+        if (!m_documents[i].sourcePath.isEmpty() && QFileInfo(m_documents[i].sourcePath).canonicalFilePath() == canonical) {
+            activateDocument(i);
+            return true;
+        }
+    }
     QFile file(path);
     if (!file.open(QIODevice::ReadOnly)) {
         QMessageBox::warning(this, tr("Open"), tr("Could not open %1:\n%2").arg(path, file.errorString()));
@@ -967,15 +1106,19 @@ bool MainWindow::openFile(const QString &path)
     const bool corel = suffix == u"cdr" || suffix == u"cdt";
     QString error;
     svg::ReadReport report;
-    const bool ok = corel ? cdr::read(file.readAll(), *m_document, &error, &report)
-                          : svg::read(&file, *m_document, &error, &report);
+    auto document = std::make_unique<Document>();
+    const bool ok = corel ? cdr::read(file.readAll(), *document, &error, &report)
+                          : svg::read(&file, *document, &error, &report);
     if (!ok) {
         QMessageBox::warning(this, tr("Open"), tr("Could not read %1:\n%2").arg(path, error));
         return false;
     }
-    m_undoStack->clear();
-    // An imported file is not overwritten: Save asks where to put the SVG.
-    setFilePath(corel ? QString() : path, path);
+    // A new tab, taking the place of an untouched empty drawing. An imported file is not
+    // overwritten: Save asks where to put the SVG.
+    const int replaced = currentIsPristine() ? m_current : -1;
+    activateDocument(addDocument(document.release(), corel ? QString() : path, path));
+    if (replaced >= 0)
+        closeDocument(replaced);
     m_canvas->fitPage();
 
     // Never refuse a file: open what we understand and say what was left out.
@@ -1117,10 +1260,17 @@ bool MainWindow::maybeSave()
 
 void MainWindow::closeEvent(QCloseEvent *event)
 {
-    if (maybeSave())
-        event->accept();
-    else
-        event->ignore();
+    // Every drawing with changes is shown in turn and its changes saved or dropped.
+    for (int i = 0; i < int(m_documents.size()); ++i) {
+        if (m_documents[i].undoStack->isClean())
+            continue;
+        activateDocument(i);
+        if (!maybeSave()) {
+            event->ignore();
+            return;
+        }
+    }
+    event->accept();
 }
 
 // The style shown for the selection: its first plain shape (groups have no style of their own).
@@ -1277,7 +1427,6 @@ void MainWindow::createTextBar()
     m_textBar->hide();
     connect(m_canvas, &CanvasWidget::textEditingChanged, this, &MainWindow::updateTextBar);
     connect(m_canvas, &CanvasWidget::selectionChanged, this, &MainWindow::updateTextBar);
-    connect(m_document, &Document::changed, this, &MainWindow::updateTextBar);
 }
 
 // Shown with the text tool, while typing, or when a text is selected; always shows the
@@ -1389,6 +1538,8 @@ void MainWindow::setFilePath(const QString &path, const QString &sourcePath)
 {
     m_filePath = path;
     m_sourcePath = sourcePath;
+    m_documents[m_current].filePath = path;
+    m_documents[m_current].sourcePath = sourcePath;
     updateTitle();
 }
 
@@ -1397,8 +1548,8 @@ void MainWindow::updateTitle()
     const QString name = documentName();
     setWindowTitle(QStringLiteral("%1[*] — OpenDraw").arg(name));
     setWindowModified(!m_undoStack->isClean());
-    m_documentTabs->setTabText(0, m_undoStack->isClean() ? name : name + QLatin1Char('*'));
-    m_documentTabs->setTabToolTip(0, m_sourcePath.isEmpty() ? name : QDir::toNativeSeparators(m_sourcePath));
+    m_documentTabs->setTabText(m_current, m_undoStack->isClean() ? name : name + QLatin1Char('*'));
+    m_documentTabs->setTabToolTip(m_current, m_sourcePath.isEmpty() ? name : QDir::toNativeSeparators(m_sourcePath));
 }
 
 } // namespace opendraw

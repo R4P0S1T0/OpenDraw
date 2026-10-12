@@ -45,6 +45,8 @@ class ObjectsPanel : public QWidget {
 
 public:
     ObjectsPanel(Document *document, QUndoStack *undoStack, CanvasWidget *canvas, QWidget *parent = nullptr);
+    // Shows another open drawing.
+    void setDocument(Document *document, QUndoStack *undoStack);
 
     // Rebuilds the tree now (it also rebuilds itself shortly after any change).
     void refresh();
@@ -53,6 +55,7 @@ public:
     static QString describe(const Shape &shape);
 
 private:
+    void connectDocument();
     enum class Kind { Page, Layer, Shape };
 
     static Kind kindOf(const QTreeWidgetItem *item);
