@@ -29,7 +29,7 @@ public:
     enum class Tool {
         Select, Node, Zoom, Pan, Freehand, Line, Bezier, Rectangle, Ellipse,
         Polygon, Star, Spiral, GraphPaper, Text, DropShadow, Transparency, Eyedropper, Blend, Contour, Envelope,
-        Extrude, SmartFill, InteractiveFill, Mesh,
+        Extrude, SmartFill, InteractiveFill, Mesh, Connector, RightAngleConnector, Dimension,
     };
 
     CanvasWidget(Document *document, QUndoStack *undoStack, QWidget *parent = nullptr);
@@ -169,6 +169,12 @@ public slots:
     bool setSelectedMeshNodeColor(const QColor &color);
     void setMeshGrid(int columns, int rows);
     void removeMesh();
+    // A connector between two objects, kept joined to them.
+    void connectShapes(opendraw::Shape *from, opendraw::Shape *to, bool rightAngle);
+    // A dimension measuring from one point to another, in the unit shown on the rulers.
+    void addDimension(const QPointF &from, const QPointF &to);
+    // Distance from the measured points and figure size of the selected dimensions.
+    void setDimensionOptions(double offset, double textSize);
     // PowerClip: the objects selected before the last one go inside it (a rectangle, ellipse,
     // curve or text), and back out of selected frames.
     void placeInsideFrame();
@@ -237,7 +243,7 @@ private:
     enum class Drag {
         None, Pan, Move, Resize, Marquee, Create, NodeMove, NodeHandle, BezierHandle, Freehand, ZoomBox, Guide,
         Rotate, Skew, RotationCenter, TextFrame, TextSelect, Effect, EffectHandle, Blend, EnvelopeHandle,
-        FillCreate, FillHandle,
+        FillCreate, FillHandle, Connect, Measure,
     };
     enum class NodeHandle { In, Out };
 

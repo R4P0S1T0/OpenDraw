@@ -5,8 +5,12 @@ add_library(opendraw_core STATIC
     Blend.h
     Commands.cpp
     Commands.h
+    Connector.cpp
+    Connector.h
     ContourEffect.cpp
     ContourEffect.h
+    Dimension.cpp
+    Dimension.h
     Document.cpp
     Document.h
     Envelope.cpp

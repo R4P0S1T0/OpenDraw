@@ -469,6 +469,34 @@ void draw(QPainter &p, Icon id, const QColor &ink, const QColor &accent, const Q
         }
         break;
     }
+    case Icon::Connector:
+    case Icon::RightAngleConnector: {
+        // Two boxes joined by a line, straight or bent at right angles.
+        p.setPen(line);
+        p.setBrush(paper);
+        p.drawRect(QRectF(2.5, 3.5, 7, 6));
+        p.drawRect(QRectF(14.5, 14.5, 7, 6));
+        p.setPen(QPen(accent, 1.6, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        p.setBrush(Qt::NoBrush);
+        if (id == Icon::Connector)
+            p.drawLine(QPointF(9.5, 9.5), QPointF(14.5, 14.5));
+        else
+            p.drawPolyline(QPolygonF{QPointF(9.5, 6.5), QPointF(18, 6.5), QPointF(18, 14.5)});
+        break;
+    }
+    case Icon::Dimension: {
+        // A measured span: two ticks and an arrowed line between them.
+        p.setPen(line);
+        p.drawLine(QPointF(4, 6), QPointF(4, 18));
+        p.drawLine(QPointF(20, 6), QPointF(20, 18));
+        p.setPen(QPen(accent, 1.4));
+        p.drawLine(QPointF(5, 12), QPointF(19, 12));
+        p.setPen(Qt::NoPen);
+        p.setBrush(accent);
+        p.drawPolygon(QPolygonF{QPointF(4.5, 12), QPointF(8, 10), QPointF(8, 14)});
+        p.drawPolygon(QPolygonF{QPointF(19.5, 12), QPointF(16, 10), QPointF(16, 14)});
+        break;
+    }
     case Icon::Mesh: {
         // A grid of nodes over a square.
         p.setPen(line);

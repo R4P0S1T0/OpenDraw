@@ -801,6 +801,10 @@ void MainWindow::createToolbox(QMenu *toolsMenu)
     addFlyout({{CanvasWidget::Tool::Freehand, Icon::Freehand, tr("Freehand"), QKeySequence(Qt::Key_F5)},
                {CanvasWidget::Tool::Line, Icon::Line, tr("2-Point Line"), QKeySequence()},
                {CanvasWidget::Tool::Bezier, Icon::Bezier, tr("Bézier"), QKeySequence(Qt::SHIFT | Qt::Key_B)}});
+    addFlyout({{CanvasWidget::Tool::Dimension, Icon::Dimension, tr("Parallel Dimension"), QKeySequence()},
+               {CanvasWidget::Tool::Connector, Icon::Connector, tr("Straight-Line Connector"), QKeySequence()},
+               {CanvasWidget::Tool::RightAngleConnector, Icon::RightAngleConnector, tr("Right-Angle Connector"),
+                QKeySequence()}});
     m_toolbox->addSeparator();
     m_toolbox->addAction(
         makeAction({CanvasWidget::Tool::Rectangle, Icon::Rectangle, tr("Rectangle"), QKeySequence(Qt::Key_F6)}));
@@ -1019,6 +1023,11 @@ QString MainWindow::toolHint() const
     case CanvasWidget::Tool::InteractiveFill:
         return tr("Drag across an object for a gradient; drag its ends and colours, double-click the line to add a "
                   "colour, click a palette colour to recolour the selected one, Delete removes it");
+    case CanvasWidget::Tool::Connector:
+    case CanvasWidget::Tool::RightAngleConnector:
+        return tr("Drag from one object to another to join them; the line follows when they move");
+    case CanvasWidget::Tool::Dimension:
+        return tr("Drag from one point to another to measure it; Ctrl keeps it horizontal or vertical");
     case CanvasWidget::Tool::Mesh:
         return tr("Click an object to give it a mesh of colours; click a node, then a palette colour to colour it");
     case CanvasWidget::Tool::SmartFill:

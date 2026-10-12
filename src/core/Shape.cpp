@@ -1,6 +1,7 @@
 #include "core/Shape.h"
 
 #include "core/Blend.h"
+#include "core/Dimension.h"
 #include "core/Envelope.h"
 #include "core/PathOps.h"
 #include "core/TextLayout.h"
@@ -142,6 +143,15 @@ QRectF Shape::localBounds() const
     default:
         return bounds();
     }
+}
+
+void Shape::setDimension(const std::optional<Dimension> &dimension)
+{
+    if (m_kind != ShapeKind::Path)
+        return;
+    m_dimension = dimension;
+    if (m_dimension)
+        m_path = dimension::geometry(*m_dimension);
 }
 
 void Shape::setEnvelope(const std::optional<Envelope> &envelope)
@@ -323,6 +333,17 @@ void Shape::transform(const QTransform &t)
         m_cornerRadius *= std::min(std::hypot(t.m11(), t.m12()), std::hypot(t.m21(), t.m22()));
         break;
     case ShapeKind::Path:
+        if (m_dimension) {
+            // The measured points move; the label follows the new distance.
+            Dimension d = *m_dimension;
+            const double scale = std::sqrt(std::abs(t.determinant()));
+            d.from = t.map(d.from);
+            d.to = t.map(d.to);
+            d.offset *= t.determinant() < 0 ? -scale : scale;
+            d.textSize *= scale;
+            setDimension(d);
+            break;
+        }
         pathops::transform(m_path, t);
         break;
     case ShapeKind::Group:
@@ -424,7 +445,7 @@ bool Shape::contains(const QPointF &point, double tolerance) const
         return std::any_of(steps.begin(), steps.end(), hit);
     }
     // A PowerClip frame is clickable all over, where its contents show.
-    if (!m_clipped.empty() && path().contains(point))
+    if ((!m_clipped.empty() || m_dimension) && path().contains(point))
         return true;
     if (m_kind == ShapeKind::Text) { // letters are thin: the whole text box is clickable
         const QRectF box = localBounds().adjusted(-tolerance, -tolerance, tolerance, tolerance);

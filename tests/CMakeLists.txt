@@ -24,6 +24,7 @@ opendraw_add_test(test_contour opendraw_core)
 opendraw_add_test(test_envelope opendraw_core)
 opendraw_add_test(test_extrude opendraw_core)
 opendraw_add_test(test_powerclip opendraw_core)
+opendraw_add_test(test_connectors opendraw_core)
 
 # Drives the drawing canvas with simulated mouse and keyboard input.
 opendraw_add_test(test_canvas opendraw_ui)

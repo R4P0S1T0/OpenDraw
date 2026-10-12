@@ -1,6 +1,9 @@
 #include "core/Document.h"
 
+#include "core/Connector.h"
+
 #include <QCoreApplication>
+#include <QHash>
 
 #include <algorithm>
 
@@ -152,6 +155,7 @@ void Document::setPages(std::vector<std::unique_ptr<Page>> pages)
     emit cleared();
     m_pages = std::move(pages);
     m_currentPage = 0;
+    updateConnectors();
     emit currentPageChanged();
     emit structureChanged();
     emit changed();
@@ -302,6 +306,7 @@ Shape *Document::insertShape(Layer *layer, int index, std::unique_ptr<Shape> sha
     if (index < 0 || index > int(shapes.size()))
         index = int(shapes.size());
     shapes.insert(shapes.begin() + index, std::move(shape));
+    updateConnectors();
     emit changed();
     return raw;
 }
@@ -382,7 +387,30 @@ void Document::clear()
 void Document::notifyShapeChanged(Shape *shape)
 {
     Q_UNUSED(shape);
+    updateConnectors();
     emit changed();
+}
+
+void Document::updateConnectors()
+{
+    // Objects that can be joined: the top-level objects of every page.
+    QHash<quint64, const Shape *> byId;
+    std::vector<Shape *> connectors;
+    for (const auto &page : m_pages) {
+        for (const auto &layer : page->layers) {
+            for (const auto &shape : layer->shapes) {
+                byId.insert(shape->id(), shape.get());
+                if (shape->connector())
+                    connectors.push_back(shape.get());
+            }
+        }
+    }
+    for (Shape *line : connectors) {
+        const Connector &c = *line->connector();
+        const Shape *from = byId.value(c.from), *to = byId.value(c.to);
+        if (from && to && from != line && to != line)
+            line->setPathData(connector::route(*from, *to, c.rightAngle));
+    }
 }
 
 } // namespace opendraw

@@ -18,6 +18,8 @@ struct ToolSettings {
     bool smartFillOutline = true;                       // ... with the default outline
     int meshColumns = 2;                                // new mesh fills
     int meshRows = 2;
+    double dimensionOffset = 10.0 * kUnitsPerMm;        // new dimensions
+    double dimensionTextSize = 4.0 * kUnitsPerMm;
     bool operator==(const ToolSettings &) const = default;
 };
 

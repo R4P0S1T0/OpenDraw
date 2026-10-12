@@ -140,6 +140,7 @@ private slots:
     void powerClipFromTheSelection();
     void interactiveFillEditsGradients();
     void meshToolColoursNodes();
+    void connectorAndDimensionTools();
     void textToolDrawsParagraphFrames();
     void formatPartOfAText();
     void shadowAndTransparencyTools();
@@ -1156,6 +1157,26 @@ void CanvasTests::mainWindowWorkspace()
         canvas->fitPage();
         QTest::qWait(150);
         QVERIFY(window.grab().save(dir + QStringLiteral("/window-fills.png")));
+
+        // A small diagram: boxes joined by connectors, and dimensions.
+        canvas->selectAll();
+        canvas->deleteSelection();
+        Style box;
+        box.fill = QColor(0xe3, 0xf2, 0xfd);
+        box.stroke = QColor(0x0d, 0x47, 0xa1);
+        box.strokeWidth = 2;
+        Shape *start = doc->insertShape(-1, std::make_unique<Shape>(ShapeKind::Rectangle, QRectF(140, 200, 160, 90), box));
+        Shape *middle = doc->insertShape(-1, std::make_unique<Shape>(ShapeKind::Ellipse, QRectF(440, 330, 180, 110), box));
+        Shape *finish = doc->insertShape(-1, std::make_unique<Shape>(ShapeKind::Rectangle, QRectF(140, 520, 160, 90), box));
+        canvas->connectShapes(start, middle, false);
+        canvas->connectShapes(middle, finish, true);
+        canvas->addDimension(QPointF(140, 610), QPointF(300, 610));
+        canvas->addDimension(QPointF(620, 330), QPointF(620, 440));
+        canvas->setTool(CanvasWidget::Tool::Select);
+        canvas->setSelection({});
+        canvas->fitPage();
+        QTest::qWait(150);
+        QVERIFY(window.grab().save(dir + QStringLiteral("/window-diagram.png")));
         theme::apply(ColorScheme::Light);
     }
 }
@@ -1620,6 +1641,40 @@ void CanvasTests::textFitsToPathAndBack()
         m_undo->undo();
     QVERIFY(!text->textData().path);
     QCOMPARE(text->textOrigin(), QPointF(400, 400));
+}
+
+void CanvasTests::connectorAndDimensionTools()
+{
+    m_canvas->setZoom(1.0);
+    Shape *a = m_doc->insertShape(-1, std::make_unique<Shape>(ShapeKind::Rectangle, QRectF(100, 100, 100, 100)));
+    Shape *b = m_doc->insertShape(-1, std::make_unique<Shape>(ShapeKind::Ellipse, QRectF(400, 300, 100, 100)));
+    const int before = m_undo->index();
+    m_canvas->setTool(CanvasWidget::Tool::RightAngleConnector);
+    dragFromTo(m_canvas, m_canvas->documentToWidget({150, 150}), m_canvas->documentToWidget({450, 350}));
+    QCOMPARE(m_doc->count(), 3);
+    Shape *line = m_doc->shapes().back().get();
+    QVERIFY(line->connector());
+    QVERIFY(line->connector()->rightAngle);
+    QCOMPARE(line->pathData().front().nodes.size(), std::size_t(4));
+    // Moving an object drags the connector along.
+    m_canvas->setTool(CanvasWidget::Tool::Select);
+    m_canvas->setSelectedShape(b);
+    m_canvas->nudgeSelection(QPointF(0, 100));
+    QVERIFY(std::abs(line->pathData().front().nodes.back().point.y() - 450) < 1);
+
+    m_canvas->setTool(CanvasWidget::Tool::Dimension);
+    dragFromTo(m_canvas, m_canvas->documentToWidget({100, 500}), m_canvas->documentToWidget({300, 500}));
+    QCOMPARE(m_doc->count(), 4);
+    Shape *dimension = m_doc->shapes().back().get();
+    QVERIFY(dimension->dimension());
+    QVERIFY(std::abs(QLineF(dimension->dimension()->from, dimension->dimension()->to).length() - 200) < 1);
+    m_canvas->setDimensionOptions(50, 20);
+    QCOMPARE(m_doc->shapes().back()->dimension()->offset, 50.0);
+    while (m_undo->index() > before)
+        m_undo->undo();
+    QCOMPARE(m_doc->count(), 2);
+    Q_UNUSED(a);
+    m_canvas->setTool(CanvasWidget::Tool::Select);
 }
 
 void CanvasTests::meshToolColoursNodes()

@@ -104,6 +104,9 @@ private:
     QList<QAction *> m_smartFillActions;
     QList<QAction *> m_interactiveFillActions;
     QList<QAction *> m_meshActions;
+    QList<QAction *> m_dimensionActions;
+    QDoubleSpinBox *m_dimensionOffset;
+    QDoubleSpinBox *m_dimensionTextSize;
     QSpinBox *m_meshColumns;
     QSpinBox *m_meshRows;
     QToolButton *m_meshNodeColor;

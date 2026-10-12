@@ -41,7 +41,7 @@ Icon iconFor(const Shape &shape)
     case ShapeKind::Ellipse:
         return Icon::Ellipse;
     case ShapeKind::Path:
-        return Icon::Bezier;
+        return shape.connector() ? Icon::Connector : shape.dimension() ? Icon::Dimension : Icon::Bezier;
     case ShapeKind::Group:
         return shape.isBlend() ? Icon::Blend : Icon::Group;
     case ShapeKind::Text:
@@ -108,6 +108,10 @@ QString ObjectsPanel::describeAlone(const Shape &shape)
     case ShapeKind::Ellipse:
         return tr("Ellipse");
     case ShapeKind::Path:
+        if (shape.connector())
+            return tr("Connector");
+        if (shape.dimension())
+            return tr("Dimension");
         return tr("Curve");
     case ShapeKind::Group:
         if (shape.isBlend())

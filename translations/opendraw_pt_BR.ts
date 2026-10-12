@@ -281,6 +281,14 @@
         <translation>Transparência</translation>
     </message>
     <message>
+        <source>Connector</source>
+        <translation>Conector</translation>
+    </message>
+    <message>
+        <source>Dimension</source>
+        <translation>Cota</translation>
+    </message>
+    <message>
         <source>Extract contents</source>
         <translation>Extrair conteúdo</translation>
     </message>
@@ -1063,6 +1071,18 @@ Clique esquerdo: preenchimento · Clique direito: contorno</translation>
         <translation>Bézier</translation>
     </message>
     <message>
+        <source>Parallel Dimension</source>
+        <translation>Cota paralela</translation>
+    </message>
+    <message>
+        <source>Straight-Line Connector</source>
+        <translation>Conector de linha reta</translation>
+    </message>
+    <message>
+        <source>Right-Angle Connector</source>
+        <translation>Conector em ângulo reto</translation>
+    </message>
+    <message>
         <source>Rectangle</source>
         <translation>Retângulo</translation>
     </message>
@@ -1189,6 +1209,14 @@ Clique esquerdo: preenchimento · Clique direito: contorno</translation>
     <message>
         <source>Drag across an object for a gradient; drag its ends and colours, double-click the line to add a colour, click a palette colour to recolour the selected one, Delete removes it</source>
         <translation>Arraste sobre um objeto para criar um degradê; arraste as pontas e as cores, clique duas vezes na linha para acrescentar uma cor, clique numa cor da paleta para mudar a cor selecionada, Delete a remove</translation>
+    </message>
+    <message>
+        <source>Drag from one object to another to join them; the line follows when they move</source>
+        <translation>Arraste de um objeto até outro para ligá-los; a linha acompanha quando eles se movem</translation>
+    </message>
+    <message>
+        <source>Drag from one point to another to measure it; Ctrl keeps it horizontal or vertical</source>
+        <translation>Arraste de um ponto até outro para medir; Ctrl mantém a medida horizontal ou vertical</translation>
     </message>
     <message>
         <source>Click an object to give it a mesh of colours; click a node, then a palette colour to colour it</source>
@@ -1558,6 +1586,14 @@ Clique esquerdo: preenchimento · Clique direito: contorno</translation>
     <message>
         <source>Ellipse</source>
         <translation>Elipse</translation>
+    </message>
+    <message>
+        <source>Connector</source>
+        <translation>Conector</translation>
+    </message>
+    <message>
+        <source>Dimension</source>
+        <translation>Cota</translation>
     </message>
     <message>
         <source>Curve</source>
@@ -2381,6 +2417,22 @@ Clique esquerdo: preenchimento · Clique direito: contorno</translation>
     <message>
         <source>Fill</source>
         <translation>Preenchimento</translation>
+    </message>
+    <message>
+        <source>Distance</source>
+        <translation>Distância</translation>
+    </message>
+    <message>
+        <source>How far the dimension line is from the measured points</source>
+        <translation>A que distância a linha de cota fica dos pontos medidos</translation>
+    </message>
+    <message>
+        <source>Figures</source>
+        <translation>Números</translation>
+    </message>
+    <message>
+        <source>Height of the measurement&apos;s figures</source>
+        <translation>Altura dos números da medida</translation>
     </message>
     <message>
         <source>Columns of the mesh</source>

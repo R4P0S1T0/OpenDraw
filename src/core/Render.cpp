@@ -1,6 +1,7 @@
 #include "core/Render.h"
 
 #include "core/ContourEffect.h"
+#include "core/Dimension.h"
 #include "core/Document.h"
 #include "core/Extrude.h"
 #include "core/Shape.h"
@@ -254,6 +255,24 @@ void paintBody(QPainter &painter, const Shape &shape)
             painter.drawImage(0, 0, image);
             painter.restore();
         }
+        return;
+    }
+    if (const auto &dimension = shape.dimension()) {
+        // Lines in the outline's pen; arrowheads and the measurement in its colour.
+        const QColor ink = style.hasStroke() ? style.stroke : QColor(Qt::black);
+        Style lineStyle = style;
+        lineStyle.stroke = ink;
+        lineStyle.strokeWidth = style.hasStroke() ? style.strokeWidth : 1.0;
+        lineStyle.startArrow = lineStyle.endArrow = Arrowhead::None;
+        painter.save();
+        painter.setBrush(Qt::NoBrush);
+        painter.setPen(outlinePen(lineStyle));
+        painter.drawPath(dimension::lines(*dimension));
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(ink);
+        painter.drawPath(dimension::arrowheads(*dimension, lineStyle.strokeWidth));
+        painter.drawPath(dimension::labelOutline(*dimension));
+        painter.restore();
         return;
     }
     painter.save();

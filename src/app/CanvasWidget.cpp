@@ -2,7 +2,9 @@
 
 #include "core/Blend.h"
 #include "core/Commands.h"
+#include "core/Connector.h"
 #include "Icons.h"
+#include "Units.h"
 #include "core/Document.h"
 #include "core/Envelope.h"
 #include "core/Generators.h"
@@ -677,7 +679,11 @@ int CanvasWidget::transparencyHandleAt(const QPointF &widgetPosition) const
 void CanvasWidget::paintEffectHandles(QPainter &painter)
 {
     // A line from where the drag started, while dragging a shadow or a blend.
-    if ((m_drag == Drag::Effect && m_tool != Tool::Transparency) || m_drag == Drag::Blend) {
+    if (m_drag == Drag::Measure) {
+        painter.setPen(QPen(palette().color(QPalette::Highlight), 1, Qt::DashLine));
+        painter.drawLine(toWidget(m_dragStart), toWidget(m_lineEnd));
+    }
+    if ((m_drag == Drag::Effect && m_tool != Tool::Transparency) || m_drag == Drag::Blend || m_drag == Drag::Connect) {
         painter.setPen(QPen(palette().color(QPalette::Highlight), 1, Qt::DashLine));
         painter.drawLine(toWidget(m_dragStart), toWidget(m_cursor));
     }
@@ -1105,6 +1111,78 @@ void CanvasWidget::dragEnvelopeHandle(const QPointF &documentPosition)
     }
     shape->setEnvelope(e);
     m_document->notifyShapeChanged(shape);
+}
+
+void CanvasWidget::connectShapes(Shape *from, Shape *to, bool rightAngle)
+{
+    if (!m_document->activeLayer()->isEditable())
+        return;
+    // An open line in the outline style of new curves; its course comes from the two objects.
+    Style style = curveStyle(false);
+    if (!style.hasStroke()) {
+        style.stroke = Qt::black;
+        style.strokeWidth = 1.0;
+    }
+    auto line = std::make_unique<Shape>(connector::route(*from, *to, rightAngle), style);
+    line->setConnector(Connector{from->id(), to->id(), rightAngle});
+    auto *command = new AddShapeCommand(m_document, std::move(line));
+    command->setText(tr("Connector"));
+    Shape *added = command->shape();
+    m_undoStack->push(command);
+    setSelectedShape(added);
+}
+
+void CanvasWidget::addDimension(const QPointF &from, const QPointF &to)
+{
+    if (!m_document->activeLayer()->isEditable())
+        return;
+    // Measured in the unit shown on the rulers, 10 mm to the side, with 4 mm high figures.
+    const Units &units = Units::instance();
+    Dimension d;
+    d.from = from;
+    d.to = to;
+    d.offset = m_toolSettings.dimensionOffset;
+    d.unitFactor = units.toDisplay(1.0);
+    d.unitSuffix = units.suffix();
+    d.decimals = units.decimals();
+    d.textSize = m_toolSettings.dimensionTextSize;
+    Style style = curveStyle(false);
+    if (!style.hasStroke()) {
+        style.stroke = Qt::black;
+        style.strokeWidth = 1.0;
+    }
+    auto shape = std::make_unique<Shape>(PathData{}, style);
+    shape->setDimension(d);
+    auto *command = new AddShapeCommand(m_document, std::move(shape));
+    command->setText(tr("Dimension"));
+    Shape *added = command->shape();
+    m_undoStack->push(command);
+    setSelectedShape(added);
+}
+
+void CanvasWidget::setDimensionOptions(double offset, double textSize)
+{
+    std::vector<Shape *> dimensions;
+    for (Shape *shape : m_selection) {
+        if (shape->dimension())
+            dimensions.push_back(shape);
+    }
+    if (dimensions.empty())
+        return;
+    m_undoStack->beginMacro(tr("Dimension"));
+    for (Shape *shape : dimensions) {
+        auto copy = std::make_unique<Shape>(PathData{}, shape->style());
+        Dimension d = *shape->dimension();
+        d.offset = offset;
+        d.textSize = textSize;
+        copy->setDimension(d);
+        copy->setName(shape->name());
+        auto *command = new ReplaceShapeCommand(m_document, shape, std::move(copy), tr("Dimension"));
+        std::replace(m_selection.begin(), m_selection.end(), shape, command->newShape());
+        m_undoStack->push(command);
+    }
+    m_undoStack->endMacro();
+    emit selectionChanged();
 }
 
 void CanvasWidget::placeInsideFrame()
@@ -2330,7 +2408,9 @@ Shape *CanvasWidget::selectedPath() const
 {
     // A curve bent by an envelope is edited through the envelope (or converted to curves first).
     Shape *shape = selectedShape();
+    // Connectors and dimensions work out their own nodes.
     return shape && shape->kind() == ShapeKind::Path && !shape->envelope() && shape->shapeTransform().isIdentity()
+                   && !shape->connector() && !shape->dimension()
                ? shape
                : nullptr;
 }
@@ -2964,6 +3044,23 @@ void CanvasWidget::mousePressEvent(QMouseEvent *event)
         smartFill(docPos);
         break;
 
+    case Tool::Connector:
+    case Tool::RightAngleConnector: {
+        // Drag from one object to another to join them.
+        Shape *hit = m_document->shapeAt(docPos, tolerance);
+        if (hit && hit->connector())
+            hit = nullptr; // connectors join objects, not other connectors
+        m_blendStart = hit;
+        m_dragStart = docPos;
+        m_drag = hit ? Drag::Connect : Drag::None;
+        break;
+    }
+
+    case Tool::Dimension:
+        m_dragStart = m_lineEnd = snapPoint(docPos);
+        m_drag = Drag::Measure;
+        break;
+
     case Tool::Mesh: {
         // Pick a node to colour; clicking an object gives it a mesh (of its own colour).
         if (const int node = meshNodeAt(pos); node >= 0) {
@@ -3180,6 +3277,24 @@ void CanvasWidget::mouseMoveEvent(QMouseEvent *event)
     case Drag::EnvelopeHandle:
         dragEnvelopeHandle(snapPoint(docPos));
         break;
+
+    case Drag::Connect:
+        update();
+        break;
+
+    case Drag::Measure: {
+        // Ctrl: horizontal or vertical.
+        QPointF to = snapPoint(docPos);
+        if (event->modifiers() & Qt::ControlModifier) {
+            if (std::abs(to.x() - m_dragStart.x()) >= std::abs(to.y() - m_dragStart.y()))
+                to.setY(m_dragStart.y());
+            else
+                to.setX(m_dragStart.x());
+        }
+        m_lineEnd = to;
+        update();
+        break;
+    }
 
     case Drag::FillCreate:
         if (distance(toWidget(m_dragStart), pos) >= kMinCreateSizePx)
@@ -3420,6 +3535,22 @@ void CanvasWidget::mouseReleaseEvent(QMouseEvent *event)
     case Drag::FillCreate:
     case Drag::FillHandle:
         commitFillDrag();
+        break;
+
+    case Drag::Connect: {
+        Shape *from = m_blendStart;
+        m_blendStart = nullptr;
+        Shape *to = m_document->shapeAt(toDocument(event->position()), kHitTolerancePx / m_zoom);
+        if (from && to && to != from && !to->connector())
+            connectShapes(from, to, m_tool == Tool::RightAngleConnector);
+        update();
+        break;
+    }
+
+    case Drag::Measure:
+        if (distance(toWidget(m_dragStart), toWidget(m_lineEnd)) >= kMinCreateSizePx * 3)
+            addDimension(m_dragStart, m_lineEnd);
+        update();
         break;
 
     case Drag::EnvelopeHandle:

@@ -28,6 +28,7 @@ Rough order of work. Items move as contributors pick them up.
 - [x] Contour tool: rings outside, inside or to the centre of an object, colours running to a chosen fill and outline, live; saved with the rings as real SVG shapes for other programs
 - [x] Envelope tool: bend rectangles, ellipses, curves and texts by dragging the corners and edge handles of a frame; live (the objects stay editable and the envelope moves, scales, turns and mirrors with them); saved bent for other programs, with the object itself kept for OpenDraw
 - [x] Extrude tool: depth towards a vanishing point, sides shaded by a light from the top left (or one colour), live; saved with the sides as real SVG shapes for other programs
+- [x] Connectors (straight and right-angle) that stay joined to two objects as they move, and parallel dimensions labelled in the ruler unit that update when resized; both saved in SVG (drawn as plain shapes for other programs)
 - [x] PowerClip: objects placed inside a rectangle, ellipse, curve or text, shown only within its outline and moving with it; Extract Contents; saved as SVG clip-path, and clip paths from other programs are read as PowerClips
 - [x] Smart fill tool: a click inside an area enclosed by overlapping objects makes a new object of exactly that shape
 - [x] Objects docker: pages, layers and objects as a tree, selection in both directions, renaming (object names saved as Inkscape labels), drag and drop to restack or change layers

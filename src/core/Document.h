@@ -119,8 +119,11 @@ public:
     // One empty page with one layer.
     void clear();
 
-    // Call after changing a shape in place so views repaint.
+    // Call after changing a shape in place so views repaint (connectors follow it too).
     void notifyShapeChanged(Shape *shape);
+    // Reroutes every connector between the objects it joins (the ones whose objects are gone
+    // keep their last course).
+    void updateConnectors();
 
 signals:
     void changed();

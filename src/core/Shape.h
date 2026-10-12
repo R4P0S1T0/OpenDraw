@@ -262,6 +262,29 @@ struct TextPath {
     bool operator==(const TextPath &) const = default;
 };
 
+// A line joining two objects (by Shape::id()), kept joined as they move: straight from edge to
+// edge, or in horizontal and vertical stretches.
+struct Connector {
+    quint64 from = 0;
+    quint64 to = 0;
+    bool rightAngle = false;
+    bool operator==(const Connector &) const = default;
+};
+
+// A dimension line measuring the distance from `from` to `to`, drawn `offset` to the side
+// (to the left of the from→to direction on screen) and labelled with that distance in the
+// unit it was made with.
+struct Dimension {
+    QPointF from;
+    QPointF to;
+    double offset = 37.8;    // document units
+    double unitFactor = 1.0; // display units per document unit
+    QString unitSuffix;
+    int decimals = 2;
+    double textSize = 14.0;  // document units
+    bool operator==(const Dimension &) const = default;
+};
+
 // Content of a text object.
 struct TextData {
     QString text; // paragraphs (artistic text: lines) separated by '\n'
@@ -376,6 +399,15 @@ public:
     // The shapes between the two ends of a blend (empty for anything else).
     std::vector<std::unique_ptr<Shape>> blendIntermediates() const;
 
+    // Only meaningful for ShapeKind::Path. A connector's nodes are worked out from the objects
+    // it joins (see Document::updateConnectors()).
+    const std::optional<Connector> &connector() const { return m_connector; }
+    void setConnector(const std::optional<Connector> &connector) { m_connector = connector; }
+    // Only meaningful for ShapeKind::Path. A dimension's nodes (its lines, and a box around
+    // the label) are worked out from it; see core/Dimension.h.
+    const std::optional<Dimension> &dimension() const { return m_dimension; }
+    void setDimension(const std::optional<Dimension> &dimension);
+
     // PowerClip: objects placed inside this one (a rectangle, ellipse, curve or text), drawn
     // only where they fall within its outline, between its fill and its outline. They move,
     // scale and turn with it. In page coordinates, like any other shape.
@@ -414,6 +446,8 @@ private:
     int m_blendSteps = 0;                           // groups
     std::optional<Envelope> m_envelope;             // see canHaveEnvelope()
     std::vector<std::unique_ptr<Shape>> m_clipped;  // PowerClip contents
+    std::optional<Connector> m_connector;           // paths
+    std::optional<Dimension> m_dimension;           // paths
     TextData m_text;                                // text
     QPointF m_textOrigin;                           // text
     QImage m_image;                                 // image

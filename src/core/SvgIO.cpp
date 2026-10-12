@@ -1,6 +1,7 @@
 #include "core/SvgIO.h"
 
 #include "core/ContourEffect.h"
+#include "core/Dimension.h"
 #include "core/Document.h"
 #include "core/Extrude.h"
 #include "core/PathOps.h"
@@ -13,6 +14,7 @@
 #include <QHash>
 #include <QPainterPath>
 #include <QRegularExpression>
+#include <QSet>
 #include <QTransform>
 #include <QXmlStreamReader>
 #include <QXmlStreamWriter>
@@ -461,6 +463,49 @@ void writeContourRings(QXmlStreamWriter &w, const std::vector<contour::Ring> &ri
     w.writeEndElement();
 }
 
+// Objects that connectors in the file being written are joined to: they get an id.
+thread_local QSet<quint64> tJoined;
+
+void collectJoined(const std::vector<const Shape *> &shapes)
+{
+    tJoined.clear();
+    for (const Shape *shape : shapes) {
+        if (shape->connector()) {
+            tJoined.insert(shape->connector()->from);
+            tJoined.insert(shape->connector()->to);
+        }
+    }
+}
+
+void writeJoinId(QXmlStreamWriter &w, const Shape &shape)
+{
+    if (tJoined.contains(shape.id()))
+        w.writeAttribute(QString::fromLatin1(kNamespace), QStringLiteral("id"), QString::number(shape.id()));
+}
+
+QString dimensionText(const Dimension &d)
+{
+    return QStringLiteral("%1 %2 %3 %4 %5 %6 %7 %8 %9")
+        .arg(number(d.from.x()), number(d.from.y()), number(d.to.x()), number(d.to.y()), number(d.offset),
+             number(d.unitFactor), QString::number(d.decimals), number(d.textSize), d.unitSuffix);
+}
+
+std::optional<Dimension> parseDimension(QStringView text)
+{
+    const QStringList parts = text.toString().split(QLatin1Char(' '), Qt::SkipEmptyParts);
+    if (parts.size() < 8)
+        return std::nullopt;
+    Dimension d;
+    d.from = QPointF(parts[0].toDouble(), parts[1].toDouble());
+    d.to = QPointF(parts[2].toDouble(), parts[3].toDouble());
+    d.offset = parts[4].toDouble();
+    d.unitFactor = parts[5].toDouble();
+    d.decimals = parts[6].toInt();
+    d.textSize = parts[7].toDouble();
+    d.unitSuffix = parts.mid(8).join(QLatin1Char(' '));
+    return d;
+}
+
 QString envelopeText(const Envelope &e)
 {
     QStringList numbers;
@@ -489,6 +534,35 @@ void writeShapeItself(QXmlStreamWriter &w, const Shape &shape, int &gradientCoun
 // clip-path), with the frame's outline drawn again over them for other programs.
 void writeShape(QXmlStreamWriter &w, const Shape &shape, int &gradientCount)
 {
+    if (const auto &d = shape.dimension()) {
+        // A group with the dimension's settings and style; inside, its lines, arrowheads and
+        // label as plain shapes for other programs (OpenDraw draws them again from the settings).
+        const QString ns = QString::fromLatin1(kNamespace);
+        w.writeStartElement(QStringLiteral("g"));
+        w.writeAttribute(ns, QStringLiteral("dimension"), dimensionText(*d));
+        writeLabel(w, shape.name());
+        writeJoinId(w, shape);
+        Style lineStyle = shape.style();
+        lineStyle.fill = Qt::transparent;
+        if (!lineStyle.hasStroke()) {
+            lineStyle.stroke = Qt::black;
+            lineStyle.strokeWidth = 1.0;
+        }
+        writeStyle(w, lineStyle, QString());
+        w.writeStartElement(QStringLiteral("g"));
+        w.writeAttribute(ns, QStringLiteral("generated"), QStringLiteral("true"));
+        w.writeEmptyElement(QStringLiteral("path"));
+        w.writeAttribute(QStringLiteral("d"), pathops::toSvg(pathops::fromPainterPath(dimension::lines(*d))));
+        w.writeEmptyElement(QStringLiteral("path"));
+        QPainterPath marks = dimension::arrowheads(*d, lineStyle.strokeWidth);
+        marks.addPath(dimension::labelOutline(*d));
+        w.writeAttribute(QStringLiteral("d"), pathText(marks));
+        writePaint(w, QStringLiteral("fill"), lineStyle.stroke, true);
+        w.writeAttribute(QStringLiteral("stroke"), QStringLiteral("none"));
+        w.writeEndElement();
+        w.writeEndElement();
+        return;
+    }
     if (shape.clippedContents().empty()) {
         writeShapeItself(w, shape, gradientCount);
         return;
@@ -648,6 +722,7 @@ void writeShapeElement(QXmlStreamWriter &w, const Shape &shape, int &gradientCou
     case ShapeKind::Group:
         w.writeStartElement(QStringLiteral("g"));
         writeLabel(w, shape.name());
+        writeJoinId(w, shape);
         if (shape.isBlend()) {
             // The steps are written too, so other programs show them; OpenDraw skips them on
             // reading and works them out again.
@@ -685,6 +760,7 @@ void writeShapeElement(QXmlStreamWriter &w, const Shape &shape, int &gradientCou
         }
         w.writeStartElement(QStringLiteral("text"));
         writeLabel(w, shape.name());
+        writeJoinId(w, shape);
         w.writeAttribute(QStringLiteral("xml:space"), QStringLiteral("preserve"));
         w.writeAttribute(QStringLiteral("x"), number(origin.x()));
         w.writeAttribute(QStringLiteral("y"), number(origin.y()));
@@ -815,10 +891,14 @@ void writeShapeElement(QXmlStreamWriter &w, const Shape &shape, int &gradientCou
     }
     }
     writeLabel(w, shape.name());
+    writeJoinId(w, shape);
     writeShapeTransform(w, shape);
     writeStyle(w, shape.style(), gradientId);
     writeEffects(w, shape.style(), effectIds, original);
     writeArrows(w, shape.style(), markerIds);
+    if (const auto &c = shape.connector())
+        w.writeAttribute(QString::fromLatin1(kNamespace), QStringLiteral("connector"),
+                         QStringLiteral("%1 %2 %3").arg(c->from).arg(c->to).arg(c->rightAngle ? 1 : 0));
     w.writeEndElement();
 }
 
@@ -972,6 +1052,9 @@ struct Context {
     std::optional<Envelope> envelope; // for Role::Group: the envelope of the object inside
     bool powerClip = false;           // for Role::Group: a PowerClip frame and its contents
     std::optional<PathData> clip;     // another program's clip-path on this element, on the page
+    QString fileId;                   // opendraw:id, for connectors joined to the object
+    std::optional<Dimension> dimension; // for a dimension's group
+    Style dimensionStyle;
 };
 
 // What an element clipped by another program's clip-path becomes: a PowerClip frame with no
@@ -1527,6 +1610,11 @@ void applyOutlineExtras(Shape &shape, const Properties &props, const QXmlStreamA
                         ReadReport &report)
 {
     const QString ns = QString::fromLatin1(kNamespace);
+    if (const QStringList c = attributes.value(ns, QStringLiteral("connector")).toString().split(QLatin1Char(' '));
+        c.size() == 3 && shape.kind() == ShapeKind::Path) {
+        // Ids in the file, matched to the objects once the whole file is read.
+        shape.setConnector(Connector{c[0].toULongLong(), c[1].toULongLong(), c[2] == u"1"});
+    }
     Style style = shape.style();
     style.scaleStroke = attributes.value(ns, QStringLiteral("scale-stroke")) == u"true";
     auto arrow = [&](const QString &ownName, const QString &marker) {
@@ -1889,6 +1977,7 @@ QByteArray writeShapes(const std::vector<const Shape *> &shapes, const QSizeF &p
     QXmlStreamWriter w(&data);
     w.writeStartDocument();
     writeRootStart(w, pageSize);
+    collectJoined(shapes);
     int gradientCount = 0;
     for (const Shape *shape : shapes)
         writeShape(w, *shape, gradientCount);
@@ -1941,6 +2030,16 @@ bool write(const Document &document, QIODevice *device)
     }
 
     // Layers use Inkscape's layer markup too, so other editors show them as layers.
+    {
+        std::vector<const Shape *> all;
+        for (const auto &page : document.pages()) {
+            for (const auto &layer : page->layers) {
+                for (const auto &shape : layer->shapes)
+                    all.push_back(shape.get());
+            }
+        }
+        collectJoined(all);
+    }
     int gradientCount = 0;
     auto writeLayer = [&w, &gradientCount](const Layer &layer) {
         w.writeStartElement(QStringLiteral("g"));
@@ -1991,6 +2090,7 @@ bool read(QIODevice *device, Document &document, QString *errorMessage, ReadRepo
     std::vector<std::unique_ptr<Page>> pages;
     pages.push_back(std::make_unique<Page>());
     std::vector<Guide> guides;
+    QHash<QString, Shape *> joinable; // objects connectors may join, by their id in the file
     double userTop = 0.0;    // root viewBox, for guide positions
     double userHeight = pageSize.height();
 
@@ -2002,7 +2102,14 @@ bool read(QIODevice *device, Document &document, QString *errorMessage, ReadRepo
                 case Role::Group: {
                     ShapeList children = std::move(containers.back());
                     containers.pop_back();
-                    if (stack.back().clip && !children.empty()) {
+                    const std::size_t before = containers.back().size();
+                    if (const auto &dimension = stack.back().dimension) {
+                        // A dimension, drawn again from its settings.
+                        auto shape = std::make_unique<Shape>(PathData{}, stack.back().dimensionStyle);
+                        shape->setDimension(dimension);
+                        shape->setName(stack.back().label);
+                        containers.back().push_back(std::move(shape));
+                    } else if (stack.back().clip && !children.empty()) {
                         containers.back().push_back(clipFrame(*stack.back().clip, std::move(children)));
                     } else if (stack.back().powerClip && !children.empty()
                         && Shape::canHoldContents(children.front()->kind())) {
@@ -2023,6 +2130,8 @@ bool read(QIODevice *device, Document &document, QString *errorMessage, ReadRepo
                             group->setBlendSteps(stack.back().blendSteps);
                         containers.back().push_back(std::move(group));
                     }
+                    if (!stack.back().fileId.isEmpty() && containers.back().size() > before)
+                        joinable.insert(stack.back().fileId, containers.back().back().get());
                     break;
                 }
                 case Role::Layer:
@@ -2083,6 +2192,10 @@ bool read(QIODevice *device, Document &document, QString *errorMessage, ReadRepo
             context.rendering = false;
         context.envelope = name == u"g" ? parseEnvelope(attributes.value(ns, QStringLiteral("envelope"))) : std::nullopt;
         context.powerClip = name == u"g" && attributes.value(ns, QStringLiteral("powerclip")) == u"true";
+        context.fileId = attributes.value(ns, QStringLiteral("id")).toString();
+        context.dimension = name == u"g" ? parseDimension(attributes.value(ns, QStringLiteral("dimension"))) : std::nullopt;
+        if (context.dimension)
+            context.dimensionStyle = props.style(1.0, localReport);
         context.clip.reset();
         if (const QString clipRef = props.own(QStringLiteral("clip-path")).trimmed();
             clipRef.startsWith(u"url(") && !parent.powerClip && context.rendering) {
@@ -2171,6 +2284,8 @@ bool read(QIODevice *device, Document &document, QString *errorMessage, ReadRepo
                 } else {
                     containers.back().push_back(std::move(text));
                 }
+                if (!context.fileId.isEmpty())
+                    joinable.insert(context.fileId, containers.back().back().get());
             }
             continue; // readText consumed the whole element, end tag included
         } else if (context.rendering) {
@@ -2265,6 +2380,8 @@ bool read(QIODevice *device, Document &document, QString *errorMessage, ReadRepo
                 } else {
                     containers.back().push_back(std::move(shape));
                 }
+                if (!context.fileId.isEmpty())
+                    joinable.insert(context.fileId, containers.back().back().get());
             }
 
             if (name == u"g") {
@@ -2299,6 +2416,27 @@ bool read(QIODevice *device, Document &document, QString *errorMessage, ReadRepo
     for (std::size_t i = 0; i < pages.size(); ++i) {
         if (pages[i]->name.isEmpty())
             pages[i]->name = QCoreApplication::translate("Document", "Page %1").arg(i + 1);
+    }
+
+    // Connectors refer to objects by their ids in the file; join them to the objects just read
+    // (a connector whose objects are not in the file becomes a plain line).
+    for (const auto &page : pages) {
+        for (const auto &layer : page->layers) {
+            for (const auto &shape : layer->shapes) {
+                if (!shape->connector())
+                    continue;
+                Connector c = *shape->connector();
+                const Shape *from = joinable.value(QString::number(c.from));
+                const Shape *to = joinable.value(QString::number(c.to));
+                if (from && to) {
+                    c.from = from->id();
+                    c.to = to->id();
+                    shape->setConnector(c);
+                } else {
+                    shape->setConnector(std::nullopt);
+                }
+            }
+        }
     }
 
     document.setPages(std::move(pages));

@@ -431,6 +431,22 @@ void PropertyBar::createEffectFields()
             m_canvas->removeSelectedFillStop();
     });
 
+    // Dimension tool
+    m_dimensionOffset = addField(tr("Distance"), tr("How far the dimension line is from the measured points"),
+                                 -kMaxDisplay, m_dimensionActions);
+    m_dimensionTextSize = addField(tr("Figures"), tr("Height of the measurement's figures"), 0.0, m_dimensionActions);
+    for (QDoubleSpinBox *box : {m_dimensionOffset, m_dimensionTextSize}) {
+        connect(box, &QDoubleSpinBox::editingFinished, this, [this] {
+            if (m_updatingEffects)
+                return;
+            m_toolSettings.dimensionOffset = units().fromDisplay(m_dimensionOffset->value());
+            m_toolSettings.dimensionTextSize = std::max(units().fromDisplay(m_dimensionTextSize->value()), 1.0);
+            emit toolSettingsChanged(m_toolSettings);
+            if (m_canvas)
+                m_canvas->setDimensionOptions(m_toolSettings.dimensionOffset, m_toolSettings.dimensionTextSize);
+        });
+    }
+
     // Mesh fill tool
     m_meshColumns = addIntField(tr("Columns"), tr("Columns of the mesh"), 1, 20, m_meshActions);
     m_meshRows = addIntField(tr("Rows"), tr("Rows of the mesh"), 1, 20, m_meshActions);
@@ -725,6 +741,13 @@ void PropertyBar::refreshEffects()
         nodeSwatch.fill(node ? QColor(node->red(), node->green(), node->blue()) : QColor(Qt::transparent));
         m_meshNodeColor->setIcon(QIcon(nodeSwatch));
         m_meshNodeColor->setEnabled(node.has_value());
+
+        const Shape *single = m_canvas->selectedShape();
+        const bool measured = single && single->dimension();
+        setValueQuietly(m_dimensionOffset,
+                        units().toDisplay(measured ? single->dimension()->offset : m_toolSettings.dimensionOffset));
+        setValueQuietly(m_dimensionTextSize,
+                        units().toDisplay(measured ? single->dimension()->textSize : m_toolSettings.dimensionTextSize));
     }
 
     const Shape *selected = m_canvas->selectedShape();
@@ -820,6 +843,8 @@ QList<QAction *> *PropertyBar::toolGroup()
         return &m_interactiveFillActions;
     case CanvasWidget::Tool::Mesh:
         return &m_meshActions;
+    case CanvasWidget::Tool::Dimension:
+        return &m_dimensionActions;
     default:
         return nullptr;
     }
@@ -851,7 +876,7 @@ void PropertyBar::updateMode()
     const bool always = tool == &m_eyedropperActions || tool == &m_shadowActions || tool == &m_transparencyActions
                         || tool == &m_blendActions || tool == &m_contourActions || tool == &m_envelopeActions
                         || tool == &m_extrudeActions || tool == &m_smartFillActions
-                        || tool == &m_interactiveFillActions || tool == &m_meshActions;
+                        || tool == &m_interactiveFillActions || tool == &m_meshActions || tool == &m_dimensionActions;
     const bool showTool = tool && (always || !m_anySelected);
     const bool showObject = m_anySelected && !always;
     const bool showPage = !m_anySelected && !showTool;
@@ -859,7 +884,7 @@ void PropertyBar::updateMode()
                                     &m_graphActions, &m_eyedropperActions, &m_shadowActions, &m_transparencyActions,
                                     &m_blendActions, &m_contourActions, &m_envelopeActions,
                                     &m_extrudeActions, &m_smartFillActions, &m_interactiveFillActions,
-                                    &m_meshActions}) {
+                                    &m_meshActions, &m_dimensionActions}) {
         for (QAction *action : std::as_const(*group))
             action->setVisible(showTool && group == tool);
     }
@@ -885,7 +910,8 @@ void PropertyBar::updateUnits()
     const QString suffix = QLatin1Char(' ') + units().suffix();
     for (QDoubleSpinBox *box : {m_pageWidth, m_pageHeight, m_nudge, m_duplicateX, m_duplicateY, m_x, m_y, m_width,
                                 m_height, m_outline, m_cornerRadius, m_newCornerRadius, m_shadowX, m_shadowY, m_shadowBlur,
-                                m_contourOffset, m_extrudeX, m_extrudeY, m_textPathOffset}) {
+                                m_contourOffset, m_extrudeX, m_extrudeY, m_textPathOffset, m_dimensionOffset,
+                                m_dimensionTextSize}) {
         box->setSuffix(suffix);
         box->setDecimals(units().decimals());
     }
