@@ -102,6 +102,13 @@ private:
     QList<QAction *> m_envelopeActions;
     QList<QAction *> m_extrudeActions;
     QList<QAction *> m_smartFillActions;
+    QList<QAction *> m_interactiveFillActions;
+    QList<QAction *> m_meshActions;
+    QSpinBox *m_meshColumns;
+    QSpinBox *m_meshRows;
+    QToolButton *m_meshNodeColor;
+    QComboBox *m_fillType;
+    QToolButton *m_fillStopColor;
     QToolButton *m_smartFillColor;
     QCheckBox *m_smartFillOutline;
     QSpinBox *m_extrudeDepth;

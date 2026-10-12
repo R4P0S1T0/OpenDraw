@@ -29,7 +29,7 @@ public:
     enum class Tool {
         Select, Node, Zoom, Pan, Freehand, Line, Bezier, Rectangle, Ellipse,
         Polygon, Star, Spiral, GraphPaper, Text, DropShadow, Transparency, Eyedropper, Blend, Contour, Envelope,
-        Extrude, SmartFill,
+        Extrude, SmartFill, InteractiveFill, Mesh,
     };
 
     CanvasWidget(Document *document, QUndoStack *undoStack, QWidget *parent = nullptr);
@@ -152,6 +152,23 @@ public slots:
     void breakBlendApart();
     // Takes the envelope off the selected objects.
     void removeEnvelope();
+    // Interactive fill tool: the colour of the selected object's gradient picked on the canvas.
+    std::optional<GradientStop> selectedFillStop() const;
+    int selectedFillStopIndex() const { return m_fillStop; }
+    void setSelectedFillStop(int stop);
+    // Recolours the selected gradient colour; false when none is selected.
+    bool setSelectedFillStopColor(const QColor &color);
+    void removeSelectedFillStop();
+    // Turns the selected object's fill into a linear or radial gradient (keeping its colours).
+    void setFillGradientType(opendraw::Gradient::Type type);
+    // Mesh fill tool: the node picked on the selected object's mesh.
+    int selectedMeshNode() const { return m_meshNode; }
+    void setSelectedMeshNode(int node);
+    std::optional<QColor> selectedMeshNodeColor() const;
+    // Recolours the picked node; false when none is picked.
+    bool setSelectedMeshNodeColor(const QColor &color);
+    void setMeshGrid(int columns, int rows);
+    void removeMesh();
     // PowerClip: the objects selected before the last one go inside it (a rectangle, ellipse,
     // curve or text), and back out of selected frames.
     void placeInsideFrame();
@@ -201,6 +218,8 @@ signals:
     void eyedropperColorChanged(const QColor &color);
     // The default style for new shapes changed.
     void defaultStyleChanged();
+    // Another gradient colour was picked, or the picked one changed.
+    void fillStopChanged();
 
 protected:
     bool event(QEvent *event) override;
@@ -218,6 +237,7 @@ private:
     enum class Drag {
         None, Pan, Move, Resize, Marquee, Create, NodeMove, NodeHandle, BezierHandle, Freehand, ZoomBox, Guide,
         Rotate, Skew, RotationCenter, TextFrame, TextSelect, Effect, EffectHandle, Blend, EnvelopeHandle,
+        FillCreate, FillHandle,
     };
     enum class NodeHandle { In, Out };
 
@@ -293,6 +313,20 @@ private:
     std::array<QPointF, 12> envelopeHandles(const Shape &shape) const;
     int envelopeHandleAt(const QPointF &widgetPosition) const;
     void dragEnvelopeHandle(const QPointF &documentPosition);
+    // Interactive fill tool: handles are the line's ends (0 and 1) and, from kFillStopHandle
+    // on, the colours along it.
+    static constexpr int kFillStopHandle = 100;
+    Shape *fillShape() const;
+    std::array<QPointF, 2> fillAxis(const Shape &shape) const;
+    int fillHandleAt(const QPointF &widgetPosition) const;
+    void addFillStopAt(const QPointF &widgetPosition);
+    void dragFill(const QPointF &documentPosition, Qt::KeyboardModifiers modifiers);
+    void commitFillDrag();
+    void paintFillHandles(QPainter &painter);
+    Shape *meshShape() const;
+    QPointF meshNodePosition(const Shape &shape, int row, int column) const;
+    int meshNodeAt(const QPointF &widgetPosition) const;
+    void paintMeshHandles(QPainter &painter);
     // Smart fill tool: a new object filling the area the click is enclosed in.
     void smartFill(const QPointF &documentPosition);
     void paintEnvelope(QPainter &painter);
@@ -370,6 +404,10 @@ private:
     std::vector<std::pair<Shape *, Style>> m_effectBefore; // styles before a shadow/transparency drag
     int m_effectHandle = -1;               // transparency handle being dragged: 0 start, 1 end
     Shape *m_blendStart = nullptr;         // object a blend drag started on
+    int m_meshNode = -1;                   // mesh node picked with the mesh fill tool
+    int m_fillStop = -1;                   // gradient colour picked with the interactive fill tool
+    int m_fillHandle = -1;                 // its handle being dragged
+    std::optional<Style> m_fillBefore;     // the style when that drag started
     int m_envelopeHandle = -1;             // envelope point being dragged
     std::optional<Envelope> m_envelopeBefore; // the envelope when that drag started
     bool m_marqueeAdds = false;

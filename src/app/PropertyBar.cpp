@@ -391,6 +391,75 @@ void PropertyBar::createEffectFields()
         refreshEffects();
     });
 
+    // Interactive fill tool
+    m_fillType = new QComboBox(this);
+    m_fillType->addItems({tr("Uniform"), tr("Linear"), tr("Radial")});
+    m_fillType->setToolTip(tr("Kind of fill"));
+    m_interactiveFillActions << addWidget(m_fillType);
+    m_fillStopColor = addButton(QIcon(), tr("Colour of the selected gradient colour"), m_interactiveFillActions);
+    QToolButton *removeStop = addButton(icon(Icon::FillNone), tr("Remove the selected gradient colour (Delete)"),
+                                        m_interactiveFillActions);
+    auto *stopHint = new QLabel(this);
+    stopHint->setContentsMargins(6, 0, 6, 0);
+    stopHint->setText(tr("Double-click the line to add a colour"));
+    m_interactiveFillActions << addWidget(stopHint);
+    connect(m_fillType, &QComboBox::activated, this, [this](int index) {
+        if (!m_canvas)
+            return;
+        if (index == 0) {
+            // Uniform: the first colour of the gradient fills the object.
+            m_canvas->restyle(tr("Fill"), [](Style &style) {
+                if (style.gradient && !style.gradient->stops.empty())
+                    style.fill = style.gradient->stops.front().color;
+                style.gradient.reset();
+            });
+        } else {
+            m_canvas->setFillGradientType(index == 2 ? Gradient::Type::Radial : Gradient::Type::Linear);
+        }
+        refreshEffects();
+    });
+    connect(m_fillStopColor, &QToolButton::clicked, this, [this] {
+        if (!m_canvas || !m_canvas->selectedFillStop())
+            return;
+        const QColor color = QColorDialog::getColor(m_canvas->selectedFillStop()->color, this,
+                                                    m_fillStopColor->toolTip(), QColorDialog::ShowAlphaChannel);
+        if (color.isValid())
+            m_canvas->setSelectedFillStopColor(color);
+    });
+    connect(removeStop, &QToolButton::clicked, this, [this] {
+        if (m_canvas)
+            m_canvas->removeSelectedFillStop();
+    });
+
+    // Mesh fill tool
+    m_meshColumns = addIntField(tr("Columns"), tr("Columns of the mesh"), 1, 20, m_meshActions);
+    m_meshRows = addIntField(tr("Rows"), tr("Rows of the mesh"), 1, 20, m_meshActions);
+    m_meshNodeColor = addButton(QIcon(), tr("Colour of the selected node"), m_meshActions);
+    QToolButton *noMesh = addButton(icon(Icon::FillNone), tr("Remove the mesh"), m_meshActions);
+    for (QSpinBox *box : {m_meshColumns, m_meshRows}) {
+        connect(box, &QSpinBox::valueChanged, this, [this] {
+            if (m_updatingEffects || m_updatingToolFields)
+                return;
+            m_toolSettings.meshColumns = m_meshColumns->value();
+            m_toolSettings.meshRows = m_meshRows->value();
+            emit toolSettingsChanged(m_toolSettings);
+            if (m_canvas)
+                m_canvas->setMeshGrid(m_meshColumns->value(), m_meshRows->value());
+        });
+    }
+    connect(m_meshNodeColor, &QToolButton::clicked, this, [this] {
+        if (!m_canvas || !m_canvas->selectedMeshNodeColor())
+            return;
+        const QColor color = QColorDialog::getColor(*m_canvas->selectedMeshNodeColor(), this, m_meshNodeColor->toolTip(),
+                                                    QColorDialog::ShowAlphaChannel);
+        if (color.isValid())
+            m_canvas->setSelectedMeshNodeColor(color);
+    });
+    connect(noMesh, &QToolButton::clicked, this, [this] {
+        if (m_canvas)
+            m_canvas->removeMesh();
+    });
+
     // Smart fill tool
     auto *smartCaption = new QLabel(tr("Fill"), this);
     smartCaption->setContentsMargins(6, 0, 3, 0);
@@ -487,6 +556,7 @@ void PropertyBar::setCanvas(CanvasWidget *canvas)
 {
     m_canvas = canvas;
     connect(canvas, &CanvasWidget::selectionChanged, this, &PropertyBar::refreshEffects);
+    connect(canvas, &CanvasWidget::fillStopChanged, this, &PropertyBar::refreshEffects);
     refreshEffects();
 }
 
@@ -637,6 +707,26 @@ void PropertyBar::refreshEffects()
         m_extrudeColor->setIcon(QIcon(swatch));
     }
 
+    {
+        const QSignalBlocker blocker(m_fillType);
+        m_fillType->setCurrentIndex(!style.gradient ? 0 : style.gradient->type == Gradient::Type::Radial ? 2 : 1);
+        const auto stop = m_canvas->selectedFillStop();
+        QPixmap swatch(28, 16);
+        swatch.fill(stop ? QColor(stop->color.red(), stop->color.green(), stop->color.blue()) : QColor(Qt::transparent));
+        m_fillStopColor->setIcon(QIcon(swatch));
+        m_fillStopColor->setEnabled(stop.has_value());
+
+        const QSignalBlocker b1(m_meshColumns), b2(m_meshRows);
+        const bool hasMesh = style.mesh && style.mesh->isValid();
+        m_meshColumns->setValue(hasMesh ? style.mesh->columns : m_toolSettings.meshColumns);
+        m_meshRows->setValue(hasMesh ? style.mesh->rows : m_toolSettings.meshRows);
+        const auto node = m_canvas->selectedMeshNodeColor();
+        QPixmap nodeSwatch(28, 16);
+        nodeSwatch.fill(node ? QColor(node->red(), node->green(), node->blue()) : QColor(Qt::transparent));
+        m_meshNodeColor->setIcon(QIcon(nodeSwatch));
+        m_meshNodeColor->setEnabled(node.has_value());
+    }
+
     const Shape *selected = m_canvas->selectedShape();
     m_blendSteps->setValue(selected && selected->isBlend() ? selected->blendSteps() : m_toolSettings.blendSteps);
     m_updatingEffects = false;
@@ -726,6 +816,10 @@ QList<QAction *> *PropertyBar::toolGroup()
         return &m_extrudeActions;
     case CanvasWidget::Tool::SmartFill:
         return &m_smartFillActions;
+    case CanvasWidget::Tool::InteractiveFill:
+        return &m_interactiveFillActions;
+    case CanvasWidget::Tool::Mesh:
+        return &m_meshActions;
     default:
         return nullptr;
     }
@@ -756,14 +850,16 @@ void PropertyBar::updateMode()
     // These tools act on the selection, so their options show with it.
     const bool always = tool == &m_eyedropperActions || tool == &m_shadowActions || tool == &m_transparencyActions
                         || tool == &m_blendActions || tool == &m_contourActions || tool == &m_envelopeActions
-                        || tool == &m_extrudeActions || tool == &m_smartFillActions;
+                        || tool == &m_extrudeActions || tool == &m_smartFillActions
+                        || tool == &m_interactiveFillActions || tool == &m_meshActions;
     const bool showTool = tool && (always || !m_anySelected);
     const bool showObject = m_anySelected && !always;
     const bool showPage = !m_anySelected && !showTool;
     for (QList<QAction *> *group : {&m_rectangleToolActions, &m_polygonActions, &m_starActions, &m_spiralActions,
                                     &m_graphActions, &m_eyedropperActions, &m_shadowActions, &m_transparencyActions,
                                     &m_blendActions, &m_contourActions, &m_envelopeActions,
-                                    &m_extrudeActions, &m_smartFillActions}) {
+                                    &m_extrudeActions, &m_smartFillActions, &m_interactiveFillActions,
+                                    &m_meshActions}) {
         for (QAction *action : std::as_const(*group))
             action->setVisible(showTool && group == tool);
     }

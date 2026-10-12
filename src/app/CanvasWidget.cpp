@@ -695,6 +695,359 @@ void CanvasWidget::paintEffectHandles(QPainter &painter)
     }
 }
 
+// --- Interactive fill tool: the selected object's gradient, edited on the canvas.
+
+Shape *CanvasWidget::fillShape() const
+{
+    Shape *single = selectedShape();
+    return m_tool == Tool::InteractiveFill && single && single->kind() != ShapeKind::Group
+                   && single->kind() != ShapeKind::Image
+               ? single
+               : nullptr;
+}
+
+std::array<QPointF, 2> CanvasWidget::fillAxis(const Shape &shape) const
+{
+    // Linear: from start to end. Radial: from the centre out to the edge (along the box's width).
+    const Gradient &g = *shape.style().gradient;
+    if (g.type == Gradient::Type::Radial) {
+        const QRectF box = shape.localBounds();
+        const QPointF centre = fromFraction(shape, g.center);
+        const QPointF edge = fromFraction(shape, g.center + QPointF(g.radius, 0.0));
+        Q_UNUSED(box);
+        return {centre, edge};
+    }
+    return {fromFraction(shape, g.start), fromFraction(shape, g.end)};
+}
+
+int CanvasWidget::fillHandleAt(const QPointF &widgetPosition) const
+{
+    const Shape *shape = fillShape();
+    if (!shape || !shape->style().gradient)
+        return -1;
+    const auto axis = fillAxis(*shape);
+    const std::vector<GradientStop> &stops = shape->style().gradient->stops;
+    // Middle stops first (they may sit near the ends), then the two ends.
+    for (int i = 1; i + 1 < int(stops.size()); ++i) {
+        const QPointF p = axis[0] + (axis[1] - axis[0]) * stops[i].offset;
+        if (distance(toWidget(p), widgetPosition) <= kNodeHitPx + 2)
+            return kFillStopHandle + i;
+    }
+    for (int end = 0; end < 2; ++end) {
+        if (distance(toWidget(axis[end]), widgetPosition) <= kNodeHitPx + 3)
+            return end;
+    }
+    return -1;
+}
+
+void CanvasWidget::setSelectedFillStop(int stop)
+{
+    if (stop == m_fillStop)
+        return;
+    m_fillStop = stop;
+    update();
+    emit fillStopChanged();
+}
+
+std::optional<GradientStop> CanvasWidget::selectedFillStop() const
+{
+    const Shape *shape = fillShape();
+    if (!shape || !shape->style().gradient || m_fillStop < 0
+        || m_fillStop >= int(shape->style().gradient->stops.size()))
+        return std::nullopt;
+    return shape->style().gradient->stops[m_fillStop];
+}
+
+bool CanvasWidget::setSelectedFillStopColor(const QColor &color)
+{
+    Shape *shape = fillShape();
+    if (!selectedFillStop())
+        return false;
+    Style style = shape->style();
+    style.gradient->stops[m_fillStop].color = color;
+    m_undoStack->push(new SetStyleCommand(m_document, shape, style));
+    emit fillStopChanged();
+    return true;
+}
+
+void CanvasWidget::removeSelectedFillStop()
+{
+    Shape *shape = fillShape();
+    if (!selectedFillStop() || shape->style().gradient->stops.size() <= 2)
+        return;
+    Style style = shape->style();
+    style.gradient->stops.erase(style.gradient->stops.begin() + m_fillStop);
+    m_undoStack->push(new SetStyleCommand(m_document, shape, style));
+    setSelectedFillStop(-1);
+}
+
+void CanvasWidget::setFillGradientType(Gradient::Type type)
+{
+    Shape *shape = fillShape();
+    if (!shape)
+        return;
+    Style style = shape->style();
+    if (style.gradient && style.gradient->type == type)
+        return;
+    // Keep the colours; a new gradient runs across the object or from its centre.
+    std::vector<GradientStop> stops = style.gradient ? style.gradient->stops
+                                                     : std::vector<GradientStop>{{0.0, style.fill.alpha() > 0 ? style.fill : QColor(Qt::black)},
+                                                                                 {1.0, Qt::white}};
+    Gradient g = type == Gradient::Type::Radial ? Gradient::radial(Qt::black, Qt::white)
+                                                : Gradient::linear(Qt::black, Qt::white, 0);
+    g.stops = std::move(stops);
+    style.gradient = g;
+    style.pattern.reset();
+    m_undoStack->push(new SetStyleCommand(m_document, shape, style));
+    emit fillStopChanged();
+}
+
+void CanvasWidget::addFillStopAt(const QPointF &widgetPosition)
+{
+    Shape *shape = fillShape();
+    if (!shape || !shape->style().gradient)
+        return;
+    // A new colour where the line was double-clicked, the colour the gradient has there.
+    const auto axis = fillAxis(*shape);
+    const QPointF a = toWidget(axis[0]), b = toWidget(axis[1]);
+    const QPointF d = b - a;
+    const double lengthSquared = d.x() * d.x() + d.y() * d.y();
+    if (lengthSquared <= 0.0)
+        return;
+    const double t = std::clamp(((widgetPosition - a).x() * d.x() + (widgetPosition - a).y() * d.y()) / lengthSquared, 0.0, 1.0);
+    if (distance(a + d * t, widgetPosition) > kNodeHitPx + 3)
+        return;
+    Style style = shape->style();
+    std::vector<GradientStop> &stops = style.gradient->stops;
+    auto after = std::find_if(stops.begin(), stops.end(), [t](const GradientStop &s) { return s.offset > t; });
+    QColor color = stops.empty() ? QColor(Qt::black) : stops.back().color;
+    if (after != stops.begin() && after != stops.end()) {
+        const GradientStop &left = *(after - 1), &right = *after;
+        const double span = right.offset - left.offset;
+        color = blend::mix(left.color, right.color, span > 0 ? (t - left.offset) / span : 0.0);
+    } else if (after == stops.begin() && !stops.empty()) {
+        color = stops.front().color;
+    }
+    const int index = int(after - stops.begin());
+    stops.insert(after, GradientStop{t, color});
+    m_undoStack->push(new SetStyleCommand(m_document, shape, style));
+    setSelectedFillStop(index);
+}
+
+void CanvasWidget::dragFill(const QPointF &documentPosition, Qt::KeyboardModifiers modifiers)
+{
+    Shape *shape = fillShape();
+    if (!shape || !m_fillBefore)
+        return;
+    Style style = *m_fillBefore;
+    if (m_drag == Drag::FillCreate) {
+        // A linear gradient from where the drag started to the pointer (Ctrl: 15° steps),
+        // keeping the colours the object has.
+        QPointF to = documentPosition;
+        if (modifiers & Qt::ControlModifier) {
+            const QPointF d = to - m_dragStart;
+            const double length = std::hypot(d.x(), d.y());
+            const double step = 15.0 * std::numbers::pi / 180.0;
+            const double angle = std::round(std::atan2(d.y(), d.x()) / step) * step;
+            to = m_dragStart + QPointF(std::cos(angle), std::sin(angle)) * length;
+        }
+        Gradient g = style.gradient && style.gradient->type == Gradient::Type::Linear ? *style.gradient
+                                                                                      : Gradient::linear(Qt::black, Qt::white, 0);
+        if (!style.gradient)
+            g.stops = {{0.0, style.fill.alpha() > 0 ? style.fill : QColor(Qt::black)}, {1.0, Qt::white}};
+        else if (style.gradient->type != Gradient::Type::Linear)
+            g.stops = style.gradient->stops;
+        g.start = toFraction(*shape, m_dragStart);
+        g.end = toFraction(*shape, to);
+        style.gradient = g;
+        style.pattern.reset();
+    } else if (style.gradient) {
+        Gradient &g = *style.gradient;
+        const QPointF fraction = toFraction(*shape, snapPoint(documentPosition));
+        if (m_fillHandle >= kFillStopHandle) {
+            // A middle colour slides along the line, between its neighbours.
+            const int i = m_fillHandle - kFillStopHandle;
+            const auto axis = fillAxis(*shape);
+            const QPointF d = axis[1] - axis[0];
+            const double lengthSquared = d.x() * d.x() + d.y() * d.y();
+            if (lengthSquared > 0.0 && i > 0 && i + 1 < int(g.stops.size())) {
+                const QPointF p = documentPosition - axis[0];
+                const double t = (p.x() * d.x() + p.y() * d.y()) / lengthSquared;
+                g.stops[i].offset = std::clamp(t, g.stops[i - 1].offset, g.stops[i + 1].offset);
+            }
+        } else if (g.type == Gradient::Type::Radial) {
+            if (m_fillHandle == 0)
+                g.center = fraction;
+            else
+                g.radius = std::max(std::hypot(fraction.x() - g.center.x(), fraction.y() - g.center.y()), 0.01);
+        } else if (m_fillHandle == 0) {
+            g.start = fraction;
+        } else {
+            g.end = fraction;
+        }
+    }
+    shape->setStyle(style);
+    m_document->notifyShapeChanged(shape);
+}
+
+void CanvasWidget::commitFillDrag()
+{
+    Shape *shape = fillShape();
+    if (shape && m_fillBefore && !(shape->style().gradient == m_fillBefore->gradient)) {
+        const Style after = shape->style();
+        shape->setStyle(*m_fillBefore);
+        m_undoStack->push(new SetStyleCommand(m_document, shape, after));
+    } else if (shape && m_fillBefore) {
+        shape->setStyle(*m_fillBefore);
+    }
+    m_fillBefore.reset();
+    m_fillHandle = -1;
+    emit fillStopChanged();
+}
+
+void CanvasWidget::paintFillHandles(QPainter &painter)
+{
+    const Shape *shape = fillShape();
+    if (!shape || !shape->style().gradient)
+        return;
+    const auto axis = fillAxis(*shape);
+    const QPointF a = toWidget(axis[0]), b = toWidget(axis[1]);
+    const QColor highlight = palette().color(QPalette::Highlight);
+    painter.save();
+    painter.setRenderHint(QPainter::Antialiasing);
+    painter.setPen(QPen(highlight, 1.5));
+    painter.drawLine(a, b);
+    const std::vector<GradientStop> &stops = shape->style().gradient->stops;
+    for (int i = 0; i < int(stops.size()); ++i) {
+        const QPointF p = a + (b - a) * stops[i].offset;
+        const bool selected = i == m_fillStop;
+        const double size = (i == 0 || i + 1 == int(stops.size())) ? 11 : 9;
+        painter.setPen(QPen(selected ? highlight : QColor(0x20, 0x20, 0x20), selected ? 2.5 : 1));
+        painter.setBrush(QColor(stops[i].color.red(), stops[i].color.green(), stops[i].color.blue()));
+        painter.drawRect(squareAround(p, size));
+    }
+    // The ends of the line, where it can be pulled.
+    painter.setBrush(Qt::NoBrush);
+    painter.setPen(QPen(highlight, 1));
+    painter.drawEllipse(a, 8, 8);
+    painter.drawEllipse(b, 8, 8);
+    painter.restore();
+}
+
+// --- Mesh fill tool: a grid of colours over the selected object.
+
+Shape *CanvasWidget::meshShape() const
+{
+    Shape *single = selectedShape();
+    return m_tool == Tool::Mesh && single && single->kind() != ShapeKind::Group && single->kind() != ShapeKind::Image
+               ? single
+               : nullptr;
+}
+
+QPointF CanvasWidget::meshNodePosition(const Shape &shape, int row, int column) const
+{
+    const MeshFill &mesh = *shape.style().mesh;
+    return fromFraction(shape, QPointF(double(column) / mesh.columns, double(row) / mesh.rows));
+}
+
+int CanvasWidget::meshNodeAt(const QPointF &widgetPosition) const
+{
+    const Shape *shape = meshShape();
+    if (!shape || !shape->style().mesh || !shape->style().mesh->isValid())
+        return -1;
+    const MeshFill &mesh = *shape->style().mesh;
+    for (int r = 0; r <= mesh.rows; ++r) {
+        for (int c = 0; c <= mesh.columns; ++c) {
+            if (distance(toWidget(meshNodePosition(*shape, r, c)), widgetPosition) <= kNodeHitPx + 2)
+                return r * (mesh.columns + 1) + c;
+        }
+    }
+    return -1;
+}
+
+void CanvasWidget::setSelectedMeshNode(int node)
+{
+    if (node == m_meshNode)
+        return;
+    m_meshNode = node;
+    update();
+    emit fillStopChanged();
+}
+
+std::optional<QColor> CanvasWidget::selectedMeshNodeColor() const
+{
+    const Shape *shape = meshShape();
+    if (!shape || !shape->style().mesh || m_meshNode < 0 || m_meshNode >= int(shape->style().mesh->colors.size()))
+        return std::nullopt;
+    return shape->style().mesh->colors[std::size_t(m_meshNode)];
+}
+
+bool CanvasWidget::setSelectedMeshNodeColor(const QColor &color)
+{
+    if (!selectedMeshNodeColor())
+        return false;
+    Shape *shape = meshShape();
+    Style style = shape->style();
+    style.mesh->colors[std::size_t(m_meshNode)] = color;
+    m_undoStack->push(new SetStyleCommand(m_document, shape, style));
+    emit fillStopChanged();
+    return true;
+}
+
+void CanvasWidget::setMeshGrid(int columns, int rows)
+{
+    Shape *shape = meshShape();
+    if (!shape || !shape->style().mesh || (shape->style().mesh->columns == columns && shape->style().mesh->rows == rows))
+        return;
+    Style style = shape->style();
+    style.mesh = style.mesh->resized(columns, rows);
+    m_undoStack->push(new SetStyleCommand(m_document, shape, style));
+    setSelectedMeshNode(-1);
+}
+
+void CanvasWidget::removeMesh()
+{
+    Shape *shape = meshShape();
+    if (!shape || !shape->style().mesh)
+        return;
+    Style style = shape->style();
+    style.fill = style.mesh->colors.empty() ? style.fill : style.mesh->colors.front();
+    style.mesh.reset();
+    m_undoStack->push(new SetStyleCommand(m_document, shape, style));
+    setSelectedMeshNode(-1);
+}
+
+void CanvasWidget::paintMeshHandles(QPainter &painter)
+{
+    const Shape *shape = meshShape();
+    if (!shape || !shape->style().mesh || !shape->style().mesh->isValid())
+        return;
+    const MeshFill &mesh = *shape->style().mesh;
+    const QColor highlight = palette().color(QPalette::Highlight);
+    painter.save();
+    painter.setRenderHint(QPainter::Antialiasing);
+    painter.setPen(QPen(highlight, 1, Qt::DashLine));
+    for (int r = 0; r <= mesh.rows; ++r) {
+        for (int c = 0; c <= mesh.columns; ++c) {
+            const QPointF p = toWidget(meshNodePosition(*shape, r, c));
+            if (c < mesh.columns)
+                painter.drawLine(p, toWidget(meshNodePosition(*shape, r, c + 1)));
+            if (r < mesh.rows)
+                painter.drawLine(p, toWidget(meshNodePosition(*shape, r + 1, c)));
+        }
+    }
+    for (int r = 0; r <= mesh.rows; ++r) {
+        for (int c = 0; c <= mesh.columns; ++c) {
+            const int index = r * (mesh.columns + 1) + c;
+            const QColor color = mesh.at(r, c);
+            painter.setPen(QPen(index == m_meshNode ? highlight : QColor(0x20, 0x20, 0x20), index == m_meshNode ? 2.5 : 1));
+            painter.setBrush(QColor(color.red(), color.green(), color.blue()));
+            painter.drawEllipse(toWidget(meshNodePosition(*shape, r, c)), 5.5, 5.5);
+        }
+    }
+    painter.restore();
+}
+
 Shape *CanvasWidget::envelopeShape() const
 {
     Shape *single = selectedShape();
@@ -1567,6 +1920,11 @@ void CanvasWidget::deleteSelection()
         removeActiveNode();
         return;
     }
+    if (m_tool == Tool::InteractiveFill && selectedFillStop()) {
+        // Delete takes out the selected colour of the gradient, not the object.
+        removeSelectedFillStop();
+        return;
+    }
     if (m_selection.empty())
         return;
     const std::vector<Shape *> shapes = m_selection;
@@ -2257,6 +2615,8 @@ void CanvasWidget::paintEvent(QPaintEvent *)
         paintSelection(painter);
     paintBezierPreview(painter);
     paintEffectHandles(painter);
+    paintFillHandles(painter);
+    paintMeshHandles(painter);
 
     if (m_drag == Drag::Marquee || m_drag == Drag::ZoomBox) {
         QColor fill = palette().color(QPalette::Highlight);
@@ -2604,6 +2964,64 @@ void CanvasWidget::mousePressEvent(QMouseEvent *event)
         smartFill(docPos);
         break;
 
+    case Tool::Mesh: {
+        // Pick a node to colour; clicking an object gives it a mesh (of its own colour).
+        if (const int node = meshNodeAt(pos); node >= 0) {
+            setSelectedMeshNode(node);
+            break;
+        }
+        Shape *hit = m_document->shapeAt(docPos, tolerance);
+        setSelectedMeshNode(-1);
+        if (!hit) {
+            setSelection({});
+            break;
+        }
+        if (selectedShape() != hit)
+            setSelectedShape(hit);
+        if (Shape *shape = meshShape(); shape && !shape->style().mesh) {
+            Style style = shape->style();
+            QColor base = style.fill.alpha() > 0 ? style.fill : QColor(Qt::white);
+            if (style.gradient && !style.gradient->stops.empty())
+                base = style.gradient->stops.front().color;
+            style.mesh = MeshFill::uniform(base, m_toolSettings.meshColumns, m_toolSettings.meshRows);
+            style.gradient.reset();
+            style.pattern.reset();
+            auto *command = new SetStyleCommand(m_document, shape, style);
+            command->setText(tr("Mesh fill"));
+            m_undoStack->push(command);
+            emit fillStopChanged();
+        }
+        update();
+        break;
+    }
+
+    case Tool::InteractiveFill: {
+        // Pull the ends or the colours of the selected object's gradient; drag across an
+        // object for a new one; a click selects.
+        if (const int handle = fillHandleAt(pos); handle >= 0) {
+            const int stops = int(fillShape()->style().gradient->stops.size());
+            m_fillHandle = handle;
+            setSelectedFillStop(handle >= kFillStopHandle ? handle - kFillStopHandle : (handle == 0 ? 0 : stops - 1));
+            m_fillBefore = fillShape()->style();
+            m_drag = Drag::FillHandle;
+            break;
+        }
+        Shape *hit = m_document->shapeAt(docPos, tolerance);
+        setSelectedFillStop(-1);
+        if (!hit) {
+            setSelection({});
+            break;
+        }
+        if (selectedShape() != hit)
+            setSelectedShape(hit);
+        if (fillShape()) {
+            m_fillBefore = hit->style();
+            m_dragStart = docPos;
+            m_drag = Drag::FillCreate;
+        }
+        break;
+    }
+
     case Tool::Envelope: {
         // Drag the envelope's corners and handles of the selected object; a click selects.
         if (const int handle = envelopeHandleAt(pos); handle >= 0) {
@@ -2761,6 +3179,15 @@ void CanvasWidget::mouseMoveEvent(QMouseEvent *event)
 
     case Drag::EnvelopeHandle:
         dragEnvelopeHandle(snapPoint(docPos));
+        break;
+
+    case Drag::FillCreate:
+        if (distance(toWidget(m_dragStart), pos) >= kMinCreateSizePx)
+            dragFill(docPos, event->modifiers());
+        break;
+
+    case Drag::FillHandle:
+        dragFill(docPos, event->modifiers());
         break;
 
     case Drag::EffectHandle:
@@ -2990,6 +3417,11 @@ void CanvasWidget::mouseReleaseEvent(QMouseEvent *event)
         m_effectHandle = -1;
         break;
 
+    case Drag::FillCreate:
+    case Drag::FillHandle:
+        commitFillDrag();
+        break;
+
     case Drag::EnvelopeHandle:
         if (Shape *shape = envelopeShape()) {
             const std::optional<Envelope> after = shape->envelope();
@@ -3107,6 +3539,10 @@ void CanvasWidget::mouseDoubleClickEvent(QMouseEvent *event)
 
     if (m_tool == Tool::Bezier) {
         finishCurve();
+        return;
+    }
+    if (m_tool == Tool::InteractiveFill) {
+        addFillStopAt(event->position());
         return;
     }
 

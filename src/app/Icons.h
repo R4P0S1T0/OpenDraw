@@ -12,7 +12,7 @@ enum class Icon {
     FillBucket, OutlinePen, Portrait, Landscape,
     FirstPage, PreviousPage, NextPage, LastPage, AddPage,
     LockRatio, MirrorHorizontal, MirrorVertical,
-    AlignLeft, AlignCenter, AlignRight, AlignJustify, Blend, Contour, Envelope, Extrude, SmartFill,
+    AlignLeft, AlignCenter, AlignRight, AlignJustify, Blend, Contour, Envelope, Extrude, SmartFill, InteractiveFill, Mesh,
     ScrollUp, ScrollDown, ScrollLeft, ScrollRight,
     Line, Polygon, Star, Spiral, GraphPaper, Eyedropper, Grid, Guidelines, Snap, CornerRadius,
     Rotate, RotateCounterclockwise,

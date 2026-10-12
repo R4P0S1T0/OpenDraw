@@ -66,7 +66,9 @@ Rough order of work. Items move as contributors pick them up.
 ## Later
 
 - [x] Linear and radial gradients, object opacity (SVG import/export, including Inkscape-style `xlink:href` gradients)
-- Interactive gradient handles on the canvas, editing more than two colours, creating pattern fills, importing bitmaps from files
+- [x] Interactive fill tool (G): gradients dragged on the canvas, any number of colours (double-click to add, palette to recolour, Delete to remove), linear or radial
+- [x] Mesh fill tool (M): a grid of colours blending smoothly, columns and rows on the property bar; saved as a picture for other programs and as the mesh for OpenDraw
+- Creating pattern fills, importing bitmaps from files; mesh nodes that can be moved
 - Effects (shadow, blend, contour)
 - Colour management (CMYK, ICC profiles)
 - Plugin / scripting API

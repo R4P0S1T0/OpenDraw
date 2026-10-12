@@ -138,6 +138,8 @@ private slots:
     void textFitsToPathAndBack();
     void severalDrawingsInTabs();
     void powerClipFromTheSelection();
+    void interactiveFillEditsGradients();
+    void meshToolColoursNodes();
     void textToolDrawsParagraphFrames();
     void formatPartOfAText();
     void shadowAndTransparencyTools();
@@ -1130,6 +1132,30 @@ void CanvasTests::mainWindowWorkspace()
         canvas->fitPage();
         QTest::qWait(150);
         QVERIFY(window.grab().save(dir + QStringLiteral("/window-powerclip.png")));
+
+        // A three-colour gradient being edited, and a mesh fill.
+        canvas->selectAll();
+        canvas->deleteSelection();
+        Style rainbow;
+        rainbow.stroke = Qt::transparent;
+        Gradient sweep = Gradient::linear(QColor(0xe5, 0x39, 0x35), QColor(0x1e, 0x88, 0xe5), 20);
+        sweep.stops.insert(sweep.stops.begin() + 1, GradientStop{0.45, QColor(0xfd, 0xd8, 0x35)});
+        rainbow.gradient = sweep;
+        Shape *swept = doc->insertShape(-1, std::make_unique<Shape>(ShapeKind::Rectangle, QRectF(120, 140, 560, 300), rainbow));
+        Style meshStyle;
+        meshStyle.stroke = QColor(0x37, 0x47, 0x4f);
+        MeshFill meshFill = MeshFill::uniform(QColor(0x80, 0xde, 0xea), 2, 2);
+        meshFill.at(1, 1) = Qt::white;
+        meshFill.at(0, 0) = QColor(0x8e, 0x24, 0xaa);
+        meshFill.at(2, 2) = QColor(0xff, 0x6f, 0x00);
+        meshStyle.mesh = meshFill;
+        doc->insertShape(-1, std::make_unique<Shape>(ShapeKind::Ellipse, QRectF(220, 520, 360, 360), meshStyle));
+        canvas->setTool(CanvasWidget::Tool::InteractiveFill);
+        canvas->setSelectedShape(swept);
+        canvas->setSelectedFillStop(1);
+        canvas->fitPage();
+        QTest::qWait(150);
+        QVERIFY(window.grab().save(dir + QStringLiteral("/window-fills.png")));
         theme::apply(ColorScheme::Light);
     }
 }
@@ -1594,6 +1620,79 @@ void CanvasTests::textFitsToPathAndBack()
         m_undo->undo();
     QVERIFY(!text->textData().path);
     QCOMPARE(text->textOrigin(), QPointF(400, 400));
+}
+
+void CanvasTests::meshToolColoursNodes()
+{
+    m_canvas->setZoom(1.0);
+    Style green;
+    green.fill = Qt::green;
+    Shape *rect = m_doc->insertShape(-1, std::make_unique<Shape>(ShapeKind::Rectangle, QRectF(100, 100, 200, 200), green));
+    const int before = m_undo->index();
+    m_canvas->setTool(CanvasWidget::Tool::Mesh);
+    click(m_canvas, m_canvas->documentToWidget({200, 200})); // a mesh of the object's colour
+    QVERIFY(rect->style().mesh);
+    QCOMPARE(rect->style().mesh->columns, 2);
+    QCOMPARE(rect->style().mesh->colors.front(), QColor(Qt::green));
+    click(m_canvas, m_canvas->documentToWidget({200, 200})); // the middle node
+    QCOMPARE(m_canvas->selectedMeshNode(), 4);
+    QVERIFY(m_canvas->setSelectedMeshNodeColor(Qt::yellow));
+    QCOMPARE(rect->style().mesh->at(1, 1), QColor(Qt::yellow));
+    m_canvas->setMeshGrid(4, 4);
+    QCOMPARE(rect->style().mesh->nodeCount(), 25);
+    QCOMPARE(rect->style().mesh->at(2, 2), QColor(Qt::yellow));
+    m_canvas->removeMesh();
+    QVERIFY(!rect->style().mesh);
+    while (m_undo->index() > before)
+        m_undo->undo();
+    QVERIFY(!rect->style().mesh);
+    m_canvas->setTool(CanvasWidget::Tool::Select);
+}
+
+void CanvasTests::interactiveFillEditsGradients()
+{
+    m_canvas->setZoom(1.0);
+    Style red;
+    red.fill = Qt::red;
+    Shape *rect = m_doc->insertShape(-1, std::make_unique<Shape>(ShapeKind::Rectangle, QRectF(100, 100, 200, 100), red));
+    const int before = m_undo->index();
+    m_canvas->setTool(CanvasWidget::Tool::InteractiveFill);
+    auto at = [this](double x, double y) { return m_canvas->documentToWidget({x, y}); };
+
+    // Dragging across makes a gradient from the object's colour to white.
+    dragFromTo(m_canvas, at(120, 150), at(280, 150));
+    QVERIFY(rect->style().gradient);
+    const Gradient g = *rect->style().gradient;
+    QCOMPARE(g.type, Gradient::Type::Linear);
+    QVERIFY(std::abs(g.start.x() - 0.1) < 0.01 && std::abs(g.end.x() - 0.9) < 0.01);
+    QCOMPARE(g.stops.front().color, QColor(Qt::red));
+    QCOMPARE(g.stops.back().color, QColor(Qt::white));
+    QCOMPARE(m_undo->index(), before + 1);
+
+    // The end can be pulled.
+    dragFromTo(m_canvas, at(280, 150), at(280, 190));
+    QVERIFY(std::abs(rect->style().gradient->end.y() - 0.9) < 0.01);
+
+    // A double-click on the line adds a colour there, picked at once; the palette recolours it.
+    const QPointF middle = (at(120, 150) + at(280, 190)) / 2;
+    QTest::mouseDClick(m_canvas, Qt::LeftButton, Qt::NoModifier, middle.toPoint());
+    QCOMPARE(rect->style().gradient->stops.size(), std::size_t(3));
+    QCOMPARE(m_canvas->selectedFillStopIndex(), 1);
+    QVERIFY(m_canvas->setSelectedFillStopColor(Qt::blue));
+    QCOMPARE(rect->style().gradient->stops[1].color, QColor(Qt::blue));
+    // Delete removes the colour, not the object.
+    m_canvas->deleteSelection();
+    QCOMPARE(rect->style().gradient->stops.size(), std::size_t(2));
+    QCOMPARE(m_doc->count(), 1);
+
+    // Radial keeps the colours.
+    m_canvas->setFillGradientType(Gradient::Type::Radial);
+    QCOMPARE(rect->style().gradient->type, Gradient::Type::Radial);
+    QCOMPARE(rect->style().gradient->stops.front().color, QColor(Qt::red));
+    while (m_undo->index() > before)
+        m_undo->undo();
+    QVERIFY(!rect->style().gradient);
+    m_canvas->setTool(CanvasWidget::Tool::Select);
 }
 
 void CanvasTests::powerClipFromTheSelection()

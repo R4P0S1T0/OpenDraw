@@ -16,6 +16,8 @@ struct ToolSettings {
     int blendSteps = 20;       // new blends
     QColor smartFillColor = QColor(0x4a, 0x90, 0xd9); // areas made by the smart fill tool
     bool smartFillOutline = true;                       // ... with the default outline
+    int meshColumns = 2;                                // new mesh fills
+    int meshRows = 2;
     bool operator==(const ToolSettings &) const = default;
 };
 

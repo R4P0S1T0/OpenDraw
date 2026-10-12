@@ -818,7 +818,9 @@ void MainWindow::createToolbox(QMenu *toolsMenu)
                {CanvasWidget::Tool::Contour, Icon::Contour, tr("Contour"), QKeySequence(Qt::CTRL | Qt::Key_F9)},
                {CanvasWidget::Tool::Envelope, Icon::Envelope, tr("Envelope"), QKeySequence()},
                {CanvasWidget::Tool::Extrude, Icon::Extrude, tr("Extrude"), QKeySequence()}});
-    m_toolbox->addAction(makeAction({CanvasWidget::Tool::SmartFill, Icon::SmartFill, tr("Smart Fill"), QKeySequence()}));
+    addFlyout({{CanvasWidget::Tool::InteractiveFill, Icon::InteractiveFill, tr("Interactive Fill"), QKeySequence(Qt::Key_G)},
+               {CanvasWidget::Tool::Mesh, Icon::Mesh, tr("Mesh Fill"), QKeySequence(Qt::Key_M)},
+               {CanvasWidget::Tool::SmartFill, Icon::SmartFill, tr("Smart Fill"), QKeySequence()}});
     m_toolbox->addAction(makeAction({CanvasWidget::Tool::Transparency, Icon::Transparency, tr("Transparency"), QKeySequence()}));
     m_toolbox->addAction(
         makeAction({CanvasWidget::Tool::Eyedropper, Icon::Eyedropper, tr("Color Eyedropper"), QKeySequence(Qt::Key_I)}));
@@ -1014,6 +1016,11 @@ QString MainWindow::toolHint() const
         return tr("Drag across an object: solid where you start, transparent where you end; drag the squares to adjust");
     case CanvasWidget::Tool::Blend:
         return tr("Drag from one object to another to blend them; click a blend to change its steps on the property bar");
+    case CanvasWidget::Tool::InteractiveFill:
+        return tr("Drag across an object for a gradient; drag its ends and colours, double-click the line to add a "
+                  "colour, click a palette colour to recolour the selected one, Delete removes it");
+    case CanvasWidget::Tool::Mesh:
+        return tr("Click an object to give it a mesh of colours; click a node, then a palette colour to colour it");
     case CanvasWidget::Tool::SmartFill:
         return tr("Click inside an area enclosed by objects to make a new object of that shape");
     case CanvasWidget::Tool::Extrude:
@@ -1314,6 +1321,11 @@ void MainWindow::restyleSelection(const QString &text, const std::function<void(
 // without one, they become the default for new shapes.
 void MainWindow::applyFill(const QColor &color)
 {
+    // With the interactive fill tool, a colour picked for a colour of the gradient.
+    if (color.alpha() > 0 && (m_canvas->setSelectedFillStopColor(color) || m_canvas->setSelectedMeshNodeColor(color))) {
+        updateStyleIndicators();
+        return;
+    }
     // While typing, a colour picked for a selected part of the text colours just those letters.
     if (m_canvas->editedText() && m_canvas->hasTextSelection() && color.alpha() > 0) {
         CharFormat change;

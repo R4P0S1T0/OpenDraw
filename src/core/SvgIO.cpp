@@ -381,6 +381,12 @@ void writeEffects(QXmlStreamWriter &w, const Style &style, const std::pair<QStri
     }
     if (style.contour)
         w.writeAttribute(ns, QStringLiteral("contour"), contourText(*style.contour));
+    if (style.mesh && style.mesh->isValid()) {
+        QStringList parts{QString::number(style.mesh->columns), QString::number(style.mesh->rows)};
+        for (const QColor &color : style.mesh->colors)
+            parts << color.name(QColor::HexArgb);
+        w.writeAttribute(ns, QStringLiteral("mesh"), parts.join(QLatin1Char(' ')));
+    }
     if (style.extrusion) {
         const Extrusion &e = *style.extrusion;
         w.writeAttribute(ns, QStringLiteral("extrude"),
@@ -585,7 +591,17 @@ void writeShapeElement(QXmlStreamWriter &w, const Shape &shape, int &gradientCou
     // A gradient is written right before the element that uses it.
     QString gradientId;
     if (shape.kind() != ShapeKind::Group && shape.kind() != ShapeKind::Image) {
-        if (shape.style().pattern) {
+        if (shape.style().mesh && shape.style().mesh->isValid()) {
+            // Other programs get the mesh as a picture filling the object's box.
+            const MeshFill &mesh = *shape.style().mesh;
+            const QRectF box = shape.localBounds();
+            PatternFill picture;
+            picture.image = render::meshImage(mesh, QSize(std::clamp(mesh.columns * 48, 2, 512),
+                                                          std::clamp(mesh.rows * 48, 2, 512)));
+            picture.tileSize = box.size();
+            gradientId = QStringLiteral("pattern%1").arg(++gradientCount);
+            writePattern(w, picture, box, gradientId);
+        } else if (shape.style().pattern) {
             gradientId = QStringLiteral("pattern%1").arg(++gradientCount);
             writePattern(w, *shape.style().pattern, shape.localBounds(), gradientId);
         } else if (shape.style().gradient) {
@@ -1478,6 +1494,23 @@ void applyEffects(Shape &shape, const QXmlStreamAttributes &attributes, ReadRepo
         e.size() == 4) {
         extrusion = Extrusion{QPointF(e[0].toDouble(), e[1].toDouble()), std::clamp(e[2].toDouble(), 0.0, 1.0),
                               e[3] == u"shaded" ? QColor() : QColor::fromString(e[3])};
+    }
+    std::optional<MeshFill> mesh;
+    if (const QStringList m = attributes.value(ns, QStringLiteral("mesh")).toString().split(QLatin1Char(' '), Qt::SkipEmptyParts);
+        m.size() > 2) {
+        MeshFill read;
+        read.columns = m[0].toInt();
+        read.rows = m[1].toInt();
+        for (int i = 2; i < m.size(); ++i)
+            read.colors.push_back(QColor::fromString(m[i]));
+        if (read.isValid())
+            mesh = read;
+    }
+    if (mesh) {
+        // The picture written for other programs gives way to the mesh itself.
+        style.mesh = mesh;
+        style.pattern.reset();
+        shape.setStyle(style);
     }
     if (!shadow && !transparency && !contour && !extrusion)
         return;

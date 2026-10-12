@@ -1,6 +1,8 @@
 #pragma once
 
 class QBrush;
+class QImage;
+class QSize;
 class QPainterPath;
 class QPen;
 class QPainter;
@@ -15,6 +17,7 @@ class Document;
 class Shape;
 struct Page;
 struct Style;
+struct MeshFill;
 enum class Arrowhead;
 
 namespace render {
@@ -24,6 +27,8 @@ namespace render {
 QBrush fillBrush(const Style &style, const QRectF &bounds);
 // Outline pen: colour, width, dashes, caps and joins, or no pen.
 QPen outlinePen(const Style &style);
+// A mesh fill as a picture `size` big, covering the object's box.
+QImage meshImage(const MeshFill &mesh, const QSize &size);
 
 // An arrowhead for an outline `width` wide, attached at the origin and pointing along +x
 // (the line arrives from -x), as a filled outline.

@@ -78,6 +78,7 @@ private slots:
     void outlineBehindFill();
     void outlineScalesWithObject();
     void outlineSettingsSurviveSvg();
+    void meshFillBlendsNodeColours();
 };
 
 void GradientTests::linearGradientAngles()
@@ -409,6 +410,51 @@ void GradientTests::outlineSettingsSurviveSvg()
     QCOMPARE(foreign.startArrow, Arrowhead::None);
     QVERIFY(foreign.strokeBehind);
     QCOMPARE(report.skippedCount(), 1);
+}
+
+// A 1 × 1 mesh: red and blue corners on top, black and white below.
+void GradientTests::meshFillBlendsNodeColours()
+{
+    MeshFill mesh = MeshFill::uniform(Qt::black, 1, 1);
+    mesh.at(0, 0) = Qt::red;
+    mesh.at(0, 1) = Qt::blue;
+    mesh.at(1, 0) = Qt::black;
+    mesh.at(1, 1) = Qt::white;
+    QVERIFY(mesh.isValid());
+    QCOMPARE(mesh.sample(0, 0), QColor(Qt::red));
+    const QColor topMiddle = mesh.sample(0.5, 0);
+    QVERIFY(std::abs(topMiddle.red() - 128) <= 1 && std::abs(topMiddle.blue() - 128) <= 1);
+    // A finer grid keeps the colours where they were.
+    const MeshFill finer = mesh.resized(2, 2);
+    QCOMPARE(finer.nodeCount(), 9);
+    QCOMPARE(finer.at(0, 2), QColor(Qt::blue));
+    QVERIFY(std::abs(finer.at(1, 1).red() - mesh.sample(0.5, 0.5).red()) <= 1);
+
+    // Drawn: each corner of the square takes its node's colour, the middle a mix.
+    Style style = noOutline();
+    style.mesh = mesh;
+    const QImage image = renderOne(style, QRectF(20, 20, 200, 200));
+    QVERIFY(closeTo(image.pixelColor(23, 23), Qt::red, 20));
+    QVERIFY(closeTo(image.pixelColor(216, 23), Qt::blue, 20));
+    QVERIFY(closeTo(image.pixelColor(216, 216), Qt::white, 20));
+    const QColor centre = image.pixelColor(120, 120);
+    QVERIFY(centre.red() > 80 && centre.red() < 180 && centre.blue() > 80);
+    QVERIFY(closeTo(image.pixelColor(10, 10), Qt::white)); // outside the square: the page
+
+    // Saved: a picture for other programs, the mesh itself for OpenDraw.
+    Document doc;
+    doc.insertShape(-1, std::make_unique<Shape>(ShapeKind::Ellipse, QRectF(0, 0, 100, 80), style));
+    QByteArray data;
+    QBuffer buffer(&data);
+    buffer.open(QIODevice::WriteOnly);
+    svg::write(doc, &buffer);
+    QVERIFY(data.contains("<pattern"));
+    QVERIFY(data.contains("opendraw:mesh="));
+    auto copy = readSvg(data);
+    const Style &read = copy->shapes().front()->style();
+    QVERIFY(read.mesh);
+    QCOMPARE(*read.mesh, mesh);
+    QVERIFY(!read.pattern);
 }
 
 QTEST_MAIN(GradientTests)

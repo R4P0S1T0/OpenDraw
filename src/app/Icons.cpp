@@ -469,6 +469,38 @@ void draw(QPainter &p, Icon id, const QColor &ink, const QColor &accent, const Q
         }
         break;
     }
+    case Icon::Mesh: {
+        // A grid of nodes over a square.
+        p.setPen(line);
+        p.setBrush(Qt::NoBrush);
+        p.drawRect(QRectF(4, 4, 16, 16));
+        p.setPen(QPen(ink, 0.8, Qt::DotLine));
+        p.drawLine(QPointF(12, 4), QPointF(12, 20));
+        p.drawLine(QPointF(4, 12), QPointF(20, 12));
+        p.setPen(Qt::NoPen);
+        p.setBrush(accent);
+        for (double x : {4.0, 12.0, 20.0}) {
+            for (double y : {4.0, 12.0, 20.0})
+                p.drawEllipse(QPointF(x, y), 1.8, 1.8);
+        }
+        break;
+    }
+    case Icon::InteractiveFill: {
+        // A square with a gradient and the handle line across it.
+        QLinearGradient shade(4, 4, 20, 20);
+        shade.setColorAt(0, accent);
+        shade.setColorAt(1, paper);
+        p.setPen(line);
+        p.setBrush(shade);
+        p.drawRect(QRectF(4, 4, 16, 16));
+        p.setPen(QPen(ink, 1.2));
+        p.drawLine(QPointF(7, 7), QPointF(17, 17));
+        p.setBrush(paper);
+        p.drawRect(QRectF(5, 5, 4, 4));
+        p.setBrush(ink);
+        p.drawRect(QRectF(15, 15, 4, 4));
+        break;
+    }
     case Icon::SmartFill: {
         // Two overlapping circles with the shared part filled.
         const QRectF left(3, 6, 12, 12), right(9, 6, 12, 12);

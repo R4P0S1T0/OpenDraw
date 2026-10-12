@@ -421,6 +421,10 @@
         <translation>Unir nós</translation>
     </message>
     <message>
+        <source>Mesh fill</source>
+        <translation>Preenchimento em malha</translation>
+    </message>
+    <message>
         <source>Move</source>
         <translation>Mover</translation>
     </message>
@@ -1107,6 +1111,14 @@ Clique esquerdo: preenchimento · Clique direito: contorno</translation>
         <translation>Extrusão</translation>
     </message>
     <message>
+        <source>Interactive Fill</source>
+        <translation>Preenchimento interativo</translation>
+    </message>
+    <message>
+        <source>Mesh Fill</source>
+        <translation>Preenchimento em malha</translation>
+    </message>
+    <message>
         <source>Smart Fill</source>
         <translation>Preenchimento inteligente</translation>
     </message>
@@ -1173,6 +1185,14 @@ Clique esquerdo: preenchimento · Clique direito: contorno</translation>
     <message>
         <source>Untitled-%1</source>
         <translation>Sem título-%1</translation>
+    </message>
+    <message>
+        <source>Drag across an object for a gradient; drag its ends and colours, double-click the line to add a colour, click a palette colour to recolour the selected one, Delete removes it</source>
+        <translation>Arraste sobre um objeto para criar um degradê; arraste as pontas e as cores, clique duas vezes na linha para acrescentar uma cor, clique numa cor da paleta para mudar a cor selecionada, Delete a remove</translation>
+    </message>
+    <message>
+        <source>Click an object to give it a mesh of colours; click a node, then a palette colour to colour it</source>
+        <translation>Clique num objeto para dar a ele uma malha de cores; clique num nó e depois numa cor da paleta para colori-lo</translation>
     </message>
     <message>
         <source>Untitled</source>
@@ -2343,8 +2363,40 @@ Clique esquerdo: preenchimento · Clique direito: contorno</translation>
         <translation>Remover contorno concêntrico</translation>
     </message>
     <message>
+        <source>Kind of fill</source>
+        <translation>Tipo de preenchimento</translation>
+    </message>
+    <message>
+        <source>Colour of the selected gradient colour</source>
+        <translation>Cor selecionada do degradê</translation>
+    </message>
+    <message>
+        <source>Remove the selected gradient colour (Delete)</source>
+        <translation>Remover a cor selecionada do degradê (Delete)</translation>
+    </message>
+    <message>
+        <source>Double-click the line to add a colour</source>
+        <translation>Clique duas vezes na linha para acrescentar uma cor</translation>
+    </message>
+    <message>
         <source>Fill</source>
         <translation>Preenchimento</translation>
+    </message>
+    <message>
+        <source>Columns of the mesh</source>
+        <translation>Colunas da malha</translation>
+    </message>
+    <message>
+        <source>Rows of the mesh</source>
+        <translation>Linhas da malha</translation>
+    </message>
+    <message>
+        <source>Colour of the selected node</source>
+        <translation>Cor do nó selecionado</translation>
+    </message>
+    <message>
+        <source>Remove the mesh</source>
+        <translation>Remover a malha</translation>
     </message>
     <message>
         <source>Fill colour of new areas</source>

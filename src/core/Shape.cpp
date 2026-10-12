@@ -39,6 +39,43 @@ Gradient Gradient::radial(const QColor &inner, const QColor &outer)
     return g;
 }
 
+MeshFill MeshFill::uniform(const QColor &color, int columns, int rows)
+{
+    MeshFill mesh;
+    mesh.columns = std::max(columns, 1);
+    mesh.rows = std::max(rows, 1);
+    mesh.colors.assign(std::size_t(mesh.nodeCount()), color);
+    return mesh;
+}
+
+QColor MeshFill::sample(double u, double v) const
+{
+    if (!isValid())
+        return QColor();
+    const double x = std::clamp(u, 0.0, 1.0) * columns, y = std::clamp(v, 0.0, 1.0) * rows;
+    const int c = std::min(int(x), columns - 1), r = std::min(int(y), rows - 1);
+    const double fx = x - c, fy = y - r;
+    auto mixChannel = [&](auto channel) {
+        const double top = channel(at(r, c)) * (1 - fx) + channel(at(r, c + 1)) * fx;
+        const double bottom = channel(at(r + 1, c)) * (1 - fx) + channel(at(r + 1, c + 1)) * fx;
+        return float(top * (1 - fy) + bottom * fy);
+    };
+    return QColor::fromRgbF(mixChannel([](const QColor &k) { return k.redF(); }),
+                            mixChannel([](const QColor &k) { return k.greenF(); }),
+                            mixChannel([](const QColor &k) { return k.blueF(); }),
+                            mixChannel([](const QColor &k) { return k.alphaF(); }));
+}
+
+MeshFill MeshFill::resized(int newColumns, int newRows) const
+{
+    MeshFill result = uniform(Qt::white, newColumns, newRows);
+    for (int r = 0; r <= result.rows; ++r) {
+        for (int c = 0; c <= result.columns; ++c)
+            result.at(r, c) = sample(double(c) / result.columns, double(r) / result.rows);
+    }
+    return result;
+}
+
 double Gradient::angle() const
 {
     const QPointF d = end - start;

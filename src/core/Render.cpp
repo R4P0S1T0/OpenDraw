@@ -18,8 +18,30 @@
 
 namespace opendraw::render {
 
+QImage meshImage(const MeshFill &mesh, const QSize &size)
+{
+    QImage picture(size, QImage::Format_ARGB32_Premultiplied);
+    picture.fill(Qt::transparent);
+    if (!mesh.isValid() || size.isEmpty())
+        return picture;
+    // One pixel per node, stretched so pixel centres land on the nodes: smooth scaling then
+    // blends between neighbouring nodes.
+    QImage nodes(mesh.columns + 1, mesh.rows + 1, QImage::Format_ARGB32);
+    for (int r = 0; r <= mesh.rows; ++r) {
+        for (int c = 0; c <= mesh.columns; ++c)
+            nodes.setPixelColor(c, r, mesh.at(r, c));
+    }
+    const double cellWidth = double(size.width()) / mesh.columns, cellHeight = double(size.height()) / mesh.rows;
+    QPainter p(&picture);
+    p.setRenderHint(QPainter::SmoothPixmapTransform);
+    p.drawImage(QRectF(-cellWidth / 2, -cellHeight / 2, size.width() + cellWidth, size.height() + cellHeight), nodes);
+    return picture;
+}
+
 QBrush fillBrush(const Style &style, const QRectF &bounds)
 {
+    if (style.mesh && style.mesh->isValid())
+        return QBrush(style.mesh->colors.front()); // as one colour, where a single brush is needed
     if (style.pattern && !style.pattern->image.isNull()) {
         const PatternFill &p = *style.pattern;
         QBrush brush(p.image);
@@ -256,6 +278,20 @@ void paintBody(QPainter &painter, const Shape &shape)
         }
         if (!style.hasFill())
             return;
+        if (style.mesh && style.mesh->isValid()) {
+            // The mesh picture over the object's own box, cut to its outline.
+            const QRectF box = shape.localBounds();
+            const MeshFill &mesh = *style.mesh;
+            const int perCell = 48;
+            const QSize size(std::clamp(mesh.columns * perCell, 2, 768), std::clamp(mesh.rows * perCell, 2, 768));
+            painter.save();
+            painter.setTransform(own, true);
+            painter.setClipPath(shape.warp(shape.localPath()), Qt::IntersectClip);
+            painter.setRenderHint(QPainter::SmoothPixmapTransform);
+            painter.drawImage(box, meshImage(mesh, size));
+            painter.restore();
+            return;
+        }
         painter.setPen(Qt::NoPen);
         if (own.isIdentity()) {
             painter.setBrush(fillBrush(style, shape.bounds()));

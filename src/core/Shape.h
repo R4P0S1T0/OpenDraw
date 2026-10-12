@@ -57,6 +57,25 @@ struct PatternFill {
     }
 };
 
+// Mesh fill: a grid of colours over the object's own box, (columns + 1) × (rows + 1) nodes
+// row by row from the top left, blending smoothly from node to node.
+struct MeshFill {
+    int columns = 2;
+    int rows = 2;
+    std::vector<QColor> colors;
+
+    static MeshFill uniform(const QColor &color, int columns = 2, int rows = 2);
+    int nodeCount() const { return (columns + 1) * (rows + 1); }
+    bool isValid() const { return columns >= 1 && rows >= 1 && int(colors.size()) == nodeCount(); }
+    QColor &at(int row, int column) { return colors[std::size_t(row * (columns + 1) + column)]; }
+    const QColor &at(int row, int column) const { return colors[std::size_t(row * (columns + 1) + column)]; }
+    // The colour at (u, v) across the box, each 0..1.
+    QColor sample(double u, double v) const;
+    // The same colours on another grid.
+    MeshFill resized(int columns, int rows) const;
+    bool operator==(const MeshFill &) const = default;
+};
+
 // A soft shadow behind an object: its silhouette, blurred, coloured and moved by `offset`.
 struct DropShadow {
     QPointF offset{8.0, 8.0}; // document units
@@ -118,8 +137,13 @@ struct Style {
     std::optional<Gradient> transparency;
     std::optional<Contour> contour;
     std::optional<Extrusion> extrusion;
+    // When set (and valid), used instead of `fill`, `gradient` and `pattern`.
+    std::optional<MeshFill> mesh;
 
-    bool hasFill() const { return pattern.has_value() || gradient.has_value() || fill.alpha() > 0; }
+    bool hasFill() const
+    {
+        return (mesh && mesh->isValid()) || pattern.has_value() || gradient.has_value() || fill.alpha() > 0;
+    }
     bool hasStroke() const { return stroke.alpha() > 0 && strokeWidth > 0.0; }
 };
 
