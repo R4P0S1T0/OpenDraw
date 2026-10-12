@@ -10,6 +10,8 @@
 #include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QLabel>
+#include <QLinearGradient>
+#include <QPainter>
 #include <QSignalBlocker>
 #include <QSpinBox>
 #include <QToolButton>
@@ -361,6 +363,42 @@ void PropertyBar::createEffectFields()
         refreshEffects();
     });
 
+    // Extrude tool
+    m_extrudeDepth = addIntField(tr("Depth"), tr("How far the extrusion goes towards the vanishing point"), 1, 95,
+                                 m_extrudeActions);
+    m_extrudeDepth->setSuffix(QStringLiteral(" %"));
+    m_extrudeX = addField(tr("Vanishing point X"), tr("Horizontal distance of the vanishing point from the object's centre"),
+                          -kMaxDisplay, m_extrudeActions);
+    m_extrudeY = addField(tr("Y"), tr("Vertical distance of the vanishing point from the object's centre"), -kMaxDisplay,
+                          m_extrudeActions);
+    m_extrudeColor = addButton(QIcon(), tr("Colour of the sides"), m_extrudeActions);
+    QToolButton *shadedSides = addButton(icon(Icon::FillLinear), tr("Shade the sides from the object's fill"),
+                                         m_extrudeActions);
+    QToolButton *noExtrusion = addButton(icon(Icon::FillNone), tr("Remove the extrusion"), m_extrudeActions);
+    connect(m_extrudeDepth, &QSpinBox::editingFinished, this, [this] {
+        const double depth = m_extrudeDepth->value() / 100.0;
+        applyExtrusion([depth](Extrusion &e) { e.depth = depth; });
+    });
+    for (QDoubleSpinBox *box : {m_extrudeX, m_extrudeY}) {
+        connect(box, &QDoubleSpinBox::editingFinished, this, [this] {
+            const QPointF vp(units().fromDisplay(m_extrudeX->value()), units().fromDisplay(m_extrudeY->value()));
+            applyExtrusion([vp](Extrusion &e) { e.vanishingPoint = vp; });
+        });
+    }
+    connect(m_extrudeColor, &QToolButton::clicked, this, [this] {
+        const auto current = m_canvas ? m_canvas->currentStyle().extrusion : std::nullopt;
+        const QColor color = QColorDialog::getColor(current && current->color.isValid() ? current->color : QColor(Qt::gray),
+                                                    this, tr("Colour of the sides"));
+        if (color.isValid())
+            applyExtrusion([color](Extrusion &e) { e.color = color; });
+    });
+    connect(shadedSides, &QToolButton::clicked, this, [this] { applyExtrusion([](Extrusion &e) { e.color = QColor(); }); });
+    connect(noExtrusion, &QToolButton::clicked, this, [this] {
+        if (m_canvas)
+            m_canvas->restyle(tr("Remove extrusion"), [](Style &s) { s.extrusion.reset(); });
+        refreshEffects();
+    });
+
     // Envelope tool
     auto *envelopeHint = new QLabel(tr("Drag the envelope's corners and handles"), this);
     envelopeHint->setContentsMargins(6, 0, 6, 0);
@@ -420,6 +458,18 @@ void PropertyBar::applyContour(const std::function<void(Contour &)> &change)
         Contour contour = style.contour.value_or(Contour{});
         change(contour);
         style.contour = contour;
+    });
+    refreshEffects();
+}
+
+void PropertyBar::applyExtrusion(const std::function<void(Extrusion &)> &change)
+{
+    if (!m_canvas || m_updatingEffects)
+        return;
+    m_canvas->restyle(tr("Extrude"), [&change](Style &style) {
+        Extrusion extrusion = style.extrusion.value_or(Extrusion{});
+        change(extrusion);
+        style.extrusion = extrusion;
     });
     refreshEffects();
 }
@@ -507,6 +557,25 @@ void PropertyBar::refreshEffects()
         button->setIcon(QIcon(swatch));
     }
 
+    const Extrusion extrusion = style.extrusion.value_or(Extrusion{});
+    m_extrudeDepth->setValue(qRound(extrusion.depth * 100));
+    setValueQuietly(m_extrudeX, units().toDisplay(extrusion.vanishingPoint.x()));
+    setValueQuietly(m_extrudeY, units().toDisplay(extrusion.vanishingPoint.y()));
+    {
+        QPixmap swatch(28, 16);
+        if (extrusion.color.isValid()) {
+            swatch.fill(QColor(extrusion.color.red(), extrusion.color.green(), extrusion.color.blue()));
+        } else {
+            // Shaded: light to dark.
+            QLinearGradient shade(0, 0, 28, 0);
+            shade.setColorAt(0, QColor(0xe0, 0xe0, 0xe0));
+            shade.setColorAt(1, QColor(0x50, 0x50, 0x50));
+            QPainter p(&swatch);
+            p.fillRect(swatch.rect(), shade);
+        }
+        m_extrudeColor->setIcon(QIcon(swatch));
+    }
+
     const Shape *selected = m_canvas->selectedShape();
     m_blendSteps->setValue(selected && selected->isBlend() ? selected->blendSteps() : m_toolSettings.blendSteps);
     m_updatingEffects = false;
@@ -591,6 +660,8 @@ QList<QAction *> *PropertyBar::toolGroup()
         return &m_contourActions;
     case CanvasWidget::Tool::Envelope:
         return &m_envelopeActions;
+    case CanvasWidget::Tool::Extrude:
+        return &m_extrudeActions;
     default:
         return nullptr;
     }
@@ -620,13 +691,15 @@ void PropertyBar::updateMode()
     QList<QAction *> *tool = toolGroup();
     // These tools act on the selection, so their options show with it.
     const bool always = tool == &m_eyedropperActions || tool == &m_shadowActions || tool == &m_transparencyActions
-                        || tool == &m_blendActions || tool == &m_contourActions || tool == &m_envelopeActions;
+                        || tool == &m_blendActions || tool == &m_contourActions || tool == &m_envelopeActions
+                        || tool == &m_extrudeActions;
     const bool showTool = tool && (always || !m_anySelected);
     const bool showObject = m_anySelected && !always;
     const bool showPage = !m_anySelected && !showTool;
     for (QList<QAction *> *group : {&m_rectangleToolActions, &m_polygonActions, &m_starActions, &m_spiralActions,
                                     &m_graphActions, &m_eyedropperActions, &m_shadowActions, &m_transparencyActions,
-                                    &m_blendActions, &m_contourActions, &m_envelopeActions}) {
+                                    &m_blendActions, &m_contourActions, &m_envelopeActions,
+                                    &m_extrudeActions}) {
         for (QAction *action : std::as_const(*group))
             action->setVisible(showTool && group == tool);
     }
@@ -649,7 +722,7 @@ void PropertyBar::updateUnits()
     const QString suffix = QLatin1Char(' ') + units().suffix();
     for (QDoubleSpinBox *box : {m_pageWidth, m_pageHeight, m_nudge, m_duplicateX, m_duplicateY, m_x, m_y, m_width,
                                 m_height, m_outline, m_cornerRadius, m_newCornerRadius, m_shadowX, m_shadowY, m_shadowBlur,
-                                m_contourOffset}) {
+                                m_contourOffset, m_extrudeX, m_extrudeY}) {
         box->setSuffix(suffix);
         box->setDecimals(units().decimals());
     }

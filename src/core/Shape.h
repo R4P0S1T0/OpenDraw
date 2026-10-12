@@ -77,6 +77,15 @@ struct Contour {
     bool operator==(const Contour &) const = default;
 };
 
+// Depth for an object (CorelDRAW's extrude): its outline joined by side faces to a copy of it
+// pulled `depth` of the way towards a vanishing point.
+struct Extrusion {
+    QPointF vanishingPoint{150.0, -120.0}; // from the centre of the object, document units
+    double depth = 0.3;                    // 0..1 of the way to the vanishing point
+    QColor color; // of the sides; invalid: the object's fill, shaded by the light from the top left
+    bool operator==(const Extrusion &) const = default;
+};
+
 // How the ends of open outlines and dashes look (SVG stroke-linecap).
 enum class LineCap { Butt, Round, Square };
 // How outlines turn at corners (SVG stroke-linejoin).
@@ -108,6 +117,7 @@ struct Style {
     // each stop's colour is how solid the object is there (255 = solid, 0 = invisible).
     std::optional<Gradient> transparency;
     std::optional<Contour> contour;
+    std::optional<Extrusion> extrusion;
 
     bool hasFill() const { return pattern.has_value() || gradient.has_value() || fill.alpha() > 0; }
     bool hasStroke() const { return stroke.alpha() > 0 && strokeWidth > 0.0; }

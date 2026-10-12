@@ -15,6 +15,7 @@
 #include "core/Commands.h"
 #include "core/Document.h"
 #include "core/Export.h"
+#include "core/Extrude.h"
 
 #include <QComboBox>
 #include <QDoubleSpinBox>
@@ -130,6 +131,7 @@ private slots:
     void blendToolJoinsTwoObjects();
     void contourToolDragsRings();
     void envelopeToolBendsObjects();
+    void extrudeToolGivesDepth();
     void textToolDrawsParagraphFrames();
     void formatPartOfAText();
     void shadowAndTransparencyTools();
@@ -1029,6 +1031,29 @@ void CanvasTests::mainWindowWorkspace()
         canvas->zoomToSelection();
         QTest::qWait(150);
         QVERIFY(window.grab().save(dir + QStringLiteral("/window-envelope.png")));
+
+        // Extruded word and star.
+        canvas->selectAll();
+        canvas->deleteSelection();
+        TextData block{QStringLiteral("3D"), {}};
+        block.format.size = 200;
+        block.format.bold = true;
+        Style blockStyle;
+        blockStyle.fill = QColor(0xff, 0xc1, 0x07);
+        blockStyle.stroke = QColor(0x3e, 0x27, 0x23);
+        blockStyle.strokeWidth = 1.5;
+        blockStyle.extrusion = Extrusion{QPointF(260, -240), 0.22, QColor()};
+        doc->insertShape(-1, std::make_unique<Shape>(block, QPointF(140, 420), blockStyle));
+        Style starDepth;
+        starDepth.fill = QColor(0x29, 0xb6, 0xf6);
+        starDepth.stroke = QColor(0x01, 0x57, 0x9b);
+        starDepth.extrusion = Extrusion{QPointF(-200, -260), 0.3, QColor()};
+        Shape *deepStar = doc->insertShape(-1, std::make_unique<Shape>(generators::star(QRectF(420, 560, 260, 260), 5, 50), starDepth));
+        canvas->setTool(CanvasWidget::Tool::Extrude);
+        canvas->setSelectedShape(deepStar);
+        canvas->fitPage();
+        QTest::qWait(150);
+        QVERIFY(window.grab().save(dir + QStringLiteral("/window-extrude.png")));
         theme::apply(ColorScheme::Light);
     }
 }
@@ -1423,6 +1448,23 @@ void CanvasTests::envelopeToolBendsObjects()
     while (m_undo->index() > before)
         m_undo->undo();
     QVERIFY(!rect->envelope());
+    m_canvas->setTool(CanvasWidget::Tool::Select);
+}
+
+void CanvasTests::extrudeToolGivesDepth()
+{
+    m_canvas->setZoom(1.0);
+    Shape *rect = m_doc->insertShape(-1, std::make_unique<Shape>(ShapeKind::Rectangle, QRectF(100, 100, 100, 100)));
+    const int before = m_undo->index();
+    m_canvas->setTool(CanvasWidget::Tool::Extrude);
+    dragFromTo(m_canvas, m_canvas->documentToWidget({150, 150}), m_canvas->documentToWidget({210, 120}));
+    QVERIFY(rect->style().extrusion);
+    // The back's centre is where the drag ended.
+    const QPointF backCentre = extrude::back(*rect, rect->bounds().center());
+    QVERIFY(std::abs(backCentre.x() - 210) < 1 && std::abs(backCentre.y() - 120) < 1);
+    QCOMPARE(m_undo->index(), before + 1);
+    m_undo->undo();
+    QVERIFY(!rect->style().extrusion);
     m_canvas->setTool(CanvasWidget::Tool::Select);
 }
 

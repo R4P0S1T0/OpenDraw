@@ -13,6 +13,8 @@ add_library(opendraw_core STATIC
     Envelope.h
     Export.cpp
     Export.h
+    Extrude.cpp
+    Extrude.h
     Generators.cpp
     Generators.h
     PathOps.cpp

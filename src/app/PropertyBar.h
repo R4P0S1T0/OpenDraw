@@ -68,6 +68,7 @@ private:
     void refreshEffects();
     void applyShadow(const std::function<void(DropShadow &)> &change);
     void applyContour(const std::function<void(Contour &)> &change);
+    void applyExtrusion(const std::function<void(Extrusion &)> &change);
     void applyTransparency();
 
     Document *m_document;
@@ -93,6 +94,11 @@ private:
     QSpinBox *m_blendSteps;
     QList<QAction *> m_contourActions;
     QList<QAction *> m_envelopeActions;
+    QList<QAction *> m_extrudeActions;
+    QSpinBox *m_extrudeDepth;
+    QDoubleSpinBox *m_extrudeX;
+    QDoubleSpinBox *m_extrudeY;
+    QToolButton *m_extrudeColor;
     QComboBox *m_contourDirection;
     QSpinBox *m_contourSteps;
     QDoubleSpinBox *m_contourOffset;

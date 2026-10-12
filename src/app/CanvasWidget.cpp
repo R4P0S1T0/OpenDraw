@@ -566,6 +566,12 @@ void CanvasWidget::applyEffectDrag(const QPointF &documentPosition, Qt::Keyboard
             DropShadow shadow = before.shadow.value_or(DropShadow{});
             shadow.offset = delta;
             style.shadow = shadow;
+        } else if (m_tool == Tool::Extrude) {
+            // The back of the extrusion follows the pointer; the vanishing point lies beyond it.
+            Extrusion e = before.extrusion.value_or(Extrusion{});
+            e.depth = std::clamp(e.depth, 0.05, 0.95);
+            e.vanishingPoint = delta / e.depth;
+            style.extrusion = e;
         } else if (m_tool == Tool::Contour) {
             // Out of the object: rings outside, as far as the pointer; into it: rings inside.
             Contour c = before.contour.value_or(Contour{});
@@ -600,6 +606,7 @@ void CanvasWidget::commitEffectDrag()
         return;
     const QString text = m_tool == Tool::DropShadow ? tr("Drop shadow")
                          : m_tool == Tool::Contour  ? tr("Contour")
+                         : m_tool == Tool::Extrude  ? tr("Extrude")
                                                     : tr("Transparency");
     m_undoStack->beginMacro(text);
     for (const auto &[leaf, before] : m_effectBefore) {
@@ -2423,6 +2430,7 @@ void CanvasWidget::mousePressEvent(QMouseEvent *event)
 
     case Tool::DropShadow:
     case Tool::Contour:
+    case Tool::Extrude:
     case Tool::Transparency: {
         if (const int handle = transparencyHandleAt(pos); handle >= 0) {
             m_effectHandle = handle;

@@ -2,6 +2,7 @@
 
 #include "core/ContourEffect.h"
 #include "core/Document.h"
+#include "core/Extrude.h"
 #include "core/Shape.h"
 #include "core/TextLayout.h"
 
@@ -204,6 +205,11 @@ QRectF paintedBounds(const Shape &shape)
     if (style.shadow) {
         const double blur = std::max(style.shadow->blur, 0.0) * 1.5;
         area = area.united(area.translated(style.shadow->offset).adjusted(-blur, -blur, blur, blur));
+    }
+    if (style.extrusion) {
+        const QRectF box = shape.bounds();
+        const QRectF back = QRectF(extrude::back(shape, box.topLeft()), extrude::back(shape, box.bottomRight()));
+        area = area.united(back.normalized().adjusted(-reach, -reach, reach, reach));
     }
     return area;
 }
@@ -437,6 +443,24 @@ void paintShape(QPainter &painter, const Shape &shape)
         }
     };
     const bool ringsUnder = style.contour && style.contour->direction == Contour::Direction::Outside;
+    if (style.extrusion) {
+        // Extruded sides under everything; outlined like the object, or by themselves so
+        // neighbouring faces show no seams.
+        Style solid = style;
+        solid.dashes.clear();
+        const QPen objectPen = outlinePen(solid);
+        for (const extrude::Face &face : extrude::faces(shape)) {
+            painter.setBrush(face.color);
+            painter.setPen(QPen(face.color, 0.5));
+            painter.drawPolygon(face.polygon);
+            if (style.hasStroke()) {
+                painter.setPen(objectPen);
+                painter.drawLines(face.lines.data(), int(face.lines.size()));
+                if (face.lines.empty()) // the back
+                    painter.drawPolygon(face.polygon);
+            }
+        }
+    }
     if (ringsUnder)
         paintRings();
     if (style.shadow || style.transparency)

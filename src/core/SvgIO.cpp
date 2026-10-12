@@ -2,6 +2,7 @@
 
 #include "core/ContourEffect.h"
 #include "core/Document.h"
+#include "core/Extrude.h"
 #include "core/PathOps.h"
 #include "core/Render.h"
 #include "core/RichText.h"
@@ -380,6 +381,14 @@ void writeEffects(QXmlStreamWriter &w, const Style &style, const std::pair<QStri
     }
     if (style.contour)
         w.writeAttribute(ns, QStringLiteral("contour"), contourText(*style.contour));
+    if (style.extrusion) {
+        const Extrusion &e = *style.extrusion;
+        w.writeAttribute(ns, QStringLiteral("extrude"),
+                         QStringLiteral("%1 %2 %3 %4").arg(number(e.vanishingPoint.x()), number(e.vanishingPoint.y()),
+                                                          number(e.depth),
+                                                          e.color.isValid() ? e.color.name(QColor::HexArgb)
+                                                                            : QStringLiteral("shaded")));
+    }
     if (style.shadow) {
         w.writeAttribute(QStringLiteral("filter"), QStringLiteral("url(#%1)").arg(ids.first));
         w.writeAttribute(ns, QStringLiteral("shadow"), shadowText(*style.shadow));
@@ -486,6 +495,37 @@ void writeShape(QXmlStreamWriter &w, const Shape &shape, int &gradientCount)
         writeShapeElement(w, shape, gradientCount, true);
         w.writeEndElement();
         return;
+    }
+    if (shape.style().extrusion) {
+        // The extruded sides, as plain shapes under the object.
+        w.writeStartElement(QStringLiteral("g"));
+        w.writeAttribute(QString::fromLatin1(kNamespace), QStringLiteral("generated"), QStringLiteral("true"));
+        Style faceStyle = shape.style();
+        faceStyle.dashes.clear();
+        for (const extrude::Face &face : extrude::faces(shape)) {
+            QStringList points;
+            for (const QPointF &p : face.polygon)
+                points << number(p.x()) + QLatin1Char(',') + number(p.y());
+            w.writeEmptyElement(QStringLiteral("polygon"));
+            w.writeAttribute(QStringLiteral("points"), points.join(QLatin1Char(' ')));
+            writePaint(w, QStringLiteral("fill"), face.color, true);
+            const bool outlined = faceStyle.hasStroke() && face.lines.empty(); // the back
+            writePaint(w, QStringLiteral("stroke"), outlined ? faceStyle.stroke : face.color, true);
+            w.writeAttribute(QStringLiteral("stroke-width"), outlined ? number(faceStyle.strokeWidth) : QStringLiteral("0.5"));
+            if (!faceStyle.hasStroke())
+                continue;
+            for (const QLineF &line : face.lines) {
+                w.writeEmptyElement(QStringLiteral("line"));
+                w.writeAttribute(QStringLiteral("x1"), number(line.x1()));
+                w.writeAttribute(QStringLiteral("y1"), number(line.y1()));
+                w.writeAttribute(QStringLiteral("x2"), number(line.x2()));
+                w.writeAttribute(QStringLiteral("y2"), number(line.y2()));
+                writePaint(w, QStringLiteral("stroke"), faceStyle.stroke, true);
+                w.writeAttribute(QStringLiteral("stroke-width"), number(faceStyle.strokeWidth));
+                w.writeAttribute(QStringLiteral("stroke-linecap"), QStringLiteral("round"));
+            }
+        }
+        w.writeEndElement();
     }
     const std::vector<contour::Ring> rings = contour::rings(shape);
     const bool under = shape.style().contour && shape.style().contour->direction == Contour::Direction::Outside;
@@ -1283,11 +1323,18 @@ void applyEffects(Shape &shape, const QXmlStreamAttributes &attributes, ReadRepo
     if (!transparency && attributes.hasAttribute(QStringLiteral("mask")))
         ++report.skippedElements[QCoreApplication::translate("SvgIO", "mask (shown without it)")];
     const auto contour = parseContour(attributes.value(ns, QStringLiteral("contour")));
-    if (!shadow && !transparency && !contour)
+    std::optional<Extrusion> extrusion;
+    if (const QStringList e = attributes.value(ns, QStringLiteral("extrude")).toString().split(QLatin1Char(' '), Qt::SkipEmptyParts);
+        e.size() == 4) {
+        extrusion = Extrusion{QPointF(e[0].toDouble(), e[1].toDouble()), std::clamp(e[2].toDouble(), 0.0, 1.0),
+                              e[3] == u"shaded" ? QColor() : QColor::fromString(e[3])};
+    }
+    if (!shadow && !transparency && !contour && !extrusion)
         return;
     style.shadow = shadow;
     style.transparency = transparency;
     style.contour = contour;
+    style.extrusion = extrusion;
     shape.setStyle(style);
 }
 

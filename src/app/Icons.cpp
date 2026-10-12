@@ -469,6 +469,18 @@ void draw(QPainter &p, Icon id, const QColor &ink, const QColor &accent, const Q
         }
         break;
     }
+    case Icon::Extrude: {
+        // A square with depth: its side faces going up and to the right.
+        QColor side = accent;
+        side.setAlpha(120);
+        p.setPen(line);
+        p.setBrush(side);
+        p.drawPolygon(QPolygonF{QPointF(4, 9), QPointF(9, 4), QPointF(20, 4), QPointF(15, 9)});
+        p.drawPolygon(QPolygonF{QPointF(15, 9), QPointF(20, 4), QPointF(20, 15), QPointF(15, 20)});
+        p.setBrush(paper);
+        p.drawRect(QRectF(4, 9, 11, 11));
+        break;
+    }
     case Icon::Envelope: {
         // A box whose top and bottom bow inwards, with corner handles.
         QPainterPath frame;

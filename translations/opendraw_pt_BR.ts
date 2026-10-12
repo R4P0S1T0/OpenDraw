@@ -257,6 +257,10 @@
         <translation>Contorno concêntrico</translation>
     </message>
     <message>
+        <source>Extrude</source>
+        <translation>Extrusão</translation>
+    </message>
+    <message>
         <source>Transparency</source>
         <translation>Transparência</translation>
     </message>
@@ -1035,6 +1039,10 @@ Clique esquerdo: preenchimento · Clique direito: contorno</translation>
         <translation>Envelope</translation>
     </message>
     <message>
+        <source>Extrude</source>
+        <translation>Extrusão</translation>
+    </message>
+    <message>
         <source>Transparency</source>
         <translation>Transparência</translation>
     </message>
@@ -1165,6 +1173,10 @@ Clique esquerdo: preenchimento · Clique direito: contorno</translation>
     <message>
         <source>Drag from one object to another to blend them; click a blend to change its steps on the property bar</source>
         <translation>Arraste de um objeto até outro para misturá-los; clique numa mistura para mudar os passos na barra de propriedades</translation>
+    </message>
+    <message>
+        <source>Drag from an object to give it depth: the back follows the pointer; the property bar sets the depth, vanishing point and colour</source>
+        <translation>Arraste a partir de um objeto para dar profundidade: o fundo segue o ponteiro; a barra de propriedades define profundidade, ponto de fuga e cor</translation>
     </message>
     <message>
         <source>Click an object, then drag the corners and round handles of its envelope to bend it</source>
@@ -2240,6 +2252,42 @@ Clique esquerdo: preenchimento · Clique direito: contorno</translation>
         <translation>Remover contorno concêntrico</translation>
     </message>
     <message>
+        <source>Depth</source>
+        <translation>Profundidade</translation>
+    </message>
+    <message>
+        <source>How far the extrusion goes towards the vanishing point</source>
+        <translation>Quanto a extrusão avança em direção ao ponto de fuga</translation>
+    </message>
+    <message>
+        <source>Vanishing point X</source>
+        <translation>Ponto de fuga X</translation>
+    </message>
+    <message>
+        <source>Horizontal distance of the vanishing point from the object&apos;s centre</source>
+        <translation>Distância horizontal do ponto de fuga ao centro do objeto</translation>
+    </message>
+    <message>
+        <source>Vertical distance of the vanishing point from the object&apos;s centre</source>
+        <translation>Distância vertical do ponto de fuga ao centro do objeto</translation>
+    </message>
+    <message>
+        <source>Colour of the sides</source>
+        <translation>Cor das laterais</translation>
+    </message>
+    <message>
+        <source>Shade the sides from the object&apos;s fill</source>
+        <translation>Sombrear as laterais a partir do preenchimento do objeto</translation>
+    </message>
+    <message>
+        <source>Remove the extrusion</source>
+        <translation>Remover a extrusão</translation>
+    </message>
+    <message>
+        <source>Remove extrusion</source>
+        <translation>Remover extrusão</translation>
+    </message>
+    <message>
         <source>Drag the envelope&apos;s corners and handles</source>
         <translation>Arraste os cantos e as alças do envelope</translation>
     </message>
@@ -2262,6 +2310,10 @@ Clique esquerdo: preenchimento · Clique direito: contorno</translation>
     <message>
         <source>Contour</source>
         <translation>Contorno concêntrico</translation>
+    </message>
+    <message>
+        <source>Extrude</source>
+        <translation>Extrusão</translation>
     </message>
 </context>
 <context>

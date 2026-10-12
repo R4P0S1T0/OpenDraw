@@ -29,6 +29,7 @@ public:
     enum class Tool {
         Select, Node, Zoom, Pan, Freehand, Line, Bezier, Rectangle, Ellipse,
         Polygon, Star, Spiral, GraphPaper, Text, DropShadow, Transparency, Eyedropper, Blend, Contour, Envelope,
+        Extrude,
     };
 
     CanvasWidget(Document *document, QUndoStack *undoStack, QWidget *parent = nullptr);
