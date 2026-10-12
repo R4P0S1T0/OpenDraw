@@ -549,6 +549,58 @@ void SetCornerRadiusCommand::undo()
     m_document->notifyShapeChanged(m_shape);
 }
 
+SetBlendStepsCommand::SetBlendStepsCommand(Document *document, Shape *blend, int steps, QUndoCommand *parent)
+    : QUndoCommand(QCoreApplication::translate("Commands", "Blend steps"), parent)
+    , m_document(document)
+    , m_blend(blend)
+    , m_oldSteps(blend->blendSteps())
+    , m_newSteps(steps)
+{
+}
+
+void SetBlendStepsCommand::redo()
+{
+    m_blend->setBlendSteps(m_newSteps);
+    m_document->notifyShapeChanged(m_blend);
+}
+
+void SetBlendStepsCommand::undo()
+{
+    m_blend->setBlendSteps(m_oldSteps);
+    m_document->notifyShapeChanged(m_blend);
+}
+
+BreakBlendCommand::BreakBlendCommand(Document *document, Shape *blend, QUndoCommand *parent)
+    : QUndoCommand(QCoreApplication::translate("Commands", "Break blend apart"), parent)
+    , m_document(document)
+    , m_blend(blend)
+    , m_steps(blend->blendSteps())
+    , m_ownedSteps(std::make_unique<Shape>(blend->blendIntermediates()))
+{
+    m_stepsGroup = m_ownedSteps.get();
+}
+
+void BreakBlendCommand::redo()
+{
+    ShapeList children = m_blend->takeChildren();
+    children.insert(children.begin() + 1, std::move(m_ownedSteps));
+    m_blend->setChildren(std::move(children));
+    m_blend->setBlendSteps(0);
+    m_document->notifyShapeChanged(m_blend);
+}
+
+void BreakBlendCommand::undo()
+{
+    ShapeList children = m_blend->takeChildren();
+    const auto it = std::find_if(children.begin(), children.end(),
+                                 [this](const std::unique_ptr<Shape> &s) { return s.get() == m_stepsGroup; });
+    m_ownedSteps = std::move(*it);
+    children.erase(it);
+    m_blend->setChildren(std::move(children));
+    m_blend->setBlendSteps(m_steps);
+    m_document->notifyShapeChanged(m_blend);
+}
+
 GuideCommand::GuideCommand(Document *document, int index, std::optional<Guide> before, std::optional<Guide> after,
                            QUndoCommand *parent)
     : QUndoCommand(parent)

@@ -43,7 +43,7 @@ Icon iconFor(const Shape &shape)
     case ShapeKind::Path:
         return Icon::Bezier;
     case ShapeKind::Group:
-        return Icon::Group;
+        return shape.isBlend() ? Icon::Blend : Icon::Group;
     case ShapeKind::Text:
         return Icon::Text;
     case ShapeKind::Image:
@@ -101,6 +101,8 @@ QString ObjectsPanel::describe(const Shape &shape)
     case ShapeKind::Path:
         return tr("Curve");
     case ShapeKind::Group:
+        if (shape.isBlend())
+            return tr("Blend of %n step(s)", nullptr, shape.blendSteps());
         return tr("Group of %n object(s)", nullptr, int(shape.children().size()));
     case ShapeKind::Text: {
         QString first = shape.textData().text.section(QLatin1Char('\n'), 0, 0);

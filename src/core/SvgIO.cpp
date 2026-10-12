@@ -441,6 +441,21 @@ void writeShape(QXmlStreamWriter &w, const Shape &shape, int &gradientCount)
     case ShapeKind::Group:
         w.writeStartElement(QStringLiteral("g"));
         writeLabel(w, shape.name());
+        if (shape.isBlend()) {
+            // The steps are written too, so other programs show them; OpenDraw skips them on
+            // reading and works them out again.
+            const QString ns = QString::fromLatin1(kNamespace);
+            w.writeAttribute(ns, QStringLiteral("blend"), QString::number(shape.blendSteps()));
+            writeShape(w, *shape.children()[0], gradientCount);
+            w.writeStartElement(QStringLiteral("g"));
+            w.writeAttribute(ns, QStringLiteral("generated"), QStringLiteral("true"));
+            for (const auto &step : shape.blendIntermediates())
+                writeShape(w, *step, gradientCount);
+            w.writeEndElement();
+            writeShape(w, *shape.children()[1], gradientCount);
+            w.writeEndElement();
+            return;
+        }
         for (const auto &child : shape.children())
             writeShape(w, *child, gradientCount);
         w.writeEndElement();
@@ -695,6 +710,7 @@ struct Context {
     bool inPage = false;    // inside a page group
     bool inLayer = false;   // inside a layer (nested layers become groups)
     QString label;          // for Role::Group: the name the group was given
+    int blendSteps = 0;     // for Role::Group: a blend's steps (opendraw:blend)
 };
 
 // The presentation properties of one element: style attribute, then attributes, then inherited values.
@@ -1608,6 +1624,8 @@ bool read(QIODevice *device, Document &document, QString *errorMessage, ReadRepo
                     if (!children.empty()) {
                         auto group = std::make_unique<Shape>(std::move(children));
                         group->setName(stack.back().label);
+                        if (group->children().size() == 2)
+                            group->setBlendSteps(stack.back().blendSteps);
                         containers.back().push_back(std::move(group));
                     }
                     break;
@@ -1666,6 +1684,10 @@ bool read(QIODevice *device, Document &document, QString *errorMessage, ReadRepo
         // Hidden pages and layers are still read; any other hidden element is skipped.
         if (hidden && !isPage && !isLayer)
             context.rendering = false;
+        // Steps of a blend, worked out again from its ends.
+        if (attributes.value(ns, QStringLiteral("generated")) == u"true")
+            context.rendering = false;
+        context.blendSteps = name == u"g" ? attributes.value(ns, QStringLiteral("blend")).toInt() : 0;
 
         if (isPage && context.rendering) {
             auto page = std::make_unique<Page>();

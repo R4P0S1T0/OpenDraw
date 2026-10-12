@@ -127,6 +127,7 @@ private slots:
     void secondClickRotatesAndSkews();
     void propertiesDockerAppliesStyles();
     void propertiesDockerFormatsParagraphs();
+    void blendToolJoinsTwoObjects();
     void textToolDrawsParagraphFrames();
     void formatPartOfAText();
     void shadowAndTransparencyTools();
@@ -952,6 +953,24 @@ void CanvasTests::mainWindowWorkspace()
         canvas->zoomToSelection();
         QTest::qWait(150);
         QVERIFY(window.grab().save(dir + QStringLiteral("/window-paragraph.png")));
+
+        // A blend from a yellow star to a blue circle, with the blend tool.
+        canvas->selectAll();
+        canvas->deleteSelection();
+        Style starStyle;
+        starStyle.fill = QColor(0xfd, 0xd8, 0x35);
+        starStyle.stroke = QColor(0x5d, 0x40, 0x37);
+        Shape *starShape = doc->insertShape(-1, std::make_unique<Shape>(generators::star(QRectF(120, 160, 160, 160), 5, 50), starStyle));
+        Style circleStyle;
+        circleStyle.fill = QColor(0x1e, 0x88, 0xe5);
+        circleStyle.stroke = QColor(0x0d, 0x47, 0xa1);
+        circleStyle.strokeWidth = 4;
+        Shape *circle = doc->insertShape(-1, std::make_unique<Shape>(ShapeKind::Ellipse, QRectF(560, 560, 200, 200), circleStyle));
+        canvas->setTool(CanvasWidget::Tool::Blend);
+        canvas->blendShapes(starShape, circle);
+        canvas->zoomToSelection();
+        QTest::qWait(150);
+        QVERIFY(window.grab().save(dir + QStringLiteral("/window-blend.png")));
         theme::apply(ColorScheme::Light);
     }
 }
@@ -1266,6 +1285,38 @@ void CanvasTests::propertiesDockerFormatsParagraphs()
     m_undo->undo();
     QCOMPARE(text->textData().format.align, TextAlign::Left);
     QCOMPARE(text->textData().format.firstIndent, 0.0);
+}
+
+void CanvasTests::blendToolJoinsTwoObjects()
+{
+    m_canvas->setZoom(1.0);
+    Style style;
+    style.fill = Qt::red;
+    Shape *a = m_doc->insertShape(-1, std::make_unique<Shape>(ShapeKind::Rectangle, QRectF(10, 10, 40, 40), style));
+    style.fill = Qt::blue;
+    Shape *b = m_doc->insertShape(-1, std::make_unique<Shape>(ShapeKind::Ellipse, QRectF(300, 200, 60, 60), style));
+    const int before = m_undo->index();
+    m_canvas->setTool(CanvasWidget::Tool::Blend);
+    dragFromTo(m_canvas, m_canvas->documentToWidget(a->bounds().center()), m_canvas->documentToWidget(b->bounds().center()));
+    QCOMPARE(m_doc->count(), 1);
+    Shape *blend = m_doc->shapes().front().get();
+    QVERIFY(blend->isBlend());
+    QCOMPARE(blend->blendSteps(), m_canvas->toolSettings().blendSteps);
+    QCOMPARE(m_canvas->selectedShape(), blend);
+
+    m_canvas->setBlendSteps(4);
+    QCOMPARE(blend->blendSteps(), 4);
+    m_canvas->breakBlendApart();
+    QCOMPARE(m_doc->count(), 3); // start, the steps, end
+    QCOMPARE(m_doc->shapes()[1]->children().size(), std::size_t(4));
+    while (m_undo->index() > before)
+        m_undo->undo();
+    QCOMPARE(m_doc->count(), 2);
+
+    // Dragging onto empty space does nothing.
+    dragFromTo(m_canvas, m_canvas->documentToWidget(a->bounds().center()), {700, 50});
+    QCOMPARE(m_doc->count(), 2);
+    m_canvas->setTool(CanvasWidget::Tool::Select);
 }
 
 void CanvasTests::textToolDrawsParagraphFrames()

@@ -111,6 +111,14 @@
         <translation>Raio do canto</translation>
     </message>
     <message>
+        <source>Blend steps</source>
+        <translation>Passos da mistura</translation>
+    </message>
+    <message>
+        <source>Break blend apart</source>
+        <translation>Separar mistura</translation>
+    </message>
+    <message>
         <source>Add guideline</source>
         <translation>Adicionar linha-guia</translation>
     </message>
@@ -259,6 +267,18 @@
     <message>
         <source>Convert text</source>
         <translation>Converter texto</translation>
+    </message>
+    <message>
+        <source>Blend</source>
+        <translation>Mistura</translation>
+    </message>
+    <message>
+        <source>Blend steps</source>
+        <translation>Passos da mistura</translation>
+    </message>
+    <message>
+        <source>Break blend apart</source>
+        <translation>Separar mistura</translation>
     </message>
     <message>
         <source>Ungroup</source>
@@ -703,6 +723,10 @@ Clique esquerdo: preenchimento · Clique direito: contorno</translation>
         <translation>&amp;Desagrupar</translation>
     </message>
     <message>
+        <source>&amp;Break Blend Apart</source>
+        <translation>&amp;Separar mistura</translation>
+    </message>
+    <message>
         <source>&amp;Order</source>
         <translation>&amp;Ordem</translation>
     </message>
@@ -979,6 +1003,10 @@ Clique esquerdo: preenchimento · Clique direito: contorno</translation>
         <translation>Sombra</translation>
     </message>
     <message>
+        <source>Blend</source>
+        <translation>Mistura</translation>
+    </message>
+    <message>
         <source>Transparency</source>
         <translation>Transparência</translation>
     </message>
@@ -1105,6 +1133,10 @@ Clique esquerdo: preenchimento · Clique direito: contorno</translation>
     <message>
         <source>Drag across an object: solid where you start, transparent where you end; drag the squares to adjust</source>
         <translation>Arraste sobre um objeto: sólido onde começa, transparente onde termina; arraste os quadrados para ajustar</translation>
+    </message>
+    <message>
+        <source>Drag from one object to another to blend them; click a blend to change its steps on the property bar</source>
+        <translation>Arraste de um objeto até outro para misturá-los; clique numa mistura para mudar os passos na barra de propriedades</translation>
     </message>
     <message>
         <source>Click inside an object to fill it, on its outline to colour the outline; Shift+click or Esc picks another colour</source>
@@ -1324,6 +1356,13 @@ Clique esquerdo: preenchimento · Clique direito: contorno</translation>
         </translation>
     </message>
     <message numerus="yes">
+        <source>Blend of %n step(s)</source>
+        <translation>
+            <numerusform>Mistura de %n passo</numerusform>
+            <numerusform>Mistura de %n passos</numerusform>
+        </translation>
+    </message>
+    <message numerus="yes">
         <source>Group of %n object(s)</source>
         <translation>
             <numerusform>Grupo de %n objeto</numerusform>
@@ -1372,6 +1411,13 @@ Clique esquerdo: preenchimento · Clique direito: contorno</translation>
     <message>
         <source>Curve</source>
         <translation>Curva</translation>
+    </message>
+    <message numerus="yes">
+        <source>Blend of %n step(s)</source>
+        <translation>
+            <numerusform>Mistura de %n passo</numerusform>
+            <numerusform>Mistura de %n passos</numerusform>
+        </translation>
     </message>
     <message numerus="yes">
         <source>Group of %n object(s)</source>
@@ -2108,6 +2154,18 @@ Clique esquerdo: preenchimento · Clique direito: contorno</translation>
     <message>
         <source>Transparency where the gradient ends</source>
         <translation>Transparência onde o degradê termina</translation>
+    </message>
+    <message>
+        <source>Steps</source>
+        <translation>Passos</translation>
+    </message>
+    <message>
+        <source>Number of shapes between the two ends of the blend</source>
+        <translation>Número de formas entre as duas pontas da mistura</translation>
+    </message>
+    <message>
+        <source>Break the blend apart (Ctrl+K)</source>
+        <translation>Separar a mistura (Ctrl+K)</translation>
     </message>
     <message>
         <source>Drop shadow</source>

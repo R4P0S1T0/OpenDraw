@@ -28,7 +28,7 @@ class CanvasWidget : public QWidget {
 public:
     enum class Tool {
         Select, Node, Zoom, Pan, Freehand, Line, Bezier, Rectangle, Ellipse,
-        Polygon, Star, Spiral, GraphPaper, Text, DropShadow, Transparency, Eyedropper,
+        Polygon, Star, Spiral, GraphPaper, Text, DropShadow, Transparency, Eyedropper, Blend,
     };
 
     CanvasWidget(Document *document, QUndoStack *undoStack, QWidget *parent = nullptr);
@@ -139,6 +139,12 @@ public slots:
 
     void groupSelection();
     void ungroupSelection();
+    // Blends two objects (the lower one is the start) with toolSettings().blendSteps steps.
+    void blendShapes(opendraw::Shape *from, opendraw::Shape *to);
+    // Number of steps of the selected blends.
+    void setBlendSteps(int steps);
+    // Selected blends become their start, a group of their steps, and their end.
+    void breakBlendApart();
     void orderToFront();
     void orderToBack();
     void orderForwardOne();
@@ -196,7 +202,7 @@ protected:
 private:
     enum class Drag {
         None, Pan, Move, Resize, Marquee, Create, NodeMove, NodeHandle, BezierHandle, Freehand, ZoomBox, Guide,
-        Rotate, Skew, RotationCenter, TextFrame, TextSelect, Effect, EffectHandle,
+        Rotate, Skew, RotationCenter, TextFrame, TextSelect, Effect, EffectHandle, Blend,
     };
     enum class NodeHandle { In, Out };
 
@@ -338,6 +344,7 @@ private:
     QPointF m_transformCenter;             // rotation centre when that drag started
     std::vector<std::pair<Shape *, Style>> m_effectBefore; // styles before a shadow/transparency drag
     int m_effectHandle = -1;               // transparency handle being dragged: 0 start, 1 end
+    Shape *m_blendStart = nullptr;         // object a blend drag started on
     bool m_marqueeAdds = false;
     int m_resizeHandle = -1;
     QRectF m_resizeOriginal;                // selection bounds when the resize started

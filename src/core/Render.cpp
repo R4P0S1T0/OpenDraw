@@ -383,6 +383,14 @@ void paintWithEffects(QPainter &painter, const Shape &shape)
 void paintShape(QPainter &painter, const Shape &shape)
 {
     if (shape.kind() == ShapeKind::Group) {
+        if (shape.isBlend()) {
+            // Start, the steps in between, end on top.
+            paintShape(painter, *shape.children()[0]);
+            for (const auto &step : shape.blendIntermediates())
+                paintShape(painter, *step);
+            paintShape(painter, *shape.children()[1]);
+            return;
+        }
         for (const auto &child : shape.children())
             paintShape(painter, *child);
         return;

@@ -1,5 +1,6 @@
 #include "core/Shape.h"
 
+#include "core/Blend.h"
 #include "core/PathOps.h"
 #include "core/TextLayout.h"
 
@@ -283,6 +284,8 @@ QPainterPath Shape::localPath() const
     case ShapeKind::Group:
         for (const auto &child : m_children)
             path.addPath(child->path());
+        for (const auto &step : blendIntermediates())
+            path.addPath(step->path());
         break;
     case ShapeKind::Text:
         path = textlayout::outline(m_text, m_textOrigin);
@@ -297,11 +300,23 @@ QPainterPath Shape::localPath() const
     return path;
 }
 
+std::vector<std::unique_ptr<Shape>> Shape::blendIntermediates() const
+{
+    if (!isBlend())
+        return {};
+    return blend::intermediates(*m_children[0], *m_children[1], m_blendSteps);
+}
+
 bool Shape::contains(const QPointF &point, double tolerance) const
 {
     if (m_kind == ShapeKind::Group) {
-        return std::any_of(m_children.begin(), m_children.end(),
-                           [&](const auto &child) { return child->contains(point, tolerance); });
+        auto hit = [&](const auto &child) { return child->contains(point, tolerance); };
+        if (std::any_of(m_children.begin(), m_children.end(), hit))
+            return true;
+        if (!isBlend())
+            return false;
+        const auto steps = blendIntermediates();
+        return std::any_of(steps.begin(), steps.end(), hit);
     }
     if (m_kind == ShapeKind::Text) { // letters are thin: the whole text box is clickable
         const QRectF box = localBounds().adjusted(-tolerance, -tolerance, tolerance, tolerance);

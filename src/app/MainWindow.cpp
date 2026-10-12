@@ -404,6 +404,8 @@ void MainWindow::createActions()
     objectMenu->addAction(tr("&Group"), QKeySequence(Qt::CTRL | Qt::Key_G), m_canvas, &CanvasWidget::groupSelection);
     objectMenu->addAction(tr("&Ungroup"), QKeySequence(Qt::CTRL | Qt::Key_U), m_canvas,
                           &CanvasWidget::ungroupSelection);
+    objectMenu->addAction(tr("&Break Blend Apart"), QKeySequence(Qt::CTRL | Qt::Key_K), m_canvas,
+                          &CanvasWidget::breakBlendApart);
     objectMenu->addSeparator();
 
     QMenu *orderMenu = objectMenu->addMenu(tr("&Order"));
@@ -668,7 +670,8 @@ void MainWindow::createToolbox(QMenu *toolsMenu)
     m_toolbox->addSeparator();
     m_toolbox->addAction(makeAction({CanvasWidget::Tool::Text, Icon::Text, tr("Text"), QKeySequence(Qt::Key_F8)}));
     m_toolbox->addSeparator();
-    m_toolbox->addAction(makeAction({CanvasWidget::Tool::DropShadow, Icon::Shadow, tr("Drop Shadow"), QKeySequence()}));
+    addFlyout({{CanvasWidget::Tool::DropShadow, Icon::Shadow, tr("Drop Shadow"), QKeySequence()},
+               {CanvasWidget::Tool::Blend, Icon::Blend, tr("Blend"), QKeySequence()}});
     m_toolbox->addAction(makeAction({CanvasWidget::Tool::Transparency, Icon::Transparency, tr("Transparency"), QKeySequence()}));
     m_toolbox->addAction(
         makeAction({CanvasWidget::Tool::Eyedropper, Icon::Eyedropper, tr("Color Eyedropper"), QKeySequence(Qt::Key_I)}));
@@ -861,6 +864,8 @@ QString MainWindow::toolHint() const
         return tr("Drag from an object to give it a shadow; the property bar sets its offset, softness, opacity and colour");
     case CanvasWidget::Tool::Transparency:
         return tr("Drag across an object: solid where you start, transparent where you end; drag the squares to adjust");
+    case CanvasWidget::Tool::Blend:
+        return tr("Drag from one object to another to blend them; click a blend to change its steps on the property bar");
     case CanvasWidget::Tool::Eyedropper:
         return m_canvas->eyedropperColor()
                    ? tr("Click inside an object to fill it, on its outline to colour the outline; Shift+click or Esc "
@@ -1326,7 +1331,8 @@ void MainWindow::updateStyleIndicators()
             break;
         }
         case ShapeKind::Group:
-            prefix = tr("Group of %n object(s)", nullptr, int(selected->children().size()));
+            prefix = selected->isBlend() ? tr("Blend of %n step(s)", nullptr, selected->blendSteps())
+                                         : tr("Group of %n object(s)", nullptr, int(selected->children().size()));
             break;
         case ShapeKind::Text: {
             const TextFormat &f = selected->textData().format;

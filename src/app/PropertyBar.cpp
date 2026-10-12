@@ -324,6 +324,23 @@ void PropertyBar::createEffectFields()
     m_transparencyEnd = addIntField(tr("End"), tr("Transparency where the gradient ends"), 0, 100, m_transparencyActions);
     m_transparencyStart->setSuffix(QStringLiteral(" %"));
     m_transparencyEnd->setSuffix(QStringLiteral(" %"));
+    // Blend tool: steps of new blends and of the selected one.
+    m_blendSteps = addIntField(tr("Steps"), tr("Number of shapes between the two ends of the blend"), 1, 999,
+                               m_blendActions);
+    QToolButton *breakBlend = addButton(icon(Icon::Group), tr("Break the blend apart (Ctrl+K)"), m_blendActions);
+    connect(m_blendSteps, &QSpinBox::valueChanged, this, [this](int steps) {
+        if (m_updatingEffects || m_updatingToolFields)
+            return;
+        m_toolSettings.blendSteps = steps;
+        emit toolSettingsChanged(m_toolSettings);
+        if (m_canvas)
+            m_canvas->setBlendSteps(steps);
+    });
+    connect(breakBlend, &QToolButton::clicked, this, [this] {
+        if (m_canvas)
+            m_canvas->breakBlendApart();
+    });
+
     connect(m_transparencyType, &QComboBox::activated, this, &PropertyBar::applyTransparency);
     connect(m_transparencyStart, &QSpinBox::editingFinished, this, &PropertyBar::applyTransparency);
     connect(m_transparencyEnd, &QSpinBox::editingFinished, this, &PropertyBar::applyTransparency);
@@ -419,6 +436,9 @@ void PropertyBar::refreshEffects()
     m_transparencyStart->setValue(start);
     m_transparencyEnd->setValue(end);
     m_transparencyEnd->setEnabled(type >= 2);
+
+    const Shape *selected = m_canvas->selectedShape();
+    m_blendSteps->setValue(selected && selected->isBlend() ? selected->blendSteps() : m_toolSettings.blendSteps);
     m_updatingEffects = false;
 }
 
@@ -495,6 +515,8 @@ QList<QAction *> *PropertyBar::toolGroup()
         return &m_shadowActions;
     case CanvasWidget::Tool::Transparency:
         return &m_transparencyActions;
+    case CanvasWidget::Tool::Blend:
+        return &m_blendActions;
     default:
         return nullptr;
     }
@@ -523,12 +545,14 @@ void PropertyBar::updateMode()
 {
     QList<QAction *> *tool = toolGroup();
     // These tools act on the selection, so their options show with it.
-    const bool always = tool == &m_eyedropperActions || tool == &m_shadowActions || tool == &m_transparencyActions;
+    const bool always = tool == &m_eyedropperActions || tool == &m_shadowActions || tool == &m_transparencyActions
+                        || tool == &m_blendActions;
     const bool showTool = tool && (always || !m_anySelected);
     const bool showObject = m_anySelected && !always;
     const bool showPage = !m_anySelected && !showTool;
     for (QList<QAction *> *group : {&m_rectangleToolActions, &m_polygonActions, &m_starActions, &m_spiralActions,
-                                    &m_graphActions, &m_eyedropperActions, &m_shadowActions, &m_transparencyActions}) {
+                                    &m_graphActions, &m_eyedropperActions, &m_shadowActions, &m_transparencyActions,
+                                    &m_blendActions}) {
         for (QAction *action : std::as_const(*group))
             action->setVisible(showTool && group == tool);
     }

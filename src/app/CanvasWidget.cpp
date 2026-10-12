@@ -1,5 +1,6 @@
 #include "CanvasWidget.h"
 
+#include "core/Blend.h"
 #include "core/Commands.h"
 #include "Icons.h"
 #include "core/Document.h"
@@ -628,8 +629,8 @@ int CanvasWidget::transparencyHandleAt(const QPointF &widgetPosition) const
 
 void CanvasWidget::paintEffectHandles(QPainter &painter)
 {
-    // A line from where the drag started, while dragging a shadow.
-    if (m_drag == Drag::Effect && m_tool == Tool::DropShadow) {
+    // A line from where the drag started, while dragging a shadow or a blend.
+    if ((m_drag == Drag::Effect && m_tool == Tool::DropShadow) || m_drag == Drag::Blend) {
         painter.setPen(QPen(palette().color(QPalette::Highlight), 1, Qt::DashLine));
         painter.drawLine(toWidget(m_dragStart), toWidget(m_cursor));
     }
@@ -826,7 +827,7 @@ void CanvasWidget::fitPage()
 
 void CanvasWidget::updateCursor()
 {
-    // Cursor drawn from one of OpenDraw's icons, with its hot spot on the 24 × 24 grid.
+    // Cursor drawn from one of OpenDraw's icons, with its hot spot on the 24 Ã— 24 grid.
     auto iconCursor = [](Icon id, QPoint hotSpot) {
         const QPixmap pixmap = icon(id).pixmap(QSize(24, 24));
         return QCursor(pixmap, hotSpot.x(), hotSpot.y());
@@ -1379,6 +1380,53 @@ void CanvasWidget::groupSelection()
     Shape *group = command->group();
     m_undoStack->push(command);
     setSelectedShape(group);
+}
+
+void CanvasWidget::blendShapes(Shape *from, Shape *to)
+{
+    auto *command = new GroupCommand(m_document, {from, to});
+    command->setText(tr("Blend"));
+    Shape *group = command->group();
+    group->setBlendSteps(m_toolSettings.blendSteps);
+    m_undoStack->push(command);
+    setSelectedShape(group);
+}
+
+void CanvasWidget::setBlendSteps(int steps)
+{
+    std::vector<Shape *> blends;
+    for (Shape *shape : m_selection) {
+        if (shape->isBlend() && shape->blendSteps() != steps)
+            blends.push_back(shape);
+    }
+    if (blends.empty())
+        return;
+    m_undoStack->beginMacro(tr("Blend steps"));
+    for (Shape *blend : blends)
+        m_undoStack->push(new SetBlendStepsCommand(m_document, blend, steps));
+    m_undoStack->endMacro();
+}
+
+void CanvasWidget::breakBlendApart()
+{
+    std::vector<Shape *> blends;
+    for (Shape *shape : m_selection) {
+        if (shape->isBlend())
+            blends.push_back(shape);
+    }
+    if (blends.empty())
+        return;
+    // Start, steps (as a group) and end become separate objects.
+    std::vector<Shape *> released;
+    m_undoStack->beginMacro(tr("Break blend apart"));
+    for (Shape *blend : blends) {
+        m_undoStack->push(new BreakBlendCommand(m_document, blend));
+        auto *ungroup = new UngroupCommand(m_document, blend);
+        released.insert(released.end(), ungroup->children().begin(), ungroup->children().end());
+        m_undoStack->push(ungroup);
+    }
+    m_undoStack->endMacro();
+    setSelection(std::move(released));
 }
 
 void CanvasWidget::ungroupSelection()
@@ -2262,6 +2310,22 @@ void CanvasWidget::mousePressEvent(QMouseEvent *event)
         break;
     }
 
+    case Tool::Blend: {
+        // Drag from one object to another to blend them; a click selects (a blend, to change it).
+        Shape *hit = m_document->shapeAt(docPos, tolerance);
+        if (!hit) {
+            setSelection({});
+            break;
+        }
+        setSelectedShape(hit);
+        if (blend::canBlend(*hit)) {
+            m_blendStart = hit;
+            m_dragStart = docPos;
+            m_drag = Drag::Blend;
+        }
+        break;
+    }
+
     case Tool::Eyedropper:
         // The first click picks up a colour; later clicks apply it. Shift+click picks again.
         if (!m_eyedropperColor || shift)
@@ -2334,7 +2398,7 @@ void CanvasWidget::mouseMoveEvent(QMouseEvent *event)
         const double to = std::atan2(docPos.y() - c.y(), docPos.x() - c.x());
         double degrees = (to - from) * 180.0 / std::numbers::pi;
         if (event->modifiers() & Qt::ControlModifier)
-            degrees = std::round(degrees / 15.0) * 15.0; // Ctrl: 15° steps
+            degrees = std::round(degrees / 15.0) * 15.0; // Ctrl: 15Â° steps
         applyLiveTransform(QTransform::fromTranslate(-c.x(), -c.y()) * QTransform().rotate(degrees)
                            * QTransform::fromTranslate(c.x(), c.y()));
         break;
@@ -2378,6 +2442,10 @@ void CanvasWidget::mouseMoveEvent(QMouseEvent *event)
 
     case Drag::Effect:
         applyEffectDrag(docPos, event->modifiers());
+        break;
+
+    case Drag::Blend:
+        update(); // the line towards the pointer
         break;
 
     case Drag::EffectHandle:
@@ -2447,7 +2515,7 @@ void CanvasWidget::mouseMoveEvent(QMouseEvent *event)
 
     case Drag::Create: {
         // As in other desktop editors: Ctrl constrains (square, circle, regular shape, line
-        // angles in 15° steps), Shift draws from the centre.
+        // angles in 15Â° steps), Shift draws from the centre.
         const bool constrain = event->modifiers() & Qt::ControlModifier;
         const bool fromCenter = event->modifiers() & Qt::ShiftModifier;
         const QPointF end = snapPoint(docPos);
@@ -2606,6 +2674,16 @@ void CanvasWidget::mouseReleaseEvent(QMouseEvent *event)
         commitEffectDrag();
         m_effectHandle = -1;
         break;
+
+    case Drag::Blend: {
+        Shape *from = m_blendStart;
+        m_blendStart = nullptr;
+        Shape *to = m_document->shapeAt(toDocument(event->position()), kHitTolerancePx / m_zoom);
+        if (from && to && to != from && blend::canBlend(*to))
+            blendShapes(from, to);
+        update();
+        break;
+    }
 
     case Drag::TextFrame: {
         const QRectF frame = m_creating;

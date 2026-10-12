@@ -452,6 +452,23 @@ void draw(QPainter &p, Icon id, const QColor &ink, const QColor &accent, const Q
         p.drawRect(QRectF(3, 3, 13, 13));
         break;
     }
+    case Icon::Blend: {
+        // A small square turning into a larger circle, through fainter steps.
+        for (int i = 0; i < 4; ++i) {
+            const double t = i / 3.0;
+            const double size = 6 + t * 7;
+            const QPointF centre(6 + t * 11, 6 + t * 11);
+            QColor shade = i == 0 || i == 3 ? ink : accent;
+            if (i == 1 || i == 2)
+                shade.setAlpha(110);
+            p.setPen(QPen(shade, 1.3));
+            p.setBrush(i == 3 ? QBrush(accent) : QBrush(Qt::NoBrush));
+            const QRectF box(centre.x() - size / 2, centre.y() - size / 2, size, size);
+            const double radius = t * size / 2;
+            p.drawRoundedRect(box, radius, radius);
+        }
+        break;
+    }
     case Icon::FillNone:
         p.drawRect(QRectF(4, 4, 16, 16));
         p.setPen(QPen(QColor(0xd0, 0x30, 0x30), 1.8, Qt::SolidLine, Qt::RoundCap));

@@ -386,6 +386,38 @@ private:
     double m_newRadius;
 };
 
+// Changes the number of steps of a blend.
+class SetBlendStepsCommand : public QUndoCommand {
+public:
+    SetBlendStepsCommand(Document *document, Shape *blend, int steps, QUndoCommand *parent = nullptr);
+
+    void redo() override;
+    void undo() override;
+
+private:
+    Document *m_document;
+    Shape *m_blend;
+    int m_oldSteps;
+    int m_newSteps;
+};
+
+// Turns a blend into a plain group of its start, a group holding the steps as they are now,
+// and its end.
+class BreakBlendCommand : public QUndoCommand {
+public:
+    BreakBlendCommand(Document *document, Shape *blend, QUndoCommand *parent = nullptr);
+
+    void redo() override;
+    void undo() override;
+
+private:
+    Document *m_document;
+    Shape *m_blend;
+    int m_steps;
+    Shape *m_stepsGroup;
+    std::unique_ptr<Shape> m_ownedSteps; // while the steps are not in the blend
+};
+
 // Adds, moves or removes a guideline. `before` empty = add, `after` empty = remove.
 class GuideCommand : public QUndoCommand {
 public:

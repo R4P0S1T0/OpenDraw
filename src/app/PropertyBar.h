@@ -88,6 +88,8 @@ private:
     QList<QAction *> m_eyedropperActions;
     QList<QAction *> m_shadowActions;
     QList<QAction *> m_transparencyActions;
+    QList<QAction *> m_blendActions;
+    QSpinBox *m_blendSteps;
     CanvasWidget *m_canvas = nullptr;
     bool m_updatingEffects = false;
     QDoubleSpinBox *m_shadowX;

@@ -13,6 +13,7 @@ struct ToolSettings {
     int graphColumns = 4;
     int graphRows = 3;
     double cornerRadius = 0.0; // new rectangles, document units
+    int blendSteps = 20;       // new blends
     bool operator==(const ToolSettings &) const = default;
 };
 

@@ -281,6 +281,13 @@ public:
     const std::vector<std::unique_ptr<Shape>> &children() const { return m_children; }
     std::vector<std::unique_ptr<Shape>> takeChildren() { return std::move(m_children); }
     void setChildren(std::vector<std::unique_ptr<Shape>> children) { m_children = std::move(children); }
+    // A group of two objects with blend steps > 0 is a blend: that many shapes in between
+    // change step by step from the first child into the second (see core/Blend.h).
+    int blendSteps() const { return m_blendSteps; }
+    void setBlendSteps(int steps) { m_blendSteps = std::max(steps, 0); }
+    bool isBlend() const { return m_kind == ShapeKind::Group && m_blendSteps > 0 && m_children.size() == 2; }
+    // The shapes between the two ends of a blend (empty for anything else).
+    std::vector<std::unique_ptr<Shape>> blendIntermediates() const;
 
     // Outline of a single shape; for a group, the union of its children's outlines.
     QPainterPath path() const;
@@ -309,6 +316,7 @@ private:
     QTransform m_shapeTransform;                  // rectangles, ellipses, text
     PathData m_path;                              // paths
     std::vector<std::unique_ptr<Shape>> m_children; // groups
+    int m_blendSteps = 0;                           // groups
     TextData m_text;                                // text
     QPointF m_textOrigin;                           // text
     QImage m_image;                                 // image
