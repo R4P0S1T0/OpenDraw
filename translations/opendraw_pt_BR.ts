@@ -265,6 +265,10 @@
         <translation>Transparência</translation>
     </message>
     <message>
+        <source>Smart fill</source>
+        <translation>Preenchimento inteligente</translation>
+    </message>
+    <message>
         <source>Remove envelope</source>
         <translation>Remover envelope</translation>
     </message>
@@ -1043,6 +1047,10 @@ Clique esquerdo: preenchimento · Clique direito: contorno</translation>
         <translation>Extrusão</translation>
     </message>
     <message>
+        <source>Smart Fill</source>
+        <translation>Preenchimento inteligente</translation>
+    </message>
+    <message>
         <source>Transparency</source>
         <translation>Transparência</translation>
     </message>
@@ -1173,6 +1181,10 @@ Clique esquerdo: preenchimento · Clique direito: contorno</translation>
     <message>
         <source>Drag from one object to another to blend them; click a blend to change its steps on the property bar</source>
         <translation>Arraste de um objeto até outro para misturá-los; clique numa mistura para mudar os passos na barra de propriedades</translation>
+    </message>
+    <message>
+        <source>Click inside an area enclosed by objects to make a new object of that shape</source>
+        <translation>Clique dentro de uma área cercada por objetos para criar um novo objeto com esse formato</translation>
     </message>
     <message>
         <source>Drag from an object to give it depth: the back follows the pointer; the property bar sets the depth, vanishing point and colour</source>
@@ -2250,6 +2262,18 @@ Clique esquerdo: preenchimento · Clique direito: contorno</translation>
     <message>
         <source>Remove contour</source>
         <translation>Remover contorno concêntrico</translation>
+    </message>
+    <message>
+        <source>Fill</source>
+        <translation>Preenchimento</translation>
+    </message>
+    <message>
+        <source>Fill colour of new areas</source>
+        <translation>Cor de preenchimento das novas áreas</translation>
+    </message>
+    <message>
+        <source>Give new areas the default outline</source>
+        <translation>Dar às novas áreas o contorno padrão</translation>
     </message>
     <message>
         <source>Depth</source>

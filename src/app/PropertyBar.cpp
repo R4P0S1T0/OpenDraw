@@ -6,6 +6,7 @@
 #include "core/Commands.h"
 #include "core/Document.h"
 
+#include <QCheckBox>
 #include <QColorDialog>
 #include <QComboBox>
 #include <QDoubleSpinBox>
@@ -363,6 +364,30 @@ void PropertyBar::createEffectFields()
         refreshEffects();
     });
 
+    // Smart fill tool
+    auto *smartCaption = new QLabel(tr("Fill"), this);
+    smartCaption->setContentsMargins(6, 0, 3, 0);
+    m_smartFillActions << addWidget(smartCaption);
+    m_smartFillColor = addButton(QIcon(), tr("Fill colour of new areas"), m_smartFillActions);
+    m_smartFillOutline = new QCheckBox(tr("Outline"), this);
+    m_smartFillOutline->setToolTip(tr("Give new areas the default outline"));
+    m_smartFillActions << addWidget(m_smartFillOutline);
+    connect(m_smartFillColor, &QToolButton::clicked, this, [this] {
+        const QColor color = QColorDialog::getColor(m_toolSettings.smartFillColor, this, tr("Fill colour of new areas"),
+                                                    QColorDialog::ShowAlphaChannel);
+        if (!color.isValid())
+            return;
+        m_toolSettings.smartFillColor = color;
+        refreshSmartFill();
+        emit toolSettingsChanged(m_toolSettings);
+    });
+    connect(m_smartFillOutline, &QCheckBox::toggled, this, [this](bool on) {
+        if (m_updatingToolFields)
+            return;
+        m_toolSettings.smartFillOutline = on;
+        emit toolSettingsChanged(m_toolSettings);
+    });
+
     // Extrude tool
     m_extrudeDepth = addIntField(tr("Depth"), tr("How far the extrusion goes towards the vanishing point"), 1, 95,
                                  m_extrudeActions);
@@ -460,6 +485,15 @@ void PropertyBar::applyContour(const std::function<void(Contour &)> &change)
         style.contour = contour;
     });
     refreshEffects();
+}
+
+void PropertyBar::refreshSmartFill()
+{
+    QPixmap swatch(28, 16);
+    swatch.fill(m_toolSettings.smartFillColor);
+    m_smartFillColor->setIcon(QIcon(swatch));
+    const QSignalBlocker blocker(m_smartFillOutline);
+    m_smartFillOutline->setChecked(m_toolSettings.smartFillOutline);
 }
 
 void PropertyBar::applyExtrusion(const std::function<void(Extrusion &)> &change)
@@ -606,6 +640,7 @@ void PropertyBar::setToolSettings(const ToolSettings &settings)
     m_graphColumns->setValue(settings.graphColumns);
     m_graphRows->setValue(settings.graphRows);
     m_newCornerRadius->setValue(units().toDisplay(settings.cornerRadius));
+    refreshSmartFill();
     m_updatingToolFields = false;
 }
 
@@ -662,6 +697,8 @@ QList<QAction *> *PropertyBar::toolGroup()
         return &m_envelopeActions;
     case CanvasWidget::Tool::Extrude:
         return &m_extrudeActions;
+    case CanvasWidget::Tool::SmartFill:
+        return &m_smartFillActions;
     default:
         return nullptr;
     }
@@ -692,14 +729,14 @@ void PropertyBar::updateMode()
     // These tools act on the selection, so their options show with it.
     const bool always = tool == &m_eyedropperActions || tool == &m_shadowActions || tool == &m_transparencyActions
                         || tool == &m_blendActions || tool == &m_contourActions || tool == &m_envelopeActions
-                        || tool == &m_extrudeActions;
+                        || tool == &m_extrudeActions || tool == &m_smartFillActions;
     const bool showTool = tool && (always || !m_anySelected);
     const bool showObject = m_anySelected && !always;
     const bool showPage = !m_anySelected && !showTool;
     for (QList<QAction *> *group : {&m_rectangleToolActions, &m_polygonActions, &m_starActions, &m_spiralActions,
                                     &m_graphActions, &m_eyedropperActions, &m_shadowActions, &m_transparencyActions,
                                     &m_blendActions, &m_contourActions, &m_envelopeActions,
-                                    &m_extrudeActions}) {
+                                    &m_extrudeActions, &m_smartFillActions}) {
         for (QAction *action : std::as_const(*group))
             action->setVisible(showTool && group == tool);
     }

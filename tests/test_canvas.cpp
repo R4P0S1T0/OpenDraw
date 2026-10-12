@@ -132,6 +132,7 @@ private slots:
     void contourToolDragsRings();
     void envelopeToolBendsObjects();
     void extrudeToolGivesDepth();
+    void smartFillToolMakesAreas();
     void textToolDrawsParagraphFrames();
     void formatPartOfAText();
     void shadowAndTransparencyTools();
@@ -1465,6 +1466,32 @@ void CanvasTests::extrudeToolGivesDepth()
     QCOMPARE(m_undo->index(), before + 1);
     m_undo->undo();
     QVERIFY(!rect->style().extrusion);
+    m_canvas->setTool(CanvasWidget::Tool::Select);
+}
+
+void CanvasTests::smartFillToolMakesAreas()
+{
+    m_canvas->setZoom(1.0);
+    m_doc->insertShape(-1, std::make_unique<Shape>(ShapeKind::Ellipse, QRectF(100, 100, 200, 200)));
+    m_doc->insertShape(-1, std::make_unique<Shape>(ShapeKind::Ellipse, QRectF(200, 100, 200, 200)));
+    const int before = m_undo->index();
+    m_canvas->setTool(CanvasWidget::Tool::SmartFill);
+    ToolSettings settings = m_canvas->toolSettings();
+    settings.smartFillColor = Qt::magenta;
+    m_canvas->setToolSettings(settings);
+    click(m_canvas, m_canvas->documentToWidget({250, 200})); // where the circles overlap
+    QCOMPARE(m_doc->count(), 3);
+    Shape *lens = m_doc->shapes().back().get();
+    QCOMPARE(lens->kind(), ShapeKind::Path);
+    QCOMPARE(lens->style().fill, QColor(Qt::magenta));
+    QVERIFY(std::abs(lens->bounds().left() - 200) < 1 && std::abs(lens->bounds().right() - 300) < 1);
+    QCOMPARE(m_canvas->selectedShape(), lens);
+    // Outside both: nothing.
+    click(m_canvas, m_canvas->documentToWidget({600, 600}));
+    QCOMPARE(m_doc->count(), 3);
+    m_undo->undo();
+    QCOMPARE(m_undo->index(), before);
+    QCOMPARE(m_doc->count(), 2);
     m_canvas->setTool(CanvasWidget::Tool::Select);
 }
 

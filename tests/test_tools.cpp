@@ -4,6 +4,7 @@
 #include "core/PathOps.h"
 #include "core/Render.h"
 #include "core/RichText.h"
+#include "core/SmartFill.h"
 #include "core/TextLayout.h"
 
 #include <QPen>
@@ -61,6 +62,7 @@ private slots:
     void paragraphTextSvg();
     void richTextEditing();
     void richTextLayoutAndSvg();
+    void smartFillFindsEnclosedAreas();
 };
 
 void ToolTests::richTextEditing()
@@ -493,6 +495,41 @@ void ToolTests::readsInkscapeGuides()
     QVERIFY(near(doc->guides()[0].position, 25));
     QCOMPARE(doc->guides()[1].orientation, Qt::Vertical);
     QVERIFY(near(doc->guides()[1].position, 120));
+}
+
+// Smart fill finds the piece of the drawing a click is enclosed in.
+void ToolTests::smartFillFindsEnclosedAreas()
+{
+    QPainterPath a, b, ring, hole;
+    a.addRect(0, 0, 100, 100);
+    b.addRect(50, 50, 100, 100);
+    const std::vector<QPainterPath> squares{a, b};
+    // The overlap.
+    QCOMPARE(smartfill::regionAt(squares, {75, 75}).boundingRect(), QRectF(50, 50, 50, 50));
+    // The part of the first square outside the second: an L with the overlap cut out.
+    const QPainterPath l = smartfill::regionAt(squares, {25, 25});
+    QCOMPARE(l.boundingRect(), QRectF(0, 0, 100, 100));
+    QVERIFY(!l.contains(QPointF(75, 75)));
+    QVERIFY(l.contains(QPointF(90, 10)));
+    // Outside everything: nothing to fill.
+    QVERIFY(smartfill::regionAt(squares, {200, 10}).isEmpty());
+    // Between two circles, one inside the other: a ring with a hole.
+    ring.addEllipse(QRectF(0, 0, 200, 200));
+    hole.addEllipse(QRectF(50, 50, 100, 100));
+    const QPainterPath band = smartfill::regionAt({ring, hole}, {20, 100});
+    QVERIFY(band.contains(QPointF(20, 100)));
+    QVERIFY(!band.contains(QPointF(100, 100)));
+
+    // A page's outlines: visible layers only, the members of groups one by one.
+    Document doc;
+    doc.insertShape(-1, std::make_unique<Shape>(ShapeKind::Rectangle, QRectF(0, 0, 10, 10)));
+    std::vector<std::unique_ptr<Shape>> members;
+    members.push_back(std::make_unique<Shape>(ShapeKind::Ellipse, QRectF(20, 0, 10, 10)));
+    members.push_back(std::make_unique<Shape>(ShapeKind::Ellipse, QRectF(40, 0, 10, 10)));
+    doc.insertShape(-1, std::make_unique<Shape>(std::move(members)));
+    QCOMPARE(smartfill::outlinesOf(*doc.currentPage()).size(), std::size_t(3));
+    doc.activeLayer()->visible = false;
+    QVERIFY(smartfill::outlinesOf(*doc.currentPage()).empty());
 }
 
 QTEST_MAIN(ToolTests)

@@ -21,6 +21,8 @@ add_library(opendraw_core STATIC
     PathOps.h
     Render.cpp
     Render.h
+    SmartFill.cpp
+    SmartFill.h
     RichText.cpp
     RichText.h
     Shape.cpp

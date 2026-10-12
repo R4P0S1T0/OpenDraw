@@ -9,6 +9,7 @@
 #include "core/PathOps.h"
 #include "core/Render.h"
 #include "core/RichText.h"
+#include "core/SmartFill.h"
 #include "core/SvgIO.h"
 #include "core/TextLayout.h"
 
@@ -727,6 +728,28 @@ void CanvasWidget::dragEnvelopeHandle(const QPointF &documentPosition)
     }
     shape->setEnvelope(e);
     m_document->notifyShapeChanged(shape);
+}
+
+void CanvasWidget::smartFill(const QPointF &documentPosition)
+{
+    if (!m_document->activeLayer()->isEditable())
+        return;
+    const QPainterPath region =
+        smartfill::regionAt(smartfill::outlinesOf(*m_document->currentPage()), documentPosition);
+    PathData path = pathops::fromPainterPath(region);
+    if (path.empty())
+        return; // not enclosed by anything
+    Style style = m_defaultStyle;
+    style.fill = m_toolSettings.smartFillColor;
+    style.gradient.reset();
+    style.pattern.reset();
+    if (!m_toolSettings.smartFillOutline)
+        style.stroke = Qt::transparent;
+    auto *command = new AddShapeCommand(m_document, std::make_unique<Shape>(std::move(path), style));
+    command->setText(tr("Smart fill"));
+    Shape *added = command->shape();
+    m_undoStack->push(command);
+    setSelectedShape(added);
 }
 
 void CanvasWidget::removeEnvelope()
@@ -2449,6 +2472,10 @@ void CanvasWidget::mousePressEvent(QMouseEvent *event)
         m_drag = Drag::Effect;
         break;
     }
+
+    case Tool::SmartFill:
+        smartFill(docPos);
+        break;
 
     case Tool::Envelope: {
         // Drag the envelope's corners and handles of the selected object; a click selects.

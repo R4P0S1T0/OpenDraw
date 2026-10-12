@@ -676,6 +676,7 @@ void MainWindow::createToolbox(QMenu *toolsMenu)
                {CanvasWidget::Tool::Contour, Icon::Contour, tr("Contour"), QKeySequence(Qt::CTRL | Qt::Key_F9)},
                {CanvasWidget::Tool::Envelope, Icon::Envelope, tr("Envelope"), QKeySequence()},
                {CanvasWidget::Tool::Extrude, Icon::Extrude, tr("Extrude"), QKeySequence()}});
+    m_toolbox->addAction(makeAction({CanvasWidget::Tool::SmartFill, Icon::SmartFill, tr("Smart Fill"), QKeySequence()}));
     m_toolbox->addAction(makeAction({CanvasWidget::Tool::Transparency, Icon::Transparency, tr("Transparency"), QKeySequence()}));
     m_toolbox->addAction(
         makeAction({CanvasWidget::Tool::Eyedropper, Icon::Eyedropper, tr("Color Eyedropper"), QKeySequence(Qt::Key_I)}));
@@ -870,6 +871,8 @@ QString MainWindow::toolHint() const
         return tr("Drag across an object: solid where you start, transparent where you end; drag the squares to adjust");
     case CanvasWidget::Tool::Blend:
         return tr("Drag from one object to another to blend them; click a blend to change its steps on the property bar");
+    case CanvasWidget::Tool::SmartFill:
+        return tr("Click inside an area enclosed by objects to make a new object of that shape");
     case CanvasWidget::Tool::Extrude:
         return tr("Drag from an object to give it depth: the back follows the pointer; the property bar sets the depth, "
                   "vanishing point and colour");

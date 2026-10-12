@@ -469,6 +469,21 @@ void draw(QPainter &p, Icon id, const QColor &ink, const QColor &accent, const Q
         }
         break;
     }
+    case Icon::SmartFill: {
+        // Two overlapping circles with the shared part filled.
+        const QRectF left(3, 6, 12, 12), right(9, 6, 12, 12);
+        QPainterPath a, b;
+        a.addEllipse(left);
+        b.addEllipse(right);
+        p.setPen(Qt::NoPen);
+        p.setBrush(accent);
+        p.drawPath(a.intersected(b));
+        p.setPen(line);
+        p.setBrush(Qt::NoBrush);
+        p.drawEllipse(left);
+        p.drawEllipse(right);
+        break;
+    }
     case Icon::Extrude: {
         // A square with depth: its side faces going up and to the right.
         QColor side = accent;

@@ -6,6 +6,7 @@
 #include <QPointF>
 #include <QToolBar>
 
+class QCheckBox;
 class QComboBox;
 class QDoubleSpinBox;
 class QLabel;
@@ -69,6 +70,7 @@ private:
     void applyShadow(const std::function<void(DropShadow &)> &change);
     void applyContour(const std::function<void(Contour &)> &change);
     void applyExtrusion(const std::function<void(Extrusion &)> &change);
+    void refreshSmartFill();
     void applyTransparency();
 
     Document *m_document;
@@ -95,6 +97,9 @@ private:
     QList<QAction *> m_contourActions;
     QList<QAction *> m_envelopeActions;
     QList<QAction *> m_extrudeActions;
+    QList<QAction *> m_smartFillActions;
+    QToolButton *m_smartFillColor;
+    QCheckBox *m_smartFillOutline;
     QSpinBox *m_extrudeDepth;
     QDoubleSpinBox *m_extrudeX;
     QDoubleSpinBox *m_extrudeY;

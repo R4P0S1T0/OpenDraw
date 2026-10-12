@@ -14,6 +14,8 @@ struct ToolSettings {
     int graphRows = 3;
     double cornerRadius = 0.0; // new rectangles, document units
     int blendSteps = 20;       // new blends
+    QColor smartFillColor = QColor(0x4a, 0x90, 0xd9); // areas made by the smart fill tool
+    bool smartFillOutline = true;                       // ... with the default outline
     bool operator==(const ToolSettings &) const = default;
 };
 

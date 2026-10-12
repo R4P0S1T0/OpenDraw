@@ -29,7 +29,7 @@ public:
     enum class Tool {
         Select, Node, Zoom, Pan, Freehand, Line, Bezier, Rectangle, Ellipse,
         Polygon, Star, Spiral, GraphPaper, Text, DropShadow, Transparency, Eyedropper, Blend, Contour, Envelope,
-        Extrude,
+        Extrude, SmartFill,
     };
 
     CanvasWidget(Document *document, QUndoStack *undoStack, QWidget *parent = nullptr);
@@ -280,6 +280,8 @@ private:
     std::array<QPointF, 12> envelopeHandles(const Shape &shape) const;
     int envelopeHandleAt(const QPointF &widgetPosition) const;
     void dragEnvelopeHandle(const QPointF &documentPosition);
+    // Smart fill tool: a new object filling the area the click is enclosed in.
+    void smartFill(const QPointF &documentPosition);
     void paintEnvelope(QPainter &painter);
     QPainterPath toolShapePreview(const QRectF &box) const;
     std::unique_ptr<Shape> createToolShape(const QRectF &box) const;
