@@ -156,17 +156,27 @@ QPainterPath arrowheads(const Shape &shape)
         }
         return QPointF();
     };
+    // An end and its direction on the page, through the envelope and shape transform if any
+    // (the direction from a point a short way back along the curve).
+    auto place = [&shape](Arrowhead type, const QPointF &end, const QPointF &direction, double width) {
+        const double length = std::hypot(direction.x(), direction.y());
+        if (length <= 0.0)
+            return QPainterPath();
+        const QPointF back = end - direction * (0.01 / length);
+        const QPointF tip = shape.mapToPage(end);
+        return arrowheadPath(type, tip, tip - shape.mapToPage(back), width);
+    };
     QPainterPath result;
     result.setFillRule(Qt::WindingFill);
     const SubPath &first = data.front();
     if (style.startArrow != Arrowhead::None && !first.closed && first.nodes.size() > 1) {
         const PathNode &a = first.nodes[0], &b = first.nodes[1];
-        result.addPath(arrowheadPath(style.startArrow, a.point, away(a.point, {a.out, b.in, b.point}), style.strokeWidth));
+        result.addPath(place(style.startArrow, a.point, away(a.point, {a.out, b.in, b.point}), style.strokeWidth));
     }
     const SubPath &last = data.back();
     if (style.endArrow != Arrowhead::None && !last.closed && last.nodes.size() > 1) {
         const PathNode &z = last.nodes.back(), &y = last.nodes[last.nodes.size() - 2];
-        result.addPath(arrowheadPath(style.endArrow, z.point, away(z.point, {z.in, y.out, y.point}), style.strokeWidth));
+        result.addPath(place(style.endArrow, z.point, away(z.point, {z.in, y.out, y.point}), style.strokeWidth));
     }
     return result;
 }
@@ -232,7 +242,7 @@ void paintBody(QPainter &painter, const Shape &shape)
                 painter.setPen(Qt::NoPen);
                 for (const textlayout::ColoredPath &part : textlayout::coloredOutline(data, shape.textOrigin())) {
                     painter.setBrush(part.color ? QBrush(*part.color) : fillBrush(style, shape.localBounds()));
-                    painter.drawPath(part.path);
+                    painter.drawPath(shape.warp(part.path));
                 }
                 painter.restore();
                 return;
@@ -250,7 +260,7 @@ void paintBody(QPainter &painter, const Shape &shape)
             painter.save();
             painter.setTransform(own, true);
             painter.setBrush(fillBrush(style, shape.localBounds()));
-            painter.drawPath(shape.localPath());
+            painter.drawPath(shape.warp(shape.localPath()));
             painter.restore();
         }
     };

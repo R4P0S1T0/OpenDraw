@@ -129,6 +129,7 @@ private slots:
     void propertiesDockerFormatsParagraphs();
     void blendToolJoinsTwoObjects();
     void contourToolDragsRings();
+    void envelopeToolBendsObjects();
     void textToolDrawsParagraphFrames();
     void formatPartOfAText();
     void shadowAndTransparencyTools();
@@ -1006,6 +1007,28 @@ void CanvasTests::mainWindowWorkspace()
         canvas->fitPage();
         QTest::qWait(150);
         QVERIFY(window.grab().save(dir + QStringLiteral("/window-contour.png")));
+
+        // An envelope arching a word, with the envelope tool's handles.
+        canvas->selectAll();
+        canvas->deleteSelection();
+        TextData title{QStringLiteral("OpenDraw"), {}};
+        title.format.size = 120;
+        title.format.bold = true;
+        Style titleStyle;
+        titleStyle.gradient = Gradient::linear(QColor(0xe5, 0x39, 0x35), QColor(0xfb, 0x8c, 0x00), 0);
+        titleStyle.stroke = QColor(0x5d, 0x40, 0x37);
+        Shape *arched = doc->insertShape(-1, std::make_unique<Shape>(title, QPointF(120, 400), titleStyle));
+        Envelope bow = Envelope::identity();
+        for (int k : {1, 2})
+            bow.points[k].ry() = -0.8;
+        for (int k : {7, 8})
+            bow.points[k].ry() = 0.6;
+        arched->setEnvelope(bow);
+        canvas->setTool(CanvasWidget::Tool::Envelope);
+        canvas->setSelectedShape(arched);
+        canvas->zoomToSelection();
+        QTest::qWait(150);
+        QVERIFY(window.grab().save(dir + QStringLiteral("/window-envelope.png")));
         theme::apply(ColorScheme::Light);
     }
 }
@@ -1374,6 +1397,32 @@ void CanvasTests::contourToolDragsRings()
     m_undo->undo();
     m_undo->undo();
     QVERIFY(!rect->style().contour);
+    m_canvas->setTool(CanvasWidget::Tool::Select);
+}
+
+void CanvasTests::envelopeToolBendsObjects()
+{
+    m_canvas->setZoom(1.0);
+    Shape *rect = m_doc->insertShape(-1, std::make_unique<Shape>(ShapeKind::Rectangle, QRectF(100, 100, 200, 100)));
+    const int before = m_undo->index();
+    m_canvas->setTool(CanvasWidget::Tool::Envelope);
+    click(m_canvas, m_canvas->documentToWidget({200, 150})); // select
+    QCOMPARE(m_canvas->selectedShape(), rect);
+    // Drag the top-right corner up and out.
+    dragFromTo(m_canvas, m_canvas->documentToWidget({300, 100}), m_canvas->documentToWidget({350, 60}));
+    QVERIFY(rect->envelope());
+    QVERIFY(std::abs(rect->bounds().right() - 350) < 1.0);
+    QVERIFY(std::abs(rect->bounds().top() - 60) < 1.0);
+    QCOMPARE(m_undo->index(), before + 1);
+    // A handle in the middle of the bottom edge bends it down.
+    const QPointF handle = m_canvas->documentToWidget(rect->mapToPage({300 - 200.0 / 3, 200}));
+    dragFromTo(m_canvas, handle, handle + QPointF(0, 60));
+    QVERIFY(rect->bounds().bottom() > 220);
+    m_canvas->removeEnvelope();
+    QVERIFY(!rect->envelope());
+    while (m_undo->index() > before)
+        m_undo->undo();
+    QVERIFY(!rect->envelope());
     m_canvas->setTool(CanvasWidget::Tool::Select);
 }
 

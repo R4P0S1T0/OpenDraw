@@ -28,7 +28,7 @@ class CanvasWidget : public QWidget {
 public:
     enum class Tool {
         Select, Node, Zoom, Pan, Freehand, Line, Bezier, Rectangle, Ellipse,
-        Polygon, Star, Spiral, GraphPaper, Text, DropShadow, Transparency, Eyedropper, Blend, Contour,
+        Polygon, Star, Spiral, GraphPaper, Text, DropShadow, Transparency, Eyedropper, Blend, Contour, Envelope,
     };
 
     CanvasWidget(Document *document, QUndoStack *undoStack, QWidget *parent = nullptr);
@@ -145,6 +145,8 @@ public slots:
     void setBlendSteps(int steps);
     // Selected blends become their start, a group of their steps, and their end.
     void breakBlendApart();
+    // Takes the envelope off the selected objects.
+    void removeEnvelope();
     void orderToFront();
     void orderToBack();
     void orderForwardOne();
@@ -202,7 +204,7 @@ protected:
 private:
     enum class Drag {
         None, Pan, Move, Resize, Marquee, Create, NodeMove, NodeHandle, BezierHandle, Freehand, ZoomBox, Guide,
-        Rotate, Skew, RotationCenter, TextFrame, TextSelect, Effect, EffectHandle, Blend,
+        Rotate, Skew, RotationCenter, TextFrame, TextSelect, Effect, EffectHandle, Blend, EnvelopeHandle,
     };
     enum class NodeHandle { In, Out };
 
@@ -271,6 +273,13 @@ private:
     std::array<QPointF, 2> transparencyHandles(const Shape &shape) const;
     int transparencyHandleAt(const QPointF &widgetPosition) const;
     void paintEffectHandles(QPainter &painter);
+    // Envelope tool: the selected object that can take an envelope, its 12 handles on the page
+    // (corners and edge handles, clockwise from the top-left), and dragging one.
+    Shape *envelopeShape() const;
+    std::array<QPointF, 12> envelopeHandles(const Shape &shape) const;
+    int envelopeHandleAt(const QPointF &widgetPosition) const;
+    void dragEnvelopeHandle(const QPointF &documentPosition);
+    void paintEnvelope(QPainter &painter);
     QPainterPath toolShapePreview(const QRectF &box) const;
     std::unique_ptr<Shape> createToolShape(const QRectF &box) const;
     QColor colorAt(const QPointF &widgetPosition) const;
@@ -345,6 +354,8 @@ private:
     std::vector<std::pair<Shape *, Style>> m_effectBefore; // styles before a shadow/transparency drag
     int m_effectHandle = -1;               // transparency handle being dragged: 0 start, 1 end
     Shape *m_blendStart = nullptr;         // object a blend drag started on
+    int m_envelopeHandle = -1;             // envelope point being dragged
+    std::optional<Envelope> m_envelopeBefore; // the envelope when that drag started
     bool m_marqueeAdds = false;
     int m_resizeHandle = -1;
     QRectF m_resizeOriginal;                // selection bounds when the resize started

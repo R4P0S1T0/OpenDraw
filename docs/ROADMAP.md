@@ -26,7 +26,8 @@ Rough order of work. Items move as contributors pick them up.
 - [x] Drop shadow tool (offset, feather, opacity, colour) and interactive transparency tool (uniform, linear, radial, with handles); saved as SVG filters and masks
 - [x] Blend tool: live blends between two objects (shape, colours, outline width and opacity change step by step; the steps follow any change to either end), steps on the property bar, Break Blend Apart; saved with the steps as real SVG shapes for other programs
 - [x] Contour tool: rings outside, inside or to the centre of an object, colours running to a chosen fill and outline, live; saved with the rings as real SVG shapes for other programs
-- [ ] Smart fill, envelope and extrude
+- [x] Envelope tool: bend rectangles, ellipses, curves and texts by dragging the corners and edge handles of a frame; live (the objects stay editable and the envelope moves, scales, turns and mirrors with them); saved bent for other programs, with the object itself kept for OpenDraw
+- [ ] Smart fill and extrude
 - [x] Objects docker: pages, layers and objects as a tree, selection in both directions, renaming (object names saved as Inkscape labels), drag and drop to restack or change layers
 - [x] Properties docker: outline (colour, width, dashes, ends, corners), fill (none, uniform, linear, radial) and transparency, applied live; dashes, line ends and corners saved in SVG and read from other files
 - [x] Arrowheads (eight shapes, at either end, on the property bar and in the Properties docker), outline behind fill, scale outline with object; saved as SVG markers and `paint-order`, other programs' markers read as triangles

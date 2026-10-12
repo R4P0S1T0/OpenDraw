@@ -9,6 +9,7 @@
 #include <QTransform>
 
 #include <algorithm>
+#include <array>
 #include <memory>
 #include <optional>
 #include <vector>
@@ -110,6 +111,19 @@ struct Style {
 
     bool hasFill() const { return pattern.has_value() || gradient.has_value() || fill.alpha() > 0; }
     bool hasStroke() const { return stroke.alpha() > 0 && strokeWidth > 0.0; }
+};
+
+// A frame of four curved edges that an object is bent to fill (CorelDRAW's envelope). Points
+// are fractions of the object's own box, (0, 0) top-left to (1, 1) bottom-right, going round
+// clockwise from the top-left corner: corner, two handles, corner, ... Each edge is a cubic
+// curve from a corner through its two handles to the next corner.
+struct Envelope {
+    std::array<QPointF, 12> points;
+
+    // Straight edges along the box: the object as it is.
+    static Envelope identity();
+    static bool isCorner(int index) { return index % 3 == 0; }
+    bool operator==(const Envelope &) const = default;
 };
 
 // A smooth node keeps its two handles on one line; a corner node lets them point anywhere.
@@ -258,12 +272,27 @@ public:
 
     // Rectangles, ellipses and texts keep their own geometry (box, text origin and size) and
     // carry rotation and skew here, mapping that geometry onto the page, so they stay
-    // editable as what they are. Identity unless the shape was rotated or skewed.
+    // editable as what they are; so do curves with an envelope. Identity unless the shape was
+    // rotated or skewed.
     QTransform shapeTransform() const { return m_shapeTransform; }
     void setShapeTransform(const QTransform &t) { m_shapeTransform = t; }
-    // Geometry before shapeTransform(): the outline and its bounding box.
+    // Geometry before the envelope and shapeTransform(): the outline and its bounding box.
     QPainterPath localPath() const;
     QRectF localBounds() const;
+
+    // Rectangles, ellipses, curves and texts can be bent by an envelope (applied to their own
+    // geometry, before shapeTransform()); it moves, scales and turns with them.
+    static bool canHaveEnvelope(ShapeKind kind)
+    {
+        return kind == ShapeKind::Rectangle || kind == ShapeKind::Ellipse || kind == ShapeKind::Path
+               || kind == ShapeKind::Text;
+    }
+    const std::optional<Envelope> &envelope() const { return m_envelope; }
+    void setEnvelope(const std::optional<Envelope> &envelope);
+    // Bends a path in the shape's own coordinates by its envelope (unchanged without one).
+    QPainterPath warp(const QPainterPath &local) const;
+    // A point of the shape's own geometry on the page (envelope and shapeTransform() applied).
+    QPointF mapToPage(const QPointF &local) const;
     // Rotation of the shape in degrees (clockwise on screen), as far as it has one: taken from
     // shapeTransform() for rectangles, ellipses and texts, from the placement for bitmaps, 0 otherwise.
     double rotation() const;
@@ -330,6 +359,7 @@ private:
     PathData m_path;                              // paths
     std::vector<std::unique_ptr<Shape>> m_children; // groups
     int m_blendSteps = 0;                           // groups
+    std::optional<Envelope> m_envelope;             // see canHaveEnvelope()
     TextData m_text;                                // text
     QPointF m_textOrigin;                           // text
     QImage m_image;                                 // image

@@ -111,6 +111,14 @@
         <translation>Raio do canto</translation>
     </message>
     <message>
+        <source>Envelope</source>
+        <translation>Envelope</translation>
+    </message>
+    <message>
+        <source>Remove envelope</source>
+        <translation>Remover envelope</translation>
+    </message>
+    <message>
         <source>Blend steps</source>
         <translation>Passos da mistura</translation>
     </message>
@@ -251,6 +259,10 @@
     <message>
         <source>Transparency</source>
         <translation>Transparência</translation>
+    </message>
+    <message>
+        <source>Remove envelope</source>
+        <translation>Remover envelope</translation>
     </message>
     <message>
         <source>Text format</source>
@@ -731,6 +743,10 @@ Clique esquerdo: preenchimento · Clique direito: contorno</translation>
         <translation>&amp;Separar mistura</translation>
     </message>
     <message>
+        <source>&amp;Remove Envelope</source>
+        <translation>&amp;Remover envelope</translation>
+    </message>
+    <message>
         <source>&amp;Order</source>
         <translation>&amp;Ordem</translation>
     </message>
@@ -1015,6 +1031,10 @@ Clique esquerdo: preenchimento · Clique direito: contorno</translation>
         <translation>Contorno concêntrico</translation>
     </message>
     <message>
+        <source>Envelope</source>
+        <translation>Envelope</translation>
+    </message>
+    <message>
         <source>Transparency</source>
         <translation>Transparência</translation>
     </message>
@@ -1145,6 +1165,10 @@ Clique esquerdo: preenchimento · Clique direito: contorno</translation>
     <message>
         <source>Drag from one object to another to blend them; click a blend to change its steps on the property bar</source>
         <translation>Arraste de um objeto até outro para misturá-los; clique numa mistura para mudar os passos na barra de propriedades</translation>
+    </message>
+    <message>
+        <source>Click an object, then drag the corners and round handles of its envelope to bend it</source>
+        <translation>Clique num objeto e arraste os cantos e as alças redondas do envelope para deformá-lo</translation>
     </message>
     <message>
         <source>Drag from an object outwards for rings around it, or inwards for rings inside it; the property bar sets their number, spacing and colours</source>
@@ -2214,6 +2238,14 @@ Clique esquerdo: preenchimento · Clique direito: contorno</translation>
     <message>
         <source>Remove contour</source>
         <translation>Remover contorno concêntrico</translation>
+    </message>
+    <message>
+        <source>Drag the envelope&apos;s corners and handles</source>
+        <translation>Arraste os cantos e as alças do envelope</translation>
+    </message>
+    <message>
+        <source>Remove the envelope</source>
+        <translation>Remover o envelope</translation>
     </message>
     <message>
         <source>Number of shapes between the two ends of the blend</source>

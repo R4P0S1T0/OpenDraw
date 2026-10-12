@@ -386,6 +386,24 @@ private:
     double m_newRadius;
 };
 
+// Gives a shape an envelope, changes it, or (nullopt) removes it. A curve that was turned
+// while it had one keeps that turn in its nodes when it is removed.
+class SetEnvelopeCommand : public QUndoCommand {
+public:
+    SetEnvelopeCommand(Document *document, Shape *shape, std::optional<Envelope> envelope, QUndoCommand *parent = nullptr);
+
+    void redo() override;
+    void undo() override;
+
+private:
+    Document *m_document;
+    Shape *m_shape;
+    std::optional<Envelope> m_old;
+    std::optional<Envelope> m_new;
+    PathData m_oldPath;
+    QTransform m_oldTransform;
+};
+
 // Changes the number of steps of a blend.
 class SetBlendStepsCommand : public QUndoCommand {
 public:

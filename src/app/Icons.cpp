@@ -469,6 +469,23 @@ void draw(QPainter &p, Icon id, const QColor &ink, const QColor &accent, const Q
         }
         break;
     }
+    case Icon::Envelope: {
+        // A box whose top and bottom bow inwards, with corner handles.
+        QPainterPath frame;
+        frame.moveTo(4, 4);
+        frame.cubicTo(9, 9, 15, 9, 20, 4);
+        frame.lineTo(20, 20);
+        frame.cubicTo(15, 15, 9, 15, 4, 20);
+        frame.closeSubpath();
+        p.setPen(line);
+        p.setBrush(Qt::NoBrush);
+        p.drawPath(frame);
+        p.setPen(Qt::NoPen);
+        p.setBrush(accent);
+        for (const QPointF &corner : {QPointF(4, 4), QPointF(20, 4), QPointF(20, 20), QPointF(4, 20)})
+            p.drawRect(QRectF(corner.x() - 2, corner.y() - 2, 4, 4));
+        break;
+    }
     case Icon::Contour: {
         // Rounded squares one inside the other.
         p.setBrush(Qt::NoBrush);

@@ -1,6 +1,7 @@
 #include "core/Commands.h"
 
 #include "core/Document.h"
+#include "core/PathOps.h"
 
 #include <QCoreApplication>
 
@@ -546,6 +547,42 @@ void SetCornerRadiusCommand::redo()
 void SetCornerRadiusCommand::undo()
 {
     m_shape->setCornerRadius(m_oldRadius);
+    m_document->notifyShapeChanged(m_shape);
+}
+
+SetEnvelopeCommand::SetEnvelopeCommand(Document *document, Shape *shape, std::optional<Envelope> envelope,
+                                       QUndoCommand *parent)
+    : QUndoCommand(envelope ? QCoreApplication::translate("Commands", "Envelope")
+                            : QCoreApplication::translate("Commands", "Remove envelope"),
+                   parent)
+    , m_document(document)
+    , m_shape(shape)
+    , m_old(shape->envelope())
+    , m_new(std::move(envelope))
+    , m_oldPath(shape->pathData())
+    , m_oldTransform(shape->shapeTransform())
+{
+}
+
+void SetEnvelopeCommand::redo()
+{
+    m_shape->setEnvelope(m_new);
+    if (!m_new && m_shape->kind() == ShapeKind::Path && !m_shape->shapeTransform().isIdentity()) {
+        PathData path = m_shape->pathData();
+        pathops::transform(path, m_shape->shapeTransform());
+        m_shape->setPathData(std::move(path));
+        m_shape->setShapeTransform(QTransform());
+    }
+    m_document->notifyShapeChanged(m_shape);
+}
+
+void SetEnvelopeCommand::undo()
+{
+    if (m_shape->kind() == ShapeKind::Path) {
+        m_shape->setPathData(m_oldPath);
+        m_shape->setShapeTransform(m_oldTransform);
+    }
+    m_shape->setEnvelope(m_old);
     m_document->notifyShapeChanged(m_shape);
 }
 

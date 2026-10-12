@@ -406,6 +406,7 @@ void MainWindow::createActions()
                           &CanvasWidget::ungroupSelection);
     objectMenu->addAction(tr("&Break Blend Apart"), QKeySequence(Qt::CTRL | Qt::Key_K), m_canvas,
                           &CanvasWidget::breakBlendApart);
+    objectMenu->addAction(tr("&Remove Envelope"), m_canvas, &CanvasWidget::removeEnvelope);
     objectMenu->addSeparator();
 
     QMenu *orderMenu = objectMenu->addMenu(tr("&Order"));
@@ -672,7 +673,8 @@ void MainWindow::createToolbox(QMenu *toolsMenu)
     m_toolbox->addSeparator();
     addFlyout({{CanvasWidget::Tool::DropShadow, Icon::Shadow, tr("Drop Shadow"), QKeySequence()},
                {CanvasWidget::Tool::Blend, Icon::Blend, tr("Blend"), QKeySequence()},
-               {CanvasWidget::Tool::Contour, Icon::Contour, tr("Contour"), QKeySequence(Qt::CTRL | Qt::Key_F9)}});
+               {CanvasWidget::Tool::Contour, Icon::Contour, tr("Contour"), QKeySequence(Qt::CTRL | Qt::Key_F9)},
+               {CanvasWidget::Tool::Envelope, Icon::Envelope, tr("Envelope"), QKeySequence()}});
     m_toolbox->addAction(makeAction({CanvasWidget::Tool::Transparency, Icon::Transparency, tr("Transparency"), QKeySequence()}));
     m_toolbox->addAction(
         makeAction({CanvasWidget::Tool::Eyedropper, Icon::Eyedropper, tr("Color Eyedropper"), QKeySequence(Qt::Key_I)}));
@@ -867,6 +869,8 @@ QString MainWindow::toolHint() const
         return tr("Drag across an object: solid where you start, transparent where you end; drag the squares to adjust");
     case CanvasWidget::Tool::Blend:
         return tr("Drag from one object to another to blend them; click a blend to change its steps on the property bar");
+    case CanvasWidget::Tool::Envelope:
+        return tr("Click an object, then drag the corners and round handles of its envelope to bend it");
     case CanvasWidget::Tool::Contour:
         return tr("Drag from an object outwards for rings around it, or inwards for rings inside it; the property bar "
                   "sets their number, spacing and colours");

@@ -1,6 +1,7 @@
 #include "core/Shape.h"
 
 #include "core/Blend.h"
+#include "core/Envelope.h"
 #include "core/PathOps.h"
 #include "core/TextLayout.h"
 
@@ -99,9 +100,35 @@ QRectF Shape::localBounds() const
         return m_bounds;
     case ShapeKind::Text:
         return textlayout::layout(m_text, m_textOrigin).bounds;
+    case ShapeKind::Path:
+        return pathops::toPainterPath(m_path).boundingRect();
     default:
         return bounds();
     }
+}
+
+void Shape::setEnvelope(const std::optional<Envelope> &envelope)
+{
+    if (canHaveEnvelope(m_kind))
+        m_envelope = envelope;
+}
+
+QPainterPath Shape::warp(const QPainterPath &local) const
+{
+    return m_envelope ? envelope::warp(*m_envelope, local, localBounds()) : local;
+}
+
+QPointF Shape::mapToPage(const QPointF &local) const
+{
+    QPointF p = local;
+    if (m_envelope) {
+        const QRectF box = localBounds();
+        const QPointF unit(box.width() > 0 ? (p.x() - box.left()) / box.width() : 0.5,
+                           box.height() > 0 ? (p.y() - box.top()) / box.height() : 0.5);
+        const QPointF bent = envelope::map(*m_envelope, unit);
+        p = QPointF(box.left() + bent.x() * box.width(), box.top() + bent.y() * box.height());
+    }
+    return m_shapeTransform.map(p);
 }
 
 double Shape::rotation() const
@@ -109,7 +136,8 @@ double Shape::rotation() const
     QTransform t;
     if (m_kind == ShapeKind::Image)
         t = m_imagePlacement;
-    else if (m_kind == ShapeKind::Rectangle || m_kind == ShapeKind::Ellipse || m_kind == ShapeKind::Text)
+    else if (m_kind == ShapeKind::Rectangle || m_kind == ShapeKind::Ellipse || m_kind == ShapeKind::Text
+             || m_kind == ShapeKind::Path)
         t = m_shapeTransform;
     else
         return 0.0;
@@ -124,7 +152,7 @@ QRectF Shape::bounds() const
     switch (m_kind) {
     case ShapeKind::Rectangle:
     case ShapeKind::Ellipse:
-        return m_shapeTransform.isIdentity() ? m_bounds : path().boundingRect();
+        return m_shapeTransform.isIdentity() && !m_envelope ? m_bounds : path().boundingRect();
     case ShapeKind::Path:
         return path().boundingRect();
     case ShapeKind::Group: {
@@ -133,8 +161,15 @@ QRectF Shape::bounds() const
             united = united.isNull() ? child->bounds() : united.united(child->bounds());
         return united;
     }
-    case ShapeKind::Text:
-        return m_shapeTransform.mapRect(textlayout::layout(m_text, m_textOrigin).bounds);
+    case ShapeKind::Text: {
+        const QRectF box = textlayout::layout(m_text, m_textOrigin).bounds;
+        if (m_envelope) {
+            QPainterPath frame;
+            frame.addRect(box);
+            return m_shapeTransform.map(warp(frame)).boundingRect();
+        }
+        return m_shapeTransform.mapRect(box);
+    }
     case ShapeKind::Image:
         return m_imagePlacement.mapRect(QRectF(0, 0, 1, 1));
     }
@@ -144,14 +179,14 @@ QRectF Shape::bounds() const
 void Shape::setBounds(const QRectF &bounds)
 {
     const QRectF target = bounds.normalized();
-    if (m_kind == ShapeKind::Text && m_text.isParagraph() && m_shapeTransform.isIdentity()) {
+    if (m_kind == ShapeKind::Text && m_text.isParagraph() && m_shapeTransform.isIdentity() && !m_envelope) {
         // Resizing a paragraph frame reflows the text instead of scaling it.
         m_textOrigin = target.topLeft();
         m_text.frame = target.size();
         return;
     }
     if ((m_kind == ShapeKind::Rectangle || m_kind == ShapeKind::Ellipse) && !m_style.pattern
-        && m_shapeTransform.isIdentity()) {
+        && m_shapeTransform.isIdentity() && !m_envelope) {
         if (m_style.scaleStroke && m_bounds.width() > 0.0 && m_bounds.height() > 0.0)
             m_style.strokeWidth *= std::sqrt(target.width() * target.height() / (m_bounds.width() * m_bounds.height()));
         m_bounds = target;
@@ -177,8 +212,18 @@ void Shape::transform(const QTransform &t)
 {
     // Rectangles, ellipses and texts take a move or scale directly into their geometry while
     // they are upright; a rotation or skew (and anything after one) goes into shapeTransform().
-    const bool boxed = m_kind == ShapeKind::Rectangle || m_kind == ShapeKind::Ellipse || m_kind == ShapeKind::Text;
+    // So do curves with an envelope, which must turn with them.
+    const bool boxed = m_kind == ShapeKind::Rectangle || m_kind == ShapeKind::Ellipse || m_kind == ShapeKind::Text
+                       || (m_kind == ShapeKind::Path && m_envelope);
     const bool direct = !boxed || (m_shapeTransform.isIdentity() && t.type() <= QTransform::TxScale);
+
+    // Mirroring the geometry mirrors the envelope too, so the object stays bent the same way.
+    if (m_envelope && direct && (t.m11() < 0 || t.m22() < 0)) {
+        QTransform flip;
+        flip.translate(t.m11() < 0 ? 1 : 0, t.m22() < 0 ? 1 : 0);
+        flip.scale(t.m11() < 0 ? -1 : 1, t.m22() < 0 ? -1 : 1);
+        m_envelope = envelope::transformed(*m_envelope, flip);
+    }
 
     // An outline set to scale with the object follows the overall change of size.
     if (m_style.scaleStroke && m_kind != ShapeKind::Group) {
@@ -256,8 +301,8 @@ void Shape::transform(const QTransform &t)
 
 QPainterPath Shape::path() const
 {
-    if (m_kind == ShapeKind::Rectangle || m_kind == ShapeKind::Ellipse || m_kind == ShapeKind::Text) {
-        const QPainterPath local = localPath();
+    if (canHaveEnvelope(m_kind)) {
+        const QPainterPath local = warp(localPath());
         return m_shapeTransform.isIdentity() ? local : m_shapeTransform.map(local);
     }
     return localPath();
@@ -320,6 +365,11 @@ bool Shape::contains(const QPointF &point, double tolerance) const
     }
     if (m_kind == ShapeKind::Text) { // letters are thin: the whole text box is clickable
         const QRectF box = localBounds().adjusted(-tolerance, -tolerance, tolerance, tolerance);
+        if (m_envelope) {
+            QPainterPath frame;
+            frame.addRect(localBounds());
+            return m_shapeTransform.map(warp(frame)).contains(point);
+        }
         return m_shapeTransform.isIdentity() ? box.contains(point)
                                              : m_shapeTransform.map(QPolygonF(box)).containsPoint(point, Qt::OddEvenFill);
     }

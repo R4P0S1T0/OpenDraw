@@ -92,6 +92,7 @@ private:
     QList<QAction *> m_blendActions;
     QSpinBox *m_blendSteps;
     QList<QAction *> m_contourActions;
+    QList<QAction *> m_envelopeActions;
     QComboBox *m_contourDirection;
     QSpinBox *m_contourSteps;
     QDoubleSpinBox *m_contourOffset;

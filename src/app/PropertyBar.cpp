@@ -361,6 +361,16 @@ void PropertyBar::createEffectFields()
         refreshEffects();
     });
 
+    // Envelope tool
+    auto *envelopeHint = new QLabel(tr("Drag the envelope's corners and handles"), this);
+    envelopeHint->setContentsMargins(6, 0, 6, 0);
+    m_envelopeActions << addWidget(envelopeHint);
+    QToolButton *noEnvelope = addButton(icon(Icon::FillNone), tr("Remove the envelope"), m_envelopeActions);
+    connect(noEnvelope, &QToolButton::clicked, this, [this] {
+        if (m_canvas)
+            m_canvas->removeEnvelope();
+    });
+
     // Blend tool: steps of new blends and of the selected one.
     m_blendSteps = addIntField(tr("Steps"), tr("Number of shapes between the two ends of the blend"), 1, 999,
                                m_blendActions);
@@ -579,6 +589,8 @@ QList<QAction *> *PropertyBar::toolGroup()
         return &m_blendActions;
     case CanvasWidget::Tool::Contour:
         return &m_contourActions;
+    case CanvasWidget::Tool::Envelope:
+        return &m_envelopeActions;
     default:
         return nullptr;
     }
@@ -608,13 +620,13 @@ void PropertyBar::updateMode()
     QList<QAction *> *tool = toolGroup();
     // These tools act on the selection, so their options show with it.
     const bool always = tool == &m_eyedropperActions || tool == &m_shadowActions || tool == &m_transparencyActions
-                        || tool == &m_blendActions || tool == &m_contourActions;
+                        || tool == &m_blendActions || tool == &m_contourActions || tool == &m_envelopeActions;
     const bool showTool = tool && (always || !m_anySelected);
     const bool showObject = m_anySelected && !always;
     const bool showPage = !m_anySelected && !showTool;
     for (QList<QAction *> *group : {&m_rectangleToolActions, &m_polygonActions, &m_starActions, &m_spiralActions,
                                     &m_graphActions, &m_eyedropperActions, &m_shadowActions, &m_transparencyActions,
-                                    &m_blendActions, &m_contourActions}) {
+                                    &m_blendActions, &m_contourActions, &m_envelopeActions}) {
         for (QAction *action : std::as_const(*group))
             action->setVisible(showTool && group == tool);
     }

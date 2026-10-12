@@ -4,6 +4,7 @@
 #include "core/Commands.h"
 #include "Icons.h"
 #include "core/Document.h"
+#include "core/Envelope.h"
 #include "core/Generators.h"
 #include "core/PathOps.h"
 #include "core/Render.h"
@@ -662,6 +663,116 @@ void CanvasWidget::paintEffectHandles(QPainter &painter)
     }
 }
 
+Shape *CanvasWidget::envelopeShape() const
+{
+    Shape *single = selectedShape();
+    return m_tool == Tool::Envelope && single && Shape::canHaveEnvelope(single->kind()) ? single : nullptr;
+}
+
+// Maps box fractions of a shape's own box onto the page.
+static QTransform envelopeFrame(const Shape &shape)
+{
+    const QRectF box = shape.localBounds();
+    return QTransform(box.width(), 0, 0, box.height(), box.left(), box.top()) * shape.shapeTransform();
+}
+
+std::array<QPointF, 12> CanvasWidget::envelopeHandles(const Shape &shape) const
+{
+    const Envelope e = shape.envelope().value_or(Envelope::identity());
+    const QTransform frame = envelopeFrame(shape);
+    std::array<QPointF, 12> handles;
+    for (int i = 0; i < 12; ++i)
+        handles[i] = frame.map(e.points[i]);
+    return handles;
+}
+
+int CanvasWidget::envelopeHandleAt(const QPointF &widgetPosition) const
+{
+    const Shape *shape = envelopeShape();
+    if (!shape)
+        return -1;
+    const auto handles = envelopeHandles(*shape);
+    // Corners first: they sit on top of their handles when the edges are straight.
+    for (int pass = 0; pass < 2; ++pass) {
+        for (int i = 0; i < 12; ++i) {
+            if (Envelope::isCorner(i) == (pass == 0) && distance(toWidget(handles[i]), widgetPosition) <= kNodeHitPx + 2)
+                return i;
+        }
+    }
+    return -1;
+}
+
+void CanvasWidget::dragEnvelopeHandle(const QPointF &documentPosition)
+{
+    Shape *shape = envelopeShape();
+    if (!shape || m_envelopeHandle < 0)
+        return;
+    Envelope e = m_envelopeBefore.value_or(Envelope::identity());
+    const QPointF unit = envelopeFrame(*shape).inverted().map(documentPosition);
+    const int i = m_envelopeHandle;
+    if (Envelope::isCorner(i)) {
+        // A corner takes its two handles along.
+        const QPointF delta = unit - e.points[i];
+        for (int k : {i, (i + 1) % 12, (i + 11) % 12})
+            e.points[k] += delta;
+    } else {
+        e.points[i] = unit;
+    }
+    shape->setEnvelope(e);
+    m_document->notifyShapeChanged(shape);
+}
+
+void CanvasWidget::removeEnvelope()
+{
+    std::vector<Shape *> bent;
+    for (Shape *shape : m_selection) {
+        shape->forEachLeaf([&bent](Shape &leaf) {
+            if (leaf.envelope())
+                bent.push_back(&leaf);
+        });
+    }
+    if (bent.empty())
+        return;
+    m_undoStack->beginMacro(tr("Remove envelope"));
+    for (Shape *shape : bent)
+        m_undoStack->push(new SetEnvelopeCommand(m_document, shape, std::nullopt));
+    m_undoStack->endMacro();
+}
+
+void CanvasWidget::paintEnvelope(QPainter &painter)
+{
+    const Shape *shape = envelopeShape();
+    if (!shape)
+        return;
+    const Envelope e = shape->envelope().value_or(Envelope::identity());
+    const QTransform toView = envelopeFrame(*shape) * viewTransform();
+    const QColor highlight = palette().color(QPalette::Highlight);
+    painter.save();
+    painter.setRenderHint(QPainter::Antialiasing);
+    painter.setBrush(Qt::NoBrush);
+    painter.setPen(QPen(highlight, 1.2, Qt::DashLine));
+    painter.drawPath(toView.map(envelope::outline(e)));
+    std::array<QPointF, 12> handles;
+    for (int i = 0; i < 12; ++i)
+        handles[i] = toView.map(e.points[i]);
+    painter.setPen(QPen(highlight, 1));
+    for (int i = 0; i < 12; i += 3) {
+        painter.drawLine(handles[i], handles[(i + 1) % 12]);
+        painter.drawLine(handles[i], handles[(i + 11) % 12]);
+    }
+    painter.setPen(QPen(QColor(0x20, 0x20, 0x20), 1));
+    for (int i = 0; i < 12; ++i) {
+        if (Envelope::isCorner(i)) {
+            painter.setBrush(Qt::white);
+            painter.drawRect(squareAround(handles[i], 8));
+        } else {
+            painter.setBrush(highlight);
+            painter.drawEllipse(handles[i], 3.5, 3.5);
+        }
+    }
+    painter.restore();
+}
+
 void CanvasWidget::paintTransformHandles(QPainter &painter, const QRectF &box)
 {
     const QColor highlight = palette().color(QPalette::Highlight);
@@ -1311,8 +1422,9 @@ void CanvasWidget::deleteSelection()
 void CanvasWidget::convertSelectionToCurves()
 {
     Shape *shape = selectedShape();
-    if (!shape || shape->kind() == ShapeKind::Path || shape->kind() == ShapeKind::Group
-        || shape->kind() == ShapeKind::Image)
+    const bool plainCurve = shape && shape->kind() == ShapeKind::Path && !shape->envelope()
+                            && shape->shapeTransform().isIdentity();
+    if (!shape || plainCurve || shape->kind() == ShapeKind::Group || shape->kind() == ShapeKind::Image)
         return;
     auto curve = std::make_unique<Shape>(pathops::fromPainterPath(shape->path()), shape->style());
     auto *command = new ReplaceShapeCommand(m_document, shape, std::move(curve), tr("Convert to curves"));
@@ -1701,8 +1813,11 @@ void CanvasWidget::addShapes(std::vector<std::unique_ptr<Shape>> shapes, const Q
 
 Shape *CanvasWidget::selectedPath() const
 {
+    // A curve bent by an envelope is edited through the envelope (or converted to curves first).
     Shape *shape = selectedShape();
-    return shape && shape->kind() == ShapeKind::Path ? shape : nullptr;
+    return shape && shape->kind() == ShapeKind::Path && !shape->envelope() && shape->shapeTransform().isIdentity()
+               ? shape
+               : nullptr;
 }
 
 bool CanvasWidget::isValidNode(const NodeRef &ref) const
@@ -1979,6 +2094,8 @@ void CanvasWidget::paintEvent(QPaintEvent *)
     painter.resetTransform();
     if (m_editText)
         paintTextEdit(painter);
+    else if (envelopeShape())
+        paintEnvelope(painter); // instead of the selection handles
     else
         paintSelection(painter);
     paintBezierPreview(painter);
@@ -2325,6 +2442,23 @@ void CanvasWidget::mousePressEvent(QMouseEvent *event)
         break;
     }
 
+    case Tool::Envelope: {
+        // Drag the envelope's corners and handles of the selected object; a click selects.
+        if (const int handle = envelopeHandleAt(pos); handle >= 0) {
+            m_envelopeHandle = handle;
+            m_envelopeBefore = envelopeShape()->envelope();
+            m_drag = Drag::EnvelopeHandle;
+            break;
+        }
+        Shape *hit = m_document->shapeAt(docPos, tolerance);
+        if (!hit)
+            setSelection({});
+        else
+            setSelectedShape(hit);
+        update();
+        break;
+    }
+
     case Tool::Blend: {
         // Drag from one object to another to blend them; a click selects (a blend, to change it).
         Shape *hit = m_document->shapeAt(docPos, tolerance);
@@ -2461,6 +2595,10 @@ void CanvasWidget::mouseMoveEvent(QMouseEvent *event)
 
     case Drag::Blend:
         update(); // the line towards the pointer
+        break;
+
+    case Drag::EnvelopeHandle:
+        dragEnvelopeHandle(snapPoint(docPos));
         break;
 
     case Drag::EffectHandle:
@@ -2688,6 +2826,16 @@ void CanvasWidget::mouseReleaseEvent(QMouseEvent *event)
     case Drag::EffectHandle:
         commitEffectDrag();
         m_effectHandle = -1;
+        break;
+
+    case Drag::EnvelopeHandle:
+        if (Shape *shape = envelopeShape()) {
+            const std::optional<Envelope> after = shape->envelope();
+            shape->setEnvelope(m_envelopeBefore);
+            if (after != m_envelopeBefore)
+                m_undoStack->push(new SetEnvelopeCommand(m_document, shape, after));
+        }
+        m_envelopeHandle = -1;
         break;
 
     case Drag::Blend: {

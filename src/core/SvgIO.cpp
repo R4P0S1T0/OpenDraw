@@ -371,9 +371,13 @@ std::pair<QString, QString> writeEffectDefinitions(QXmlStreamWriter &w, const St
 
 QString contourText(const Contour &c);
 
-void writeEffects(QXmlStreamWriter &w, const Style &style, const std::pair<QString, QString> &ids)
+void writeEffects(QXmlStreamWriter &w, const Style &style, const std::pair<QString, QString> &ids, bool original = false)
 {
     const QString ns = QString::fromLatin1(kNamespace);
+    if (original) {
+        w.writeAttribute(QStringLiteral("display"), QStringLiteral("none"));
+        w.writeAttribute(ns, QStringLiteral("original"), QStringLiteral("true"));
+    }
     if (style.contour)
         w.writeAttribute(ns, QStringLiteral("contour"), contourText(*style.contour));
     if (style.shadow) {
@@ -442,11 +446,47 @@ void writeContourRings(QXmlStreamWriter &w, const std::vector<contour::Ring> &ri
     w.writeEndElement();
 }
 
-void writeShapeElement(QXmlStreamWriter &w, const Shape &shape, int &gradientCount);
+QString envelopeText(const Envelope &e)
+{
+    QStringList numbers;
+    for (const QPointF &p : e.points)
+        numbers << number(p.x()) << number(p.y());
+    return numbers.join(QLatin1Char(' '));
+}
+
+std::optional<Envelope> parseEnvelope(QStringView text)
+{
+    if (text.isEmpty())
+        return std::nullopt;
+    const QStringList v = text.toString().split(QLatin1Char(' '), Qt::SkipEmptyParts);
+    if (v.size() != 24)
+        return std::nullopt;
+    Envelope e;
+    for (int i = 0; i < 12; ++i)
+        e.points[i] = QPointF(v[2 * i].toDouble(), v[2 * i + 1].toDouble());
+    return e;
+}
+
+void writeShapeElement(QXmlStreamWriter &w, const Shape &shape, int &gradientCount, bool original = false);
 
 // An element, with its contour rings under it (outside) or over it (inside).
 void writeShape(QXmlStreamWriter &w, const Shape &shape, int &gradientCount)
 {
+    if (shape.envelope()) {
+        // Other programs get the object bent, as a curve; OpenDraw reads back the object
+        // itself (hidden) and its envelope.
+        const QString ns = QString::fromLatin1(kNamespace);
+        w.writeStartElement(QStringLiteral("g"));
+        w.writeAttribute(ns, QStringLiteral("envelope"), envelopeText(*shape.envelope()));
+        w.writeStartElement(QStringLiteral("g"));
+        w.writeAttribute(ns, QStringLiteral("generated"), QStringLiteral("true"));
+        const Shape bent(pathops::fromPainterPath(shape.path()), shape.style());
+        writeShape(w, bent, gradientCount);
+        w.writeEndElement();
+        writeShapeElement(w, shape, gradientCount, true);
+        w.writeEndElement();
+        return;
+    }
     const std::vector<contour::Ring> rings = contour::rings(shape);
     const bool under = shape.style().contour && shape.style().contour->direction == Contour::Direction::Outside;
     if (under)
@@ -456,7 +496,7 @@ void writeShape(QXmlStreamWriter &w, const Shape &shape, int &gradientCount)
         writeContourRings(w, rings);
 }
 
-void writeShapeElement(QXmlStreamWriter &w, const Shape &shape, int &gradientCount)
+void writeShapeElement(QXmlStreamWriter &w, const Shape &shape, int &gradientCount, bool original)
 {
     // A gradient is written right before the element that uses it.
     QString gradientId;
@@ -557,7 +597,7 @@ void writeShapeElement(QXmlStreamWriter &w, const Shape &shape, int &gradientCou
                              QStringLiteral("%1 %2 %3").arg(number(f.firstIndent), number(f.leftIndent), number(f.rightIndent)));
         writeShapeTransform(w, shape);
         writeStyle(w, shape.style(), gradientId);
-        writeEffects(w, shape.style(), effectIds);
+        writeEffects(w, shape.style(), effectIds, original);
 
         // Every laid-out line on its own baseline, so any viewer shows the same lines. Paragraph
         // text also records its frame and marks wrapped lines, to rebuild the paragraphs.
@@ -626,7 +666,7 @@ void writeShapeElement(QXmlStreamWriter &w, const Shape &shape, int &gradientCou
     writeLabel(w, shape.name());
     writeShapeTransform(w, shape);
     writeStyle(w, shape.style(), gradientId);
-    writeEffects(w, shape.style(), effectIds);
+    writeEffects(w, shape.style(), effectIds, original);
     writeArrows(w, shape.style(), markerIds);
     w.writeEndElement();
 }
@@ -778,6 +818,7 @@ struct Context {
     bool inLayer = false;   // inside a layer (nested layers become groups)
     QString label;          // for Role::Group: the name the group was given
     int blendSteps = 0;     // for Role::Group: a blend's steps (opendraw:blend)
+    std::optional<Envelope> envelope; // for Role::Group: the envelope of the object inside
 };
 
 // The presentation properties of one element: style attribute, then attributes, then inherited values.
@@ -1690,7 +1731,12 @@ bool read(QIODevice *device, Document &document, QString *errorMessage, ReadRepo
                 case Role::Group: {
                     ShapeList children = std::move(containers.back());
                     containers.pop_back();
-                    if (!children.empty()) {
+                    if (const auto &envelope = stack.back().envelope; envelope && children.size() == 1
+                                                                       && Shape::canHaveEnvelope(children.front()->kind())) {
+                        // An envelope's group holds just the bent object.
+                        children.front()->setEnvelope(envelope);
+                        containers.back().push_back(std::move(children.front()));
+                    } else if (!children.empty()) {
                         auto group = std::make_unique<Shape>(std::move(children));
                         group->setName(stack.back().label);
                         if (group->children().size() == 2)
@@ -1750,9 +1796,12 @@ bool read(QIODevice *device, Document &document, QString *errorMessage, ReadRepo
                              && (attributes.hasAttribute(ns, QStringLiteral("layer"))
                                  || attributes.value(QString::fromLatin1(kInkscapeNamespace), QStringLiteral("groupmode"))
                                         == u"layer");
+        // The object under an envelope, hidden from other programs (which show it bent).
+        const bool original = attributes.value(ns, QStringLiteral("original")) == u"true";
         // Hidden pages and layers are still read; any other hidden element is skipped.
-        if (hidden && !isPage && !isLayer)
+        if (hidden && !isPage && !isLayer && !original)
             context.rendering = false;
+        context.envelope = name == u"g" ? parseEnvelope(attributes.value(ns, QStringLiteral("envelope"))) : std::nullopt;
         // Steps of a blend, worked out again from its ends.
         if (attributes.value(ns, QStringLiteral("generated")) == u"true")
             context.rendering = false;
@@ -1863,8 +1912,15 @@ bool read(QIODevice *device, Document &document, QString *errorMessage, ReadRepo
                     shape = makeBoxShape(ShapeKind::Ellipse, QRectF(cx - rx, cy - ry, 2 * rx, 2 * ry), t,
                                          props.style(strokeScale, localReport));
             } else if (name == u"path") {
-                if (auto path = pathops::fromSvg(attributes.value(QStringLiteral("d"))))
-                    shape = makePathShape(std::move(*path), t, props.style(strokeScale, localReport));
+                if (auto path = pathops::fromSvg(attributes.value(QStringLiteral("d")))) {
+                    if (original && t.type() > QTransform::TxScale) {
+                        // A turned curve under an envelope keeps its own geometry.
+                        shape = std::make_unique<Shape>(std::move(*path), props.style(strokeScale, localReport));
+                        shape->setShapeTransform(t);
+                    } else {
+                        shape = makePathShape(std::move(*path), t, props.style(strokeScale, localReport));
+                    }
+                }
             } else if (name == u"line") {
                 SubPath line;
                 line.nodes = {PathNode::corner({props.length(QStringLiteral("x1")), props.length(QStringLiteral("y1"))}),

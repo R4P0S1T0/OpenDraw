@@ -9,6 +9,8 @@ add_library(opendraw_core STATIC
     ContourEffect.h
     Document.cpp
     Document.h
+    Envelope.cpp
+    Envelope.h
     Export.cpp
     Export.h
     Generators.cpp
