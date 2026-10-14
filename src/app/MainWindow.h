@@ -2,6 +2,7 @@
 
 #include "core/Shape.h"
 
+#include <QHash>
 #include <QMainWindow>
 #include <QPointF>
 
@@ -11,6 +12,7 @@
 class QAction;
 class QActionGroup;
 class QComboBox;
+class QDockWidget;
 class QDoubleSpinBox;
 class QFontComboBox;
 class QLabel;
@@ -74,6 +76,10 @@ private slots:
     void updateNodeActions();
     void updateTextBar();
     void updateDocumentPalette();
+    // Right click on the canvas: what can be done with `shape`, or with the page.
+    void showContextMenu(const QPoint &globalPosition, opendraw::Shape *shape);
+    // The selection dragged with the right button and dropped (on `target`, if any).
+    void showDropMenu(const QPoint &globalPosition, const QPointF &offset, opendraw::Shape *target);
 
 private:
     void createActions();
@@ -144,6 +150,11 @@ private:
     QToolBar *m_nodeBar = nullptr;
     QList<QAction *> m_nodeActions; // need an active node
     QAction *m_joinAction = nullptr; // needs two end nodes
+
+    // Commands and submenus of the menu bar also offered on the canvas's right-click menus.
+    QHash<QString, QAction *> m_actions;
+    QHash<QString, QMenu *> m_menus;
+    QDockWidget *m_propertiesDock = nullptr;
 
     QTabBar *m_documentTabs = nullptr;
     QAction *m_deletePageAction = nullptr;

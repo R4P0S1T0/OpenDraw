@@ -193,6 +193,7 @@ MainWindow::MainWindow(QWidget *parent)
     // Window menu: dockers, toolbars and palettes can be hidden and brought back.
     QMenu *dockers = m_windowMenu->addMenu(tr("&Dockers"));
     dockers->addAction(propertiesDock->toggleViewAction());
+    m_propertiesDock = propertiesDock;
     dockers->addAction(layersDock->toggleViewAction());
     QMenu *toolbars = m_windowMenu->addMenu(tr("&Toolbars"));
     for (QToolBar *bar : {m_standardBar, static_cast<QToolBar *>(m_propertyBar), m_toolbox}) {
@@ -241,6 +242,9 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_canvas, &CanvasWidget::defaultStyleChanged, this, &MainWindow::updateStyleIndicators);
     connect(&Units::instance(), &Units::unitChanged, this, &MainWindow::updateStyleIndicators);
     connect(m_undoGroup, &QUndoGroup::cleanChanged, this, &MainWindow::updateTitle);
+    // Menus open after the mouse button is released, outside the canvas's own event handling.
+    connect(m_canvas, &CanvasWidget::contextMenuRequested, this, &MainWindow::showContextMenu, Qt::QueuedConnection);
+    connect(m_canvas, &CanvasWidget::rightDropRequested, this, &MainWindow::showDropMenu, Qt::QueuedConnection);
     connectDocument();
     m_cutAction->setEnabled(false);
     m_copyAction->setEnabled(false);
@@ -444,23 +448,24 @@ void MainWindow::createActions()
                                        &CanvasWidget::copySelection);
     m_pasteAction = editMenu->addAction(icon(Icon::Paste), tr("&Paste"), QKeySequence::Paste, m_canvas,
                                         &CanvasWidget::paste);
-    editMenu->addAction(tr("D&uplicate"), QKeySequence(Qt::CTRL | Qt::Key_D), m_canvas,
+    m_actions["duplicate"] = editMenu->addAction(tr("D&uplicate"), QKeySequence(Qt::CTRL | Qt::Key_D), m_canvas,
                         &CanvasWidget::duplicateSelection);
     QAction *deleteAction = editMenu->addAction(tr("&Delete"), m_canvas, &CanvasWidget::deleteSelection);
     deleteAction->setShortcuts({QKeySequence::Delete, QKeySequence(Qt::Key_Backspace)});
+    m_actions.insert(QStringLiteral("delete"), deleteAction);
     editMenu->addSeparator();
-    editMenu->addAction(tr("Select &All"), QKeySequence::SelectAll, m_canvas, &CanvasWidget::selectAll);
+    m_actions["selectAll"] = editMenu->addAction(tr("Select &All"), QKeySequence::SelectAll, m_canvas, &CanvasWidget::selectAll);
 
     // View
     QMenu *viewMenu = menuBar()->addMenu(tr("&View"));
     m_viewMenu = viewMenu;
-    viewMenu->addAction(tr("Zoom &In"), QKeySequence::ZoomIn, m_canvas, &CanvasWidget::zoomIn);
-    viewMenu->addAction(tr("Zoom &Out"), QKeySequence::ZoomOut, m_canvas, &CanvasWidget::zoomOut);
-    viewMenu->addAction(tr("&Actual Size"), QKeySequence(Qt::CTRL | Qt::Key_1), m_canvas,
+    m_actions["zoomIn"] = viewMenu->addAction(tr("Zoom &In"), QKeySequence::ZoomIn, m_canvas, &CanvasWidget::zoomIn);
+    m_actions["zoomOut"] = viewMenu->addAction(tr("Zoom &Out"), QKeySequence::ZoomOut, m_canvas, &CanvasWidget::zoomOut);
+    m_actions["actualSize"] = viewMenu->addAction(tr("&Actual Size"), QKeySequence(Qt::CTRL | Qt::Key_1), m_canvas,
                         &CanvasWidget::zoomToActualSize);
-    viewMenu->addAction(tr("Zoom to &Page"), QKeySequence(Qt::SHIFT | Qt::Key_F4), m_canvas, &CanvasWidget::fitPage);
+    m_actions["fitPage"] = viewMenu->addAction(tr("Zoom to &Page"), QKeySequence(Qt::SHIFT | Qt::Key_F4), m_canvas, &CanvasWidget::fitPage);
     viewMenu->addAction(tr("Zoom to Page &Width"), m_canvas, &CanvasWidget::fitPageWidth);
-    viewMenu->addAction(tr("Zoom to &Selected"), QKeySequence(Qt::SHIFT | Qt::Key_F2), m_canvas,
+    m_actions["zoomSelection"] = viewMenu->addAction(tr("Zoom to &Selected"), QKeySequence(Qt::SHIFT | Qt::Key_F2), m_canvas,
                         &CanvasWidget::zoomToSelection);
     viewMenu->addSeparator();
     m_rulersAction = viewMenu->addAction(icon(Icon::Rulers), tr("&Rulers"));
@@ -505,9 +510,9 @@ void MainWindow::createActions()
 
     // Layout: pages
     QMenu *layoutMenu = menuBar()->addMenu(tr("&Layout"));
-    layoutMenu->addAction(tr("&Insert Page"), this, [this] { insertPage(m_document->currentPageIndex() + 1); });
+    m_actions["insertPage"] = layoutMenu->addAction(tr("&Insert Page"), this, [this] { insertPage(m_document->currentPageIndex() + 1); });
     m_deletePageAction = layoutMenu->addAction(tr("&Delete Page"), this, &MainWindow::deletePage);
-    layoutMenu->addAction(tr("&Rename Page…"), this, &MainWindow::renamePage);
+    m_actions["renamePage"] = layoutMenu->addAction(tr("&Rename Page…"), this, &MainWindow::renamePage);
     layoutMenu->addSeparator();
     layoutMenu->addAction(tr("&Next Page"), QKeySequence(Qt::Key_PageDown), this,
                           [this] { m_document->setCurrentPage(m_document->currentPageIndex() + 1); });
@@ -516,19 +521,20 @@ void MainWindow::createActions()
 
     // Object
     QMenu *objectMenu = menuBar()->addMenu(tr("&Object"));
-    objectMenu->addAction(tr("&Group"), QKeySequence(Qt::CTRL | Qt::Key_G), m_canvas, &CanvasWidget::groupSelection);
-    objectMenu->addAction(tr("&Ungroup"), QKeySequence(Qt::CTRL | Qt::Key_U), m_canvas,
+    m_actions["group"] = objectMenu->addAction(tr("&Group"), QKeySequence(Qt::CTRL | Qt::Key_G), m_canvas, &CanvasWidget::groupSelection);
+    m_actions["ungroup"] = objectMenu->addAction(tr("&Ungroup"), QKeySequence(Qt::CTRL | Qt::Key_U), m_canvas,
                           &CanvasWidget::ungroupSelection);
-    objectMenu->addAction(tr("&Break Blend Apart"), QKeySequence(Qt::CTRL | Qt::Key_K), m_canvas,
+    m_actions["breakBlend"] = objectMenu->addAction(tr("&Break Blend Apart"), QKeySequence(Qt::CTRL | Qt::Key_K), m_canvas,
                           &CanvasWidget::breakBlendApart);
-    objectMenu->addAction(tr("&Remove Envelope"), m_canvas, &CanvasWidget::removeEnvelope);
+    m_actions["removeEnvelope"] = objectMenu->addAction(tr("&Remove Envelope"), m_canvas, &CanvasWidget::removeEnvelope);
     QMenu *powerClipMenu = objectMenu->addMenu(tr("&PowerClip"));
     powerClipMenu->addAction(tr("&Place Inside Frame (the object selected last)"), m_canvas,
                              &CanvasWidget::placeInsideFrame);
-    powerClipMenu->addAction(tr("&Extract Contents"), m_canvas, &CanvasWidget::extractContents);
+    m_actions["extract"] = powerClipMenu->addAction(tr("&Extract Contents"), m_canvas, &CanvasWidget::extractContents);
     objectMenu->addSeparator();
 
     QMenu *orderMenu = objectMenu->addMenu(tr("&Order"));
+    m_menus.insert(QStringLiteral("order"), orderMenu);
     orderMenu->addAction(tr("To &Front"), QKeySequence(Qt::SHIFT | Qt::Key_PageUp), m_canvas,
                          &CanvasWidget::orderToFront);
     orderMenu->addAction(tr("To &Back"), QKeySequence(Qt::SHIFT | Qt::Key_PageDown), m_canvas,
@@ -541,6 +547,7 @@ void MainWindow::createActions()
     // Single-letter shortcuts as in other desktop vector editors. With one object selected,
     // it is aligned to the page; with several, to the selection's bounds.
     QMenu *alignMenu = objectMenu->addMenu(tr("&Align and Distribute"));
+    m_menus.insert(QStringLiteral("align"), alignMenu);
     struct AlignCommand {
         QString text;
         Qt::Key key;
@@ -565,6 +572,7 @@ void MainWindow::createActions()
     alignMenu->addAction(tr("Distribute V&ertically"), m_canvas, [this] { m_canvas->distribute(Qt::Vertical); });
 
     QMenu *transformMenu = objectMenu->addMenu(tr("&Transform"));
+    m_menus.insert(QStringLiteral("transform"), transformMenu);
     transformMenu->addAction(icon(Icon::MirrorHorizontal), tr("Mirror &Horizontally"), m_canvas,
                              [this] { m_canvas->mirrorSelection(Qt::Horizontal); });
     transformMenu->addAction(icon(Icon::MirrorVertical), tr("Mirror &Vertically"), m_canvas,
@@ -577,11 +585,12 @@ void MainWindow::createActions()
     transformMenu->addAction(tr("Rotate &180°"), m_canvas, [this] { m_canvas->rotateSelection(180); });
 
     objectMenu->addSeparator();
-    objectMenu->addAction(tr("Convert to &Curves"), QKeySequence(Qt::CTRL | Qt::Key_Q), m_canvas,
+    m_actions["toCurves"] = objectMenu->addAction(tr("Convert to &Curves"), QKeySequence(Qt::CTRL | Qt::Key_Q), m_canvas,
                           &CanvasWidget::convertSelectionToCurves);
 
     // Node commands: in Object > Nodes and on a bar shown while the shape tool is active.
     QMenu *nodesMenu = objectMenu->addMenu(tr("&Nodes"));
+    m_menus.insert(QStringLiteral("nodes"), nodesMenu);
     m_nodeBar = new QToolBar(tr("Nodes"), this);
     m_nodeBar->setObjectName(QStringLiteral("nodes"));
     m_nodeBar->setMovable(false);
@@ -616,7 +625,7 @@ void MainWindow::createActions()
 
     // Text
     QMenu *textMenu = menuBar()->addMenu(tr("Te&xt"));
-    textMenu->addAction(tr("&Paragraph Formatting"), QKeySequence(Qt::CTRL | Qt::Key_T), this, [this] {
+    m_actions["paragraph"] = textMenu->addAction(tr("&Paragraph Formatting"), QKeySequence(Qt::CTRL | Qt::Key_T), this, [this] {
         // The Properties docker, open at its Paragraph section.
         if (auto *panel = findChild<PropertiesPanel *>()) {
             panel->showSection(PropertiesPanel::Section::Paragraph);
@@ -626,11 +635,11 @@ void MainWindow::createActions()
             }
         }
     });
-    textMenu->addAction(tr("&Convert to Paragraph/Artistic Text"), QKeySequence(Qt::CTRL | Qt::Key_F8), m_canvas,
+    m_actions["textKind"] = textMenu->addAction(tr("&Convert to Paragraph/Artistic Text"), QKeySequence(Qt::CTRL | Qt::Key_F8), m_canvas,
                         &CanvasWidget::convertTextKind);
     textMenu->addSeparator();
-    textMenu->addAction(tr("&Fit Text to Path"), m_canvas, &CanvasWidget::fitTextToPath);
-    textMenu->addAction(tr("&Straighten Text"), m_canvas, &CanvasWidget::straightenText);
+    m_actions["fitText"] = textMenu->addAction(tr("&Fit Text to Path"), m_canvas, &CanvasWidget::fitTextToPath);
+    m_actions["straighten"] = textMenu->addAction(tr("&Straighten Text"), m_canvas, &CanvasWidget::straightenText);
 
     // Tools
     QMenu *toolsMenu = menuBar()->addMenu(tr("&Tools"));
@@ -848,6 +857,7 @@ void MainWindow::createSnapActions(QMenu *viewMenu)
 
     viewMenu->addSeparator();
     QAction *showGrid = viewMenu->addAction(icon(Icon::Grid), tr("&Grid"));
+    m_actions["grid"] = showGrid;
     showGrid->setCheckable(true);
     showGrid->setChecked(grid.visible);
     connect(showGrid, &QAction::toggled, this, [this](bool on) {
@@ -870,6 +880,7 @@ void MainWindow::createSnapActions(QMenu *viewMenu)
         QSettings().setValue(QStringLiteral("view/gridSpacing"), g.spacing);
     });
     QAction *showGuides = viewMenu->addAction(icon(Icon::Guidelines), tr("G&uidelines"));
+    m_actions["guides"] = showGuides;
     showGuides->setCheckable(true);
     showGuides->setChecked(m_canvas->guidesVisible());
     connect(showGuides, &QAction::toggled, this, [this](bool on) {
@@ -1474,6 +1485,130 @@ void MainWindow::updateTextBar()
     for (QAction *action : std::as_const(m_textAlignActions))
         action->setChecked(TextAlign(action->data().toInt()) == format.align);
     m_updatingTextBar = false;
+}
+
+void MainWindow::showContextMenu(const QPoint &globalPosition, Shape *shape)
+{
+    QMenu menu(this);
+    // The shape tool: what can be done with the node.
+    if (m_canvas->tool() == CanvasWidget::Tool::Node) {
+        if (QMenu *nodes = m_menus.value(QStringLiteral("nodes")))
+            menu.addActions(nodes->actions());
+        menu.addSeparator();
+        menu.addAction(m_actions.value(QStringLiteral("delete")));
+        menu.exec(globalPosition);
+        return;
+    }
+    menu.addAction(m_undoAction);
+    menu.addAction(m_redoAction);
+    menu.addSeparator();
+    auto add = [&menu, this](const char *key) {
+        if (QAction *action = m_actions.value(QString::fromLatin1(key)))
+            menu.addAction(action);
+    };
+    if (!shape) {
+        // On the page.
+        menu.addAction(m_pasteAction);
+        add("selectAll");
+        menu.addSeparator();
+        add("fitPage");
+        add("actualSize");
+        add("zoomIn");
+        add("zoomOut");
+        menu.addSeparator();
+        menu.addAction(m_rulersAction);
+        add("grid");
+        add("guides");
+        menu.addSeparator();
+        add("insertPage");
+        add("renamePage");
+        menu.addAction(m_deletePageAction);
+        menu.exec(globalPosition);
+        return;
+    }
+
+    const bool several = m_canvas->selection().size() > 1;
+    if (shape->kind() == ShapeKind::Text && !m_canvas->editedText())
+        menu.addAction(tr("&Edit Text"), m_canvas, &CanvasWidget::editSelectedText);
+    if (m_canvas->editedText())
+        menu.addAction(tr("&Finish Editing"), m_canvas, &CanvasWidget::finishTextEdit);
+    menu.addSeparator();
+    menu.addAction(m_cutAction);
+    menu.addAction(m_copyAction);
+    menu.addAction(m_pasteAction);
+    add("duplicate");
+    add("delete");
+    menu.addSeparator();
+
+    // What this kind of object offers.
+    if (several)
+        add("group");
+    if (shape->kind() == ShapeKind::Group)
+        add(shape->isBlend() ? "breakBlend" : "ungroup");
+    if (!shape->clippedContents().empty())
+        add("extract");
+    if (shape->envelope())
+        add("removeEnvelope");
+    if (shape->kind() == ShapeKind::Text) {
+        add("paragraph");
+        add("textKind");
+        if (shape->textData().path)
+            add("straighten");
+        else if (several)
+            add("fitText");
+    }
+    if (shape->kind() != ShapeKind::Group && shape->kind() != ShapeKind::Image
+        && (shape->kind() != ShapeKind::Path || shape->envelope() || shape->connector() || shape->dimension()))
+        add("toCurves");
+    menu.addSeparator();
+    for (const char *key : {"order", "align", "transform"}) {
+        if (QMenu *submenu = m_menus.value(QString::fromLatin1(key)))
+            menu.addMenu(submenu);
+    }
+    menu.addSeparator();
+    menu.addAction(m_fillAction);
+    menu.addAction(m_outlineAction);
+    menu.addAction(tr("P&roperties"), this, [this] {
+        m_propertiesDock->show();
+        m_propertiesDock->raise();
+    });
+    menu.exec(globalPosition);
+}
+
+void MainWindow::showDropMenu(const QPoint &globalPosition, const QPointF &offset, Shape *target)
+{
+    // CorelDRAW's right-button drop: what to do with the dragged objects here.
+    QMenu menu(this);
+    QAction *move = menu.addAction(tr("&Move Here"));
+    QAction *copy = menu.addAction(tr("&Copy Here"));
+    QAction *fill = nullptr, *outline = nullptr, *all = nullptr, *inside = nullptr;
+    if (target) {
+        menu.addSeparator();
+        fill = menu.addAction(tr("Copy &Fill Here"));
+        outline = menu.addAction(tr("Copy &Outline Here"));
+        all = menu.addAction(tr("Copy &All Properties"));
+        if (Shape::canHoldContents(target->kind())) {
+            menu.addSeparator();
+            inside = menu.addAction(tr("&PowerClip Inside"));
+        }
+    }
+    menu.addSeparator();
+    menu.addAction(tr("Cancel"));
+    QAction *chosen = menu.exec(globalPosition);
+    if (!chosen)
+        return;
+    if (chosen == move)
+        m_canvas->moveSelectionBy(offset);
+    else if (chosen == copy)
+        m_canvas->copySelectionBy(offset);
+    else if (chosen == fill)
+        m_canvas->copyStyleTo(target, CanvasWidget::StyleParts::Fill);
+    else if (chosen == outline)
+        m_canvas->copyStyleTo(target, CanvasWidget::StyleParts::Outline);
+    else if (chosen == all)
+        m_canvas->copyStyleTo(target, CanvasWidget::StyleParts::All);
+    else if (chosen == inside)
+        m_canvas->placeSelectionInside(target);
 }
 
 void MainWindow::updateNodeActions()

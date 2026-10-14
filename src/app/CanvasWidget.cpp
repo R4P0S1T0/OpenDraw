@@ -91,6 +91,8 @@ void CanvasWidget::connectDocument()
 {
     connect(m_document, &Document::changed, this, qOverload<>(&QWidget::update));
     connect(m_document, &Document::shapeRemoved, this, [this](Shape *shape) {
+        if (shape == m_rightHit)
+            m_rightHit = nullptr;
         if (shape == m_editText && !m_pendingText) {
             m_editText = nullptr;
             emit textEditingChanged();
@@ -679,6 +681,18 @@ int CanvasWidget::transparencyHandleAt(const QPointF &widgetPosition) const
 void CanvasWidget::paintEffectHandles(QPainter &painter)
 {
     // A line from where the drag started, while dragging a shadow or a blend.
+    if (m_drag == Drag::RightMove && distance(toWidget(m_dragStart), toWidget(m_cursor)) >= kMinCreateSizePx * 2) {
+        // Where the selection would go.
+        const QPointF delta = m_cursor - m_dragStart;
+        const QTransform moved = QTransform::fromTranslate(delta.x(), delta.y()) * viewTransform();
+        painter.save();
+        painter.setRenderHint(QPainter::Antialiasing);
+        painter.setBrush(Qt::NoBrush);
+        painter.setPen(QPen(palette().color(QPalette::Highlight), 1, Qt::DashLine));
+        for (const Shape *shape : m_selection)
+            painter.drawPath(moved.map(shape->path()));
+        painter.restore();
+    }
     if (m_drag == Drag::Measure) {
         painter.setPen(QPen(palette().color(QPalette::Highlight), 1, Qt::DashLine));
         painter.drawLine(toWidget(m_dragStart), toWidget(m_lineEnd));
@@ -1111,6 +1125,77 @@ void CanvasWidget::dragEnvelopeHandle(const QPointF &documentPosition)
     }
     shape->setEnvelope(e);
     m_document->notifyShapeChanged(shape);
+}
+
+void CanvasWidget::editSelectedText()
+{
+    Shape *text = selectedShape();
+    if (!text || text->kind() != ShapeKind::Text)
+        return;
+    setTool(Tool::Text);
+    beginTextEdit(text);
+}
+
+void CanvasWidget::moveSelectionBy(const QPointF &offset)
+{
+    if (m_selection.empty())
+        return;
+    moveSelection(std::vector<QPointF>(m_selection.size(), offset), tr("Move"));
+}
+
+void CanvasWidget::copySelectionBy(const QPointF &offset)
+{
+    finishTextEdit();
+    if (m_selection.empty())
+        return;
+    const std::vector<const Shape *> shapes(m_selection.begin(), m_selection.end());
+    addShapes(svg::readShapes(svg::writeShapes(shapes, m_document->pageSize())), offset, tr("Copy"));
+}
+
+void CanvasWidget::copyStyleTo(Shape *target, StyleParts parts)
+{
+    if (!target || m_selection.empty())
+        return;
+    const Style source = currentStyle();
+    std::vector<Shape *> leaves;
+    target->forEachLeaf([&leaves](Shape &leaf) { leaves.push_back(&leaf); });
+    const QString text = parts == StyleParts::Fill      ? tr("Copy fill")
+                         : parts == StyleParts::Outline ? tr("Copy outline")
+                                                        : tr("Copy properties");
+    m_undoStack->beginMacro(text);
+    for (Shape *leaf : leaves) {
+        Style style = leaf->style();
+        if (parts == StyleParts::All) {
+            style = source;
+        } else if (parts == StyleParts::Fill) {
+            style.fill = source.fill;
+            style.gradient = source.gradient;
+            style.pattern = source.pattern;
+            style.mesh = source.mesh;
+        } else {
+            style.stroke = source.stroke;
+            style.strokeWidth = source.strokeWidth;
+            style.dashes = source.dashes;
+            style.cap = source.cap;
+            style.join = source.join;
+            style.startArrow = source.startArrow;
+            style.endArrow = source.endArrow;
+            style.strokeBehind = source.strokeBehind;
+            style.scaleStroke = source.scaleStroke;
+        }
+        m_undoStack->push(new SetStyleCommand(m_document, leaf, style));
+    }
+    m_undoStack->endMacro();
+}
+
+void CanvasWidget::placeSelectionInside(Shape *frame)
+{
+    if (!frame || m_selection.empty() || isSelected(frame))
+        return;
+    std::vector<Shape *> shapes = m_selection;
+    shapes.push_back(frame);
+    setSelection(std::move(shapes));
+    placeInsideFrame();
 }
 
 void CanvasWidget::connectShapes(Shape *from, Shape *to, bool rightAngle)
@@ -2861,6 +2946,30 @@ void CanvasWidget::mousePressEvent(QMouseEvent *event)
         zoomAround(pos, 1.0 / kZoomStep);
         return;
     }
+    if (event->button() == Qt::RightButton) {
+        // As in CorelDRAW: a right click opens a menu for what is under the pointer; dragging
+        // an object with the right button asks on release what to do (move, copy, copy its
+        // fill or outline onto another object, put it inside one).
+        if (m_drag != Drag::None)
+            return;
+        m_dragStart = docPos;
+        if (m_tool == Tool::Node) {
+            if (const NodeRef node = nodeAt(pos); node.isValid())
+                setActiveNode(node);
+            m_drag = Drag::RightClick;
+            return;
+        }
+        Shape *hit = m_editText ? m_editText : m_document->shapeAt(docPos, kHitTolerancePx / m_zoom);
+        if (!m_editText) {
+            if (hit && !isSelected(hit))
+                setSelectedShape(hit);
+            else if (!hit)
+                setSelection({});
+        }
+        m_rightHit = hit;
+        m_drag = hit && !m_editText ? Drag::RightMove : Drag::RightClick;
+        return;
+    }
     if (event->button() != Qt::LeftButton)
         return;
 
@@ -3279,6 +3388,7 @@ void CanvasWidget::mouseMoveEvent(QMouseEvent *event)
         break;
 
     case Drag::Connect:
+    case Drag::RightMove:
         update();
         break;
 
@@ -3459,6 +3569,10 @@ void CanvasWidget::mouseMoveEvent(QMouseEvent *event)
 
 void CanvasWidget::mouseReleaseEvent(QMouseEvent *event)
 {
+    // A drag ends with the button that started it.
+    const bool rightDrag = m_drag == Drag::RightClick || m_drag == Drag::RightMove;
+    if (rightDrag != (event->button() == Qt::RightButton) && m_drag != Drag::None)
+        return;
     const Drag drag = m_drag;
     m_drag = Drag::None;
 
@@ -3466,6 +3580,30 @@ void CanvasWidget::mouseReleaseEvent(QMouseEvent *event)
     case Drag::None:
     case Drag::BezierHandle:
         break;
+
+    case Drag::RightClick:
+        emit contextMenuRequested(event->globalPosition().toPoint(), m_rightHit);
+        m_rightHit = nullptr;
+        break;
+
+    case Drag::RightMove: {
+        Shape *hit = m_rightHit;
+        m_rightHit = nullptr;
+        update();
+        if (distance(toWidget(m_dragStart), event->position()) < kMinCreateSizePx * 2) {
+            emit contextMenuRequested(event->globalPosition().toPoint(), hit);
+            break;
+        }
+        // Dropped: on the topmost object that is not being dragged, if any.
+        const QPointF docPos = toDocument(event->position());
+        Shape *target = nullptr;
+        for (Shape *shape : m_document->editableShapes()) {
+            if (!isSelected(shape) && shape->contains(docPos, kHitTolerancePx / m_zoom))
+                target = shape;
+        }
+        emit rightDropRequested(event->globalPosition().toPoint(), docPos - m_dragStart, target);
+        break;
+    }
 
     case Drag::Pan:
         updateCursor();

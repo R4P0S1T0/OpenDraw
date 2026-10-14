@@ -31,6 +31,7 @@ Rough order of work. Items move as contributors pick them up.
 - [x] Connectors (straight and right-angle) that stay joined to two objects as they move, and parallel dimensions labelled in the ruler unit that update when resized; both saved in SVG (drawn as plain shapes for other programs)
 - [x] PowerClip: objects placed inside a rectangle, ellipse, curve or text, shown only within its outline and moving with it; Extract Contents; saved as SVG clip-path, and clip paths from other programs are read as PowerClips
 - [x] Smart fill tool: a click inside an area enclosed by overlapping objects makes a new object of exactly that shape
+- [x] Right-click menus on the canvas (object, page, node) and the right-button drop menu (move or copy here, copy fill, outline or all properties, PowerClip inside)
 - [x] Objects docker: pages, layers and objects as a tree, selection in both directions, renaming (object names saved as Inkscape labels), drag and drop to restack or change layers
 - [x] Properties docker: outline (colour, width, dashes, ends, corners), fill (none, uniform, linear, radial) and transparency, applied live; dashes, line ends and corners saved in SVG and read from other files
 - [x] Arrowheads (eight shapes, at either end, on the property bar and in the Properties docker), outline behind fill, scale outline with object; saved as SVG markers and `paint-order`, other programs' markers read as triangles

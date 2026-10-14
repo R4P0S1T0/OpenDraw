@@ -22,6 +22,8 @@
 #include <QDoubleSpinBox>
 #include <QSpinBox>
 #include <QMouseEvent>
+#include <QTimer>
+#include <QMenu>
 #include <QSignalSpy>
 #include <QTabBar>
 #include <QToolBar>
@@ -141,6 +143,8 @@ private slots:
     void interactiveFillEditsGradients();
     void meshToolColoursNodes();
     void connectorAndDimensionTools();
+    void rightClickAndRightDrag();
+    void rightClickMenus();
     void textToolDrawsParagraphFrames();
     void formatPartOfAText();
     void shadowAndTransparencyTools();
@@ -1177,6 +1181,24 @@ void CanvasTests::mainWindowWorkspace()
         canvas->fitPage();
         QTest::qWait(150);
         QVERIFY(window.grab().save(dir + QStringLiteral("/window-diagram.png")));
+
+        // The right-click menu of an object and the right-button drop menu.
+        canvas->setSelectedShape(middle);
+        for (const auto &[slot, file] : {std::pair{"menu", "/menu-object.png"}, std::pair{"drop", "/menu-drop.png"}}) {
+            const QString path = dir + QLatin1String(file);
+            QTimer::singleShot(150, [path] {
+                if (auto *menu = qobject_cast<QMenu *>(QApplication::activePopupWidget())) {
+                    menu->grab().save(path);
+                    menu->close();
+                }
+            });
+            if (QByteArray(slot) == "menu")
+                QMetaObject::invokeMethod(&window, "showContextMenu", Q_ARG(QPoint, window.mapToGlobal(QPoint(500, 400))),
+                                          Q_ARG(opendraw::Shape *, middle));
+            else
+                QMetaObject::invokeMethod(&window, "showDropMenu", Q_ARG(QPoint, window.mapToGlobal(QPoint(500, 400))),
+                                          Q_ARG(QPointF, QPointF(10, 10)), Q_ARG(opendraw::Shape *, start));
+        }
         theme::apply(ColorScheme::Light);
     }
 }
@@ -1641,6 +1663,108 @@ void CanvasTests::textFitsToPathAndBack()
         m_undo->undo();
     QVERIFY(!text->textData().path);
     QCOMPARE(text->textOrigin(), QPointF(400, 400));
+}
+
+void CanvasTests::rightClickAndRightDrag()
+{
+    m_canvas->setZoom(1.0);
+    m_canvas->setTool(CanvasWidget::Tool::Select);
+    Style red;
+    red.fill = Qt::red;
+    red.stroke = Qt::blue;
+    red.strokeWidth = 4;
+    Shape *a = m_doc->insertShape(-1, std::make_unique<Shape>(ShapeKind::Rectangle, QRectF(100, 100, 100, 100), red));
+    Shape *b = m_doc->insertShape(-1, std::make_unique<Shape>(ShapeKind::Ellipse, QRectF(400, 100, 100, 100)));
+    QSignalSpy menus(m_canvas, &CanvasWidget::contextMenuRequested);
+    QSignalSpy drops(m_canvas, &CanvasWidget::rightDropRequested);
+    auto at = [this](double x, double y) { return m_canvas->documentToWidget({x, y}).toPoint(); };
+
+    // A right click on an object selects it and asks for its menu; on the page, for the page's.
+    QTest::mouseClick(m_canvas, Qt::RightButton, Qt::NoModifier, at(150, 150));
+    QCOMPARE(menus.count(), 1);
+    QCOMPARE(menus.last().at(1).value<Shape *>(), a);
+    QCOMPARE(m_canvas->selectedShape(), a);
+    QTest::mouseClick(m_canvas, Qt::RightButton, Qt::NoModifier, at(700, 700));
+    QCOMPARE(menus.count(), 2);
+    QCOMPARE(menus.last().at(1).value<Shape *>(), nullptr);
+    QVERIFY(m_canvas->selection().empty());
+
+    // Dragging with the right button onto another object asks what to do there.
+    QTest::mousePress(m_canvas, Qt::RightButton, Qt::NoModifier, at(150, 150));
+    QMouseEvent move(QEvent::MouseMove, QPointF(at(450, 150)), m_canvas->mapToGlobal(QPointF(at(450, 150))),
+                     Qt::NoButton, Qt::RightButton, Qt::NoModifier);
+    QApplication::sendEvent(m_canvas, &move);
+    QTest::mouseRelease(m_canvas, Qt::RightButton, Qt::NoModifier, at(450, 150));
+    QCOMPARE(drops.count(), 1);
+    QCOMPARE(drops.last().at(1).toPointF(), QPointF(300, 0));
+    QCOMPARE(drops.last().at(2).value<Shape *>(), b);
+    QCOMPARE(a->bounds(), QRectF(100, 100, 100, 100)); // nothing happens until a choice is made
+
+    // The choices.
+    const int before = m_undo->index();
+    m_canvas->copyStyleTo(b, CanvasWidget::StyleParts::Fill);
+    QCOMPARE(b->style().fill, QColor(Qt::red));
+    QVERIFY(b->style().stroke != QColor(Qt::blue));
+    m_canvas->copyStyleTo(b, CanvasWidget::StyleParts::Outline);
+    QCOMPARE(b->style().stroke, QColor(Qt::blue));
+    QCOMPARE(b->style().strokeWidth, 4.0);
+    m_canvas->copySelectionBy(QPointF(0, 300));
+    QCOMPARE(m_doc->count(), 3);
+    QCOMPARE(m_canvas->selectedShape()->bounds(), QRectF(100, 400, 100, 100));
+    m_canvas->setSelectedShape(a);
+    m_canvas->moveSelectionBy(QPointF(10, 0));
+    QCOMPARE(a->bounds(), QRectF(110, 100, 100, 100));
+    m_canvas->placeSelectionInside(b);
+    QCOMPARE(b->clippedContents().size(), std::size_t(1));
+    while (m_undo->index() > before)
+        m_undo->undo();
+    QCOMPARE(m_doc->count(), 2);
+    QCOMPARE(a->bounds(), QRectF(100, 100, 100, 100));
+    QVERIFY(b->clippedContents().empty());
+}
+
+void CanvasTests::rightClickMenus()
+{
+    MainWindow window;
+    window.resize(1200, 800);
+    window.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
+    auto *canvas = window.findChild<CanvasWidget *>();
+    Document *doc = canvas->document();
+    TextData words{QStringLiteral("Hello"), {}};
+    Shape *text = doc->insertShape(-1, std::make_unique<Shape>(words, QPointF(100, 100), Style{}));
+    canvas->setSelectedShape(text);
+
+    // Opens a menu, reads what it offers and closes it.
+    auto offered = [&window](const char *slot, auto... arguments) {
+        QStringList texts;
+        QTimer::singleShot(50, [&texts] {
+            if (auto *menu = qobject_cast<QMenu *>(QApplication::activePopupWidget())) {
+                for (QAction *action : menu->actions())
+                    texts << action->text().remove(QLatin1Char('&'));
+                menu->close();
+            }
+        });
+        QMetaObject::invokeMethod(&window, slot, arguments...);
+        return texts;
+    };
+    const QStringList forText =
+        offered("showContextMenu", Q_ARG(QPoint, QPoint(300, 300)), Q_ARG(opendraw::Shape *, text));
+    QVERIFY(forText.contains(QStringLiteral("Edit Text")));
+    QVERIFY(forText.contains(QStringLiteral("Copy")));
+    QVERIFY(forText.contains(QStringLiteral("Convert to Curves")));
+    QVERIFY(forText.contains(QStringLiteral("Order")));
+    const QStringList forPage =
+        offered("showContextMenu", Q_ARG(QPoint, QPoint(300, 300)), Q_ARG(opendraw::Shape *, nullptr));
+    QVERIFY(forPage.contains(QStringLiteral("Paste")));
+    QVERIFY(forPage.contains(QStringLiteral("Insert Page")));
+    QVERIFY(!forPage.contains(QStringLiteral("Copy")));
+    Shape *frame = doc->insertShape(-1, std::make_unique<Shape>(ShapeKind::Ellipse, QRectF(300, 300, 50, 50)));
+    const QStringList onDrop = offered("showDropMenu", Q_ARG(QPoint, QPoint(300, 300)), Q_ARG(QPointF, QPointF(10, 10)),
+                                       Q_ARG(opendraw::Shape *, frame));
+    QVERIFY(onDrop.contains(QStringLiteral("Move Here")));
+    QVERIFY(onDrop.contains(QStringLiteral("Copy Fill Here")));
+    QVERIFY(onDrop.contains(QStringLiteral("PowerClip Inside")));
 }
 
 void CanvasTests::connectorAndDimensionTools()

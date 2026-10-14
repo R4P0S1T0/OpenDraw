@@ -281,6 +281,22 @@
         <translation>Transparência</translation>
     </message>
     <message>
+        <source>Copy</source>
+        <translation>Copiar</translation>
+    </message>
+    <message>
+        <source>Copy fill</source>
+        <translation>Copiar preenchimento</translation>
+    </message>
+    <message>
+        <source>Copy outline</source>
+        <translation>Copiar contorno</translation>
+    </message>
+    <message>
+        <source>Copy properties</source>
+        <translation>Copiar propriedades</translation>
+    </message>
+    <message>
         <source>Connector</source>
         <translation>Conector</translation>
     </message>
@@ -1508,6 +1524,46 @@ Clique esquerdo: preenchimento · Clique direito: contorno</translation>
     <message>
         <source>Align text: %1</source>
         <translation>Alinhar texto: %1</translation>
+    </message>
+    <message>
+        <source>&amp;Edit Text</source>
+        <translation>&amp;Editar texto</translation>
+    </message>
+    <message>
+        <source>&amp;Finish Editing</source>
+        <translation>&amp;Terminar edição</translation>
+    </message>
+    <message>
+        <source>P&amp;roperties</source>
+        <translation>P&amp;ropriedades</translation>
+    </message>
+    <message>
+        <source>&amp;Move Here</source>
+        <translation>&amp;Mover aqui</translation>
+    </message>
+    <message>
+        <source>&amp;Copy Here</source>
+        <translation>&amp;Copiar aqui</translation>
+    </message>
+    <message>
+        <source>Copy &amp;Fill Here</source>
+        <translation>Copiar &amp;preenchimento aqui</translation>
+    </message>
+    <message>
+        <source>Copy &amp;Outline Here</source>
+        <translation>Copiar c&amp;ontorno aqui</translation>
+    </message>
+    <message>
+        <source>Copy &amp;All Properties</source>
+        <translation>Copiar &amp;todas as propriedades</translation>
+    </message>
+    <message>
+        <source>&amp;PowerClip Inside</source>
+        <translation>Power&amp;Clip dentro</translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation>Cancelar</translation>
     </message>
     <message>
         <source>None</source>

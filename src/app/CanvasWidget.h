@@ -32,6 +32,9 @@ public:
         Extrude, SmartFill, InteractiveFill, Mesh, Connector, RightAngleConnector, Dimension,
     };
 
+    // What copyStyleTo() copies.
+    enum class StyleParts { Fill, Outline, All };
+
     CanvasWidget(Document *document, QUndoStack *undoStack, QWidget *parent = nullptr);
 
     Tool tool() const { return m_tool; }
@@ -169,6 +172,14 @@ public slots:
     bool setSelectedMeshNodeColor(const QColor &color);
     void setMeshGrid(int columns, int rows);
     void removeMesh();
+    // What a right-button drop does: move or copy the selection by `offset`, copy its fill,
+    // outline or whole style onto another object, or put it inside one (PowerClip).
+    void moveSelectionBy(const QPointF &offset);
+    // Starts typing into the selected text (with the text tool).
+    void editSelectedText();
+    void copySelectionBy(const QPointF &offset);
+    void copyStyleTo(opendraw::Shape *target, StyleParts parts);
+    void placeSelectionInside(opendraw::Shape *frame);
     // A connector between two objects, kept joined to them.
     void connectShapes(opendraw::Shape *from, opendraw::Shape *to, bool rightAngle);
     // A dimension measuring from one point to another, in the unit shown on the rulers.
@@ -226,6 +237,11 @@ signals:
     void defaultStyleChanged();
     // Another gradient colour was picked, or the picked one changed.
     void fillStopChanged();
+    // Right click: a menu for `shape` (the object under the pointer, now selected), or for the
+    // page when it is null. With the shape tool, for the active node.
+    void contextMenuRequested(const QPoint &globalPosition, opendraw::Shape *shape);
+    // The selection was dragged with the right button by `offset`, onto `target` (or nothing).
+    void rightDropRequested(const QPoint &globalPosition, const QPointF &offset, opendraw::Shape *target);
 
 protected:
     bool event(QEvent *event) override;
@@ -243,7 +259,7 @@ private:
     enum class Drag {
         None, Pan, Move, Resize, Marquee, Create, NodeMove, NodeHandle, BezierHandle, Freehand, ZoomBox, Guide,
         Rotate, Skew, RotationCenter, TextFrame, TextSelect, Effect, EffectHandle, Blend, EnvelopeHandle,
-        FillCreate, FillHandle, Connect, Measure,
+        FillCreate, FillHandle, Connect, Measure, RightClick, RightMove,
     };
     enum class NodeHandle { In, Out };
 
@@ -410,6 +426,7 @@ private:
     std::vector<std::pair<Shape *, Style>> m_effectBefore; // styles before a shadow/transparency drag
     int m_effectHandle = -1;               // transparency handle being dragged: 0 start, 1 end
     Shape *m_blendStart = nullptr;         // object a blend drag started on
+    Shape *m_rightHit = nullptr;           // object under a right click
     int m_meshNode = -1;                   // mesh node picked with the mesh fill tool
     int m_fillStop = -1;                   // gradient colour picked with the interactive fill tool
     int m_fillHandle = -1;                 // its handle being dragged
